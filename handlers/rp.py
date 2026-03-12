@@ -22,16 +22,16 @@ RP_ACTIONS = {
 }
 
 RP_GIFS = {
-    "обнять": "https://media.giphy.com/media/lrr9rHuoJOE0w/giphy.gif",
-    "поцеловать": "https://media.giphy.com/media/bm2O3nXTcKJeU/giphy.gif",
-    "кусь": "https://media.giphy.com/media/10gxHioKqGqD0A/giphy.gif",
-    "ударить": "https://media.giphy.com/media/Gf3AUz3eD40FO/giphy.gif",
-    "погладить": "https://media.giphy.com/media/M3a51DMeWvYUo/giphy.gif",
-    "пнуть": "https://media.giphy.com/media/wOly8pa4s4W88/giphy.gif",
-    "лизнуть": "https://media.giphy.com/media/Ota9zixep5zpu/giphy.gif",
-    "убить": "https://media.giphy.com/media/pd033GOWzD0R2/giphy.gif",
-    "воскресить": "https://media.giphy.com/media/Y4vBiNdleyKcbEQyko/giphy.gif",
-    "пожать": "https://media.giphy.com/media/1k00pQoB3s2tK/giphy.gif"
+    "обнять":    "https://media.tenor.com/6RqRlNxzWOsAAAAC/hug-anime.gif",
+    "поцеловать":"https://media.tenor.com/C7EKFXvMViIAAAAC/kiss-anime.gif",
+    "кусь":      "https://media.tenor.com/bPKGbEDIgUcAAAAC/anime-bite.gif",
+    "ударить":   "https://media.tenor.com/F5kDa6JNFsEAAAAC/anime-slap.gif",
+    "погладить": "https://media.tenor.com/xtcBj-PaScYAAAAC/anime-pat.gif",
+    "пнуть":     "https://media.tenor.com/3JNaZs43FSIAAAAC/kick-anime.gif",
+    "лизнуть":   "https://media.tenor.com/JdGT-HMy3AUAAAAC/lick-anime.gif",
+    "убить":     "https://media.tenor.com/bfFaOjOy_-4AAAAC/kill-anime.gif",
+    "воскресить":"https://media.tenor.com/Zx4aXE26nz8AAAAC/anime-healing.gif",
+    "пожать":    "https://media.tenor.com/Yf_DxbKo4XIAAAAC/handshake-anime.gif",
 }
 
 REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(list(RP_ACTIONS.keys())) + r')')
