@@ -4,6 +4,7 @@ from aiogram import Router, types, F
 from typing import Union
 import time
 import asyncio
+import aiohttp
 from database import update_rp_stat, get_admins
 
 rp_router = Router()
@@ -21,18 +22,30 @@ RP_ACTIONS = {
     "пожать": ("pats", "🤝", "пожал(а) руку")
 }
 
-RP_GIFS = {
-    "обнять":    "https://media.tenor.com/6RqRlNxzWOsAAAAC/hug-anime.gif",
-    "поцеловать":"https://media.tenor.com/C7EKFXvMViIAAAAC/kiss-anime.gif",
-    "кусь":      "https://media.tenor.com/bPKGbEDIgUcAAAAC/anime-bite.gif",
-    "ударить":   "https://media.tenor.com/F5kDa6JNFsEAAAAC/anime-slap.gif",
-    "погладить": "https://media.tenor.com/xtcBj-PaScYAAAAC/anime-pat.gif",
-    "пнуть":     "https://media.tenor.com/3JNaZs43FSIAAAAC/kick-anime.gif",
-    "лизнуть":   "https://media.tenor.com/JdGT-HMy3AUAAAAC/lick-anime.gif",
-    "убить":     "https://media.tenor.com/bfFaOjOy_-4AAAAC/kill-anime.gif",
-    "воскресить":"https://media.tenor.com/Zx4aXE26nz8AAAAC/anime-healing.gif",
-    "пожать":    "https://media.tenor.com/Yf_DxbKo4XIAAAAC/handshake-anime.gif",
+# Эндпоинты nekos.best для аниме-гифок
+NEKOS_ENDPOINTS = {
+    "обнять":    "hug",
+    "поцеловать":"kiss",
+    "кусь":      "bite",
+    "ударить":   "slap",
+    "погладить": "pat",
+    "пнуть":     "kick",
+    "лизнуть":   "lick",
+    "убить":     "shoot",
+    "воскресить":"wave",
+    "пожать":    "handshake",
 }
+
+async def get_nekos_gif(action: str) -> str | None:
+    endpoint = NEKOS_ENDPOINTS.get(action)
+    if not endpoint: return None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://nekos.best/api/v2/{endpoint}", timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                data = await resp.json()
+                return data["results"][0]["url"]
+    except Exception:
+        return None
 
 REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(list(RP_ACTIONS.keys())) + r')')
 
@@ -88,10 +101,10 @@ async def rp_commands(message: types.Message):
     if await check_cd_and_warn(message, "rp_commands", 3): return
 
     stat_type, emoji, text_act = RP_ACTIONS[action_key]
-    gif_url = RP_GIFS.get(action_key)
     await update_rp_stat(user1.id, stat_type)
     
     caption = f"{emoji} {user1.mention_html()} {text_act} {user2.mention_html()}"
+    gif_url = await get_nekos_gif(action_key)
     if gif_url:
         await message.answer_animation(animation=gif_url, caption=caption, parse_mode="HTML")
     else:
