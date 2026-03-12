@@ -1152,9 +1152,6 @@ async def main():
         BotCommand(command="divorce", description="Расторгнуть брак"),
         BotCommand(command="marriages", description="Топ пар")
     ]
-    for cmd in RP_ACTIONS.keys():
-        commands.append(BotCommand(command=cmd, description="РП действие (реплай)"))
-        
     await bot.set_my_commands(commands, BotCommandScopeDefault())
     # ================================
     
