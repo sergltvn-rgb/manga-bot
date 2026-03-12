@@ -10,6 +10,7 @@ from database import update_rp_stat, get_admins
 rp_router = Router()
 
 RP_ACTIONS = {
+    # Существующие
     "обнять": ("hugs", "🤗", "тепло обнял(а)"),
     "поцеловать": ("kisses", "😘", "нежно поцеловал(а)"),
     "кусь": ("bites", "🧛‍♀️", "сделал(а) кусь"),
@@ -19,7 +20,18 @@ RP_ACTIONS = {
     "лизнуть": ("kisses", "👅", "лизнул(а)"),
     "убить": ("slaps", "💀", "жестоко убил(а)"),
     "воскресить": ("hugs", "👼", "чудесно воскресил(а)"),
-    "пожать": ("pats", "🤝", "пожал(а) руку")
+    "пожать": ("pats", "🤝", "пожал(а) руку"),
+    # Новые
+    "пощекотать": ("pats", "🪶", "пощекотал(а)"),
+    "тыкнуть": ("pats", "👈", "тыкнул(а) пальцем в"),
+    "покормить": ("hugs", "🍲", "покормил(а)"),
+    "прижаться": ("hugs", "🫂", "крепко прижался(ась) к"),
+    "посмеяться": ("hugs", "😂", "посмеялся(ась) над"),
+    "поплакать": ("hugs", "😭", "поплакал(а) на плече у"),
+    "смущаться": ("hugs", "😳", "засмущался(ась) из-за"),
+    "пять": ("pats", "✋", "дал(а) пять"),
+    "улыбнуться": ("hugs", "😊", "мило улыбнулся(ась)"),
+    "станцевать": ("hugs", "💃", "станцевал(а) с")
 }
 
 # Эндпоинты nekos.best для аниме-гифок
@@ -34,6 +46,16 @@ NEKOS_ENDPOINTS = {
     "убить":     "shoot",
     "воскресить":"wave",
     "пожать":    "handshake",
+    "пощекотать":"tickle",
+    "тыкнуть":   "poke",
+    "покормить": "feed",
+    "прижаться": "cuddle",
+    "посмеяться":"laugh",
+    "поплакать": "cry",
+    "смущаться": "blush",
+    "пять":      "highfive",
+    "улыбнуться":"smile",
+    "станцевать":"dance",
 }
 
 async def get_nekos_gif(action: str) -> str | None:
@@ -51,39 +73,7 @@ REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(list(RP_ACTIONS.keys())) + r')
 
 # Временно дублируем функцию COOLDOWN из `bot.py` для корректной работы здесь (или выносим в отдельный `utils.py`)
 # Для простоты, перенесем её сюда:
-COOLDOWNS = {}
-async def delete_after(message: types.Message, delay: int):
-    await asyncio.sleep(delay)
-    try: await message.delete()
-    except: pass
-
-async def temp_reply(message: types.Message, text: str, delay: int = 5, **kwargs):
-    msg = await message.answer(text, **kwargs)
-    asyncio.create_task(delete_after(msg, delay))
-
-
-async def is_on_cooldown(user_id: int, action: str = "global", custom_cooldown: int = 30) -> int:
-    admins = await get_admins()
-    if user_id in admins: return 0
-    now = time.time()
-    key = f"{user_id}_{action}"
-    if key in COOLDOWNS:
-        elapsed = now - COOLDOWNS[key]
-        if elapsed < custom_cooldown:
-            return int(custom_cooldown - elapsed)
-    COOLDOWNS[key] = now
-    return 0
-
-async def check_cd_and_warn(event: Union[types.Message, types.CallbackQuery], action: str, custom_cd: int = 30) -> bool:
-    cd = await is_on_cooldown(event.from_user.id, action, custom_cd)
-    if cd:
-        if isinstance(event, types.CallbackQuery):
-            await event.answer(f"⏳ Остынь! Подожди {cd} сек.", show_alert=True)
-        else:
-            msg = await event.answer(f"⏳ <b>Подожди!</b> Это действие остывает. Осталось {cd} сек.", parse_mode="HTML")
-            asyncio.create_task(delete_after(msg, 3))
-        return True
-    return False
+from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply
 
 @rp_router.message(F.text & F.text.regexp(REGEX_RP))
 async def rp_commands(message: types.Message):

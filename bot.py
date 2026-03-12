@@ -14,19 +14,23 @@ import aiosqlite
 import aiohttp
 from datetime import datetime
 from typing import Union
+
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command, StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InputMediaPhoto, Message, CallbackQuery
+from aiogram.types import (
+    InputMediaPhoto, Message, CallbackQuery, WebAppInfo, 
+    BotCommand, BotCommandScopeDefault
+)
 
-from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS
-from handlers.rp import rp_router
+from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL
+from handlers.rp import rp_router, RP_ACTIONS
 from database import (
-    init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, get_user_marriage,
-    get_ranobe_chapters, get_ranobe_chapter_link, get_all_users,
-    get_admins, add_admin, remove_admin
+    init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
+    get_user_marriage, get_ranobe_chapters, get_ranobe_chapter_link, 
+    get_all_users, get_admins, add_admin, remove_admin,
 )
 
 COOLDOWN_TIME = 30 
@@ -39,25 +43,9 @@ LANGUAGES = {"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "jp": "�
 RANOBE_LANGUAGES = {"alya": "⚔️ Воительница-Аля", "ru": "🇷🇺 Русский (Ранобэ)"}
 ITEMS_PER_PAGE = 15
 
-ART_CACHE = {}
-ART_CACHE = {}
-COOLDOWNS = {}
-MARRIAGE_PROPOSALS = {}
-
-RP_ACTIONS = {
-    "обнять": ("hugs", "🤗", "тепло обнял(а)"),
-    "поцеловать": ("kisses", "😘", "нежно поцеловал(а)"),
-    "кусь": ("bites", "🧛‍♀️", "сделал(а) кусь"),
-    "ударить": ("slaps", "😠", "дал(а) пощечину"),
-    "погладить": ("pats", "🥰", "ласково погладил(а) по голове"),
-    "пнуть": ("slaps", "🥾", "сильно пнул(а)"),
-    "лизнуть": ("kisses", "👅", "лизнул(а)"),
-    "убить": ("slaps", "💀", "жестоко убил(а)"),
-    "воскресить": ("hugs", "👼", "чудесно воскресил(а)"),
-    "пожать": ("pats", "🤝", "пожал(а) руку")
-}
-
-REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(list(RP_ACTIONS.keys())) + r')')
+ART_CACHE: dict = {}
+COOLDOWNS: dict = {}
+MARRIAGE_PROPOSALS: dict = {}
 REGEX_INFA = re.compile(r'(?i)^[/*\s]*инфа\s+(.+)$')
 REGEX_RANDOM = re.compile(r'(?i)^[/*\s]*рандом\s+(\d+)$')
 REGEX_CHOOSE = re.compile(r'(?i)^[/*\s]*выбери\s+(.+)\s+или\s+(.+)$')
@@ -113,42 +101,7 @@ class AIChat(StatesGroup):
 # ==============================================================================
 # БЛОК 2: АНТИСПАМ И КУЛДАУНЫ
 # ==============================================================================
-async def is_on_cooldown(user_id: int, action: str = "global", custom_cooldown: int = COOLDOWN_TIME) -> int:
-    admins = await get_admins()
-    if user_id in admins: return 0
-    now = time.time()
-    
-    if random.random() < 0.05: 
-        expired_keys = [k for k, v in COOLDOWNS.items() if now - v > 60]
-        for k in expired_keys: del COOLDOWNS[k]
-
-    key = f"{user_id}_{action}"
-    if key in COOLDOWNS:
-        elapsed = now - COOLDOWNS[key]
-        if elapsed < custom_cooldown:
-            return int(custom_cooldown - elapsed)
-    COOLDOWNS[key] = now
-    return 0
-
-async def check_cd_and_warn(event: Union[Message, CallbackQuery], action: str, custom_cd: int = 30) -> bool:
-    cd = await is_on_cooldown(event.from_user.id, action, custom_cd)
-    if cd:
-        if isinstance(event, CallbackQuery):
-            await event.answer(f"⏳ Остынь! Подожди {cd} сек.", show_alert=True)
-        else:
-            msg = await event.answer(f"⏳ <b>Подожди!</b> Это действие остывает. Осталось {cd} сек.", parse_mode="HTML")
-            asyncio.create_task(delete_after(msg, 3))
-        return True
-    return False
-
-async def delete_after(message: Message, delay: int):
-    await asyncio.sleep(delay)
-    try: await message.delete()
-    except: pass
-
-async def temp_reply(message: Message, text: str, delay: int = 5, **kwargs):
-    msg = await message.answer(text, **kwargs)
-    asyncio.create_task(delete_after(msg, delay))
+from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply
 
 
 # ==============================================================================
@@ -323,6 +276,7 @@ def get_main_menu():
         types.InlineKeyboardButton(text="📅 График", callback_data="schedule"), 
         types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime")
     )
+    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
     return builder.as_markup()
 
 def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
@@ -335,6 +289,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
 @dp.message(Command("help"), StateFilter("*"))
 async def cmd_help(message: types.Message):
+    rp_commands_list = ", ".join([f"/{cmd}" for cmd in RP_ACTIONS.keys()])
+    
     text = (
         "📜 <b>Список доступных команд:</b>\n\n"
         "🔹 /start — Открыть главное меню\n"
@@ -355,7 +311,7 @@ async def cmd_help(message: types.Message):
         "🔸 <i>/шар [вопрос]</i> — Магический шар (да/нет)\n"
         "🔸 <i>/совместимость</i> (реплаем) — Совместимость\n\n"
         "💞 <b>РП команды (реплаем):</b>\n"
-        "<i>/обнять, /поцеловать, /кусь, /ударить, /погладить, /пнуть, /лизнуть, /убить, /воскресить, /пожать</i>"
+        f"<i>{rp_commands_list}</i>"
     )
     
     # Администраторы увидят дополнительные команды в списке
@@ -1170,7 +1126,6 @@ class StatsMiddleware(BaseMiddleware):
             user_id = event.from_user.id
             is_sticker = 1 if getattr(event, 'sticker', None) else 0
             
-            import aiosqlite
             async with aiosqlite.connect('manga.db') as db:
                 await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
                 if is_sticker:
@@ -1187,6 +1142,22 @@ async def main():
     await init_db()
     
     dp.message.middleware(StatsMiddleware())
+    
+    # === Регистрация команд бота ===
+    commands = [
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="help", description="Список всех команд"),
+        BotCommand(command="profile", description="Твой профиль"),
+        BotCommand(command="stats", description="Твоя статистика"),
+        BotCommand(command="marry", description="Вступить в брак (реплай)"),
+        BotCommand(command="divorce", description="Расторгнуть брак"),
+        BotCommand(command="marriages", description="Топ пар")
+    ]
+    for cmd in RP_ACTIONS.keys():
+        commands.append(BotCommand(command=cmd, description="РП действие (реплай)"))
+        
+    await bot.set_my_commands(commands, BotCommandScopeDefault())
+    # ================================
     
     logging.info("Бот запущен. База данных готова.")
     await bot.delete_webhook(drop_pending_updates=True)
