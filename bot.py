@@ -267,8 +267,10 @@ def get_main_menu():
         types.InlineKeyboardButton(text="📖 Читать мангу", callback_data="read_langs"),
         types.InlineKeyboardButton(text="📚 Читать ранобэ", callback_data="read_ranobe_langs")
     )
-    builder.row(types.InlineKeyboardButton(text="🎨 Цветные арты", callback_data="view_arts"))
-    
+    builder.row(
+        types.InlineKeyboardButton(text="🎨 Цветные арты", callback_data="view_arts"),
+        types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu")
+    )
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
     
@@ -276,6 +278,7 @@ def get_main_menu():
         types.InlineKeyboardButton(text="📅 График", callback_data="schedule"), 
         types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime")
     )
+    builder.row(types.InlineKeyboardButton(text="📜 Помощь / Команды", callback_data="show_help"))
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
     return builder.as_markup()
 
@@ -287,8 +290,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:", parse_mode="HTML", reply_markup=get_main_menu())
 
-@dp.message(Command("help"), StateFilter("*"))
-async def cmd_help(message: types.Message):
+async def get_help_text(user_id: int) -> str:
     rp_commands_list = ", ".join([f"/{cmd}" for cmd in RP_ACTIONS.keys()])
     
     text = (
@@ -311,12 +313,14 @@ async def cmd_help(message: types.Message):
         "🔸 <i>/шар [вопрос]</i> — Магический шар (да/нет)\n"
         "🔸 <i>/совместимость</i> (реплаем) — Совместимость\n\n"
         "💞 <b>РП команды (реплаем):</b>\n"
-        f"<i>{rp_commands_list}</i>"
+        "<i>/обнять, /поцеловать, /кусь, /ударить, /погладить,\n"
+        "/пнуть, /лизнуть, /убить, /воскресить, /пожать,\n"
+        "/пощекотать, /тыкнуть, /покормить, /прижаться, /посмеяться,\n"
+        "/поплакать, /смущаться, /пять, /улыбнуться, /станцевать</i>"
     )
     
-    # Администраторы увидят дополнительные команды в списке
     admins = await get_admins()
-    if message.from_user.id in admins:
+    if user_id in admins:
         text += (
             "\n\n👑 <b>Команды администратора:</b>\n"
             "🔹 /admin — Меню администратора\n"
@@ -329,8 +333,15 @@ async def cmd_help(message: types.Message):
             "🔹 /add_art — Добавить арт\n"
             "🔹 /cancel — Отменить действие"
         )
-        
-    await message.answer(text, parse_mode="HTML")
+    return text
+
+@dp.message(Command("help"), StateFilter("*"))
+async def cmd_help(message: types.Message):
+    await message.answer(await get_help_text(message.from_user.id), parse_mode="HTML")
+
+@dp.callback_query(F.data == "show_help")
+async def process_show_help(callback: types.CallbackQuery):
+    await callback.message.edit_text(await get_help_text(callback.from_user.id), parse_mode="HTML", reply_markup=get_back_button())
 
 @dp.callback_query(F.data == "main_menu")
 async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
@@ -358,6 +369,12 @@ async def process_schedule(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "vs_anime")
 async def process_vs_anime(callback: types.CallbackQuery):
     await callback.message.edit_text("<b>📺 Аниме vs Манга:</b>\nМанга подробнее раскрывает монологи и шутки. Читай мангу примерно с 35 главы после 1 сезона аниме!", parse_mode="HTML", reply_markup=get_back_button())
+
+@dp.callback_query(F.data == "suggest_art_menu")
+async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMContext):
+    if await check_cd_and_warn(callback, "suggest_art", 60): return
+    await state.set_state(ArtSuggest.waiting_for_photo)
+    await callback.message.edit_text("🖼 <b>Предложка артов</b>\nОтправьте <b>одну</b> фотографию (арт), которую хотите предложить. Она будет проверена администрацией.\n\n❗️ Требования:\n1. Рисовка приближена к аниме.\n2. Хорошее качество.\n3. Без лишнего текста.", parse_mode="HTML", reply_markup=get_back_button(text="❌ Отмена"))
 
 
 # ==============================================================================
@@ -570,8 +587,6 @@ async def cmd_choose(message: types.Message):
 @dp.message(F.text & F.text.regexp(REGEX_ALYA_CHOOSE))
 async def cmd_alya_choose(message: types.Message):
     if await check_cd_and_warn(message, "alya_choose", 10): return
-    allowed, _ = await check_ai_limit(message.from_user.id)
-    if not allowed: return await message.answer("🛑 Аля устала принимать за тебя решения. Лимит ИИ исчерпан!")
 
     match = REGEX_ALYA_CHOOSE.search(message.text)
     item1, item2 = match.group(1).strip(), match.group(2).strip()
@@ -777,13 +792,13 @@ async def send_chapter(callback: types.CallbackQuery):
         await callback.message.delete() 
         status_msg = await callback.message.answer(f"⏳ Загружаю информацию о главе {chapter_num}...")
         
-        allowed, _ = await check_ai_limit(user_id)
-        if allowed:
+        # Soft cooldown for AI recap to prevent UI blocking
+        if not await is_on_cooldown(user_id, "ai_recap", 20):
             sys_prompt = "Ты фанат манги Roshidere. Коротко (2-3 предложения) опиши сюжет в районе этой главы."
             recap = await ask_groq(f"Напомни сюжет без спойлеров к главе {chapter_num}", sys_prompt)
             await status_msg.edit_text(f"✨ <b>Рекап сюжета:</b>\n<i>{recap}</i>", parse_mode="HTML")
         else:
-            await status_msg.edit_text("⏳ <b>Глава найдена!</b>\n<i>(Рекап недоступен, лимит ИИ исчерпан).</i>", parse_mode="HTML")
+            await status_msg.edit_text(f"⏳ <b>Глава найдена!</b>\n<i>(Рекап временно недоступен, Алиса отдыхает).</i>", parse_mode="HTML")
             
         builder = InlineKeyboardBuilder()
         builder.button(text=f"🔗 Читать главу {chapter_num}", url=link)
