@@ -20,8 +20,31 @@ async def init_db():
             await db.execute('ALTER TABLE users_stats ADD COLUMN stickers_count INTEGER DEFAULT 0')
         except:
             pass
+
+        # Таблица для отключения ИИ в группах
+        await db.execute('CREATE TABLE IF NOT EXISTS ai_disabled_groups (chat_id INTEGER PRIMARY KEY)')
             
         await db.commit()
+
+async def toggle_group_ai(chat_id: int) -> bool:
+    '''Toggles AI for a group. Returns True if enabled, False if disabled.'''
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT 1 FROM ai_disabled_groups WHERE chat_id = ?', (chat_id,)) as cursor:
+            is_disabled = await cursor.fetchone()
+        
+        if is_disabled:
+            await db.execute('DELETE FROM ai_disabled_groups WHERE chat_id = ?', (chat_id,))
+            await db.commit()
+            return True
+        await db.execute('INSERT INTO ai_disabled_groups (chat_id) VALUES (?)', (chat_id,))
+        await db.commit()
+        return False
+
+async def is_ai_enabled(chat_id: int) -> bool:
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT 1 FROM ai_disabled_groups WHERE chat_id = ?', (chat_id,)) as cursor:
+            is_disabled = await cursor.fetchone()
+            return not bool(is_disabled)
 
 async def update_rp_stat(user_id: int, stat_name: str):
     async with aiosqlite.connect('manga.db') as db:

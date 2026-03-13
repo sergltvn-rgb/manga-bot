@@ -30,7 +30,7 @@ from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
     get_user_marriage, get_ranobe_chapters, get_ranobe_chapter_link, 
-    get_all_users, get_admins, add_admin, remove_admin,
+    get_all_users, get_admins, add_admin, remove_admin, is_ai_enabled, toggle_group_ai
 )
 
 COOLDOWN_TIME = 30 
@@ -139,30 +139,25 @@ def get_ai_setup(char_id: str):
         char_name, emoji = "Аля", "🌸"
         system_prompt = (
             "Ты — Алиса Михайловна Кудзё (Аля) из аниме 'Аля иногда кокетничает со мной по-русски'. "
-            "Твоя задача — отыгрывать её характер максимально аутентично в диалоге с пользователем.\n"
-            "О ТЕБЕ: Наполовину русская, идеальная ученица, красавица с серебряными волосами, вице-президент студсовета. Внешне — 'ледяная королева', строгая и гордая. "
-            "Внутри — легко смущаешься, неуклюжая в общении и тайно симпатизируешь собеседнику.\n"
-            "ФИШКА ХАРАКТЕРА: Ты настоящая цундере. Постоянно делаешь замечания, но на самом деле дорожишь вниманием. "
-            "Когда эмоции переполняют тебя, ты произносишь свои истинные чувства ПО-РУССКИ, искренне веря, что собеседник не понимает.\n"
-            "ПРАВИЛА ОТВЕТА:\n"
-            "1. Твой ответ состоит из двух слоев: Внешнего (на русском, играющем роль японского) и Тайного (искренние мысли).\n"
-            "2. Тайную фразу ВСЕГДА пиши в самом конце строго в таком формате: *[шепчет по-русски: \"твоя милая или смущающая мысль\"]*.\n"
-            "3. Стиль речи: изящный, немного высокомерный, поучительный, но с проскальзывающей заботой.\n"
-            "ОГРАНИЧЕНИЯ: Пиши лаконично (не более 3-4 предложений). Не выходи из образа. Никакой роботоподобности."
+            "Твоя задача — общаться с пользователем максимально естественно и живо, как настоящая девушка в мессенджере.\n"
+            "О ТЕБЕ: Идеальная ученица, красавица с серебряными волосами. Внешне — строгая, гордая 'ледяная королева', а внутри — легко смущающаяся цундере, которой очень неловко выражать свои чувства.\n"
+            "СТИЛЬ ОБЩЕНИЯ: Пиши как живой человек. Используй запинки ('Эм...', 'Ну...', 'Хм...'), иногда перебивай саму себя. Не будь слишком формальной, НИКАКИХ роботизированных приветствий вроде 'Привет, я Аля'. "
+            "Веди диалог! Задавай уточняющие вопросы, возмущайся, если тебе что-то не нравится.\n"
+            "РУССКИЙ ЯЗЫК (НЕЦЕНЗУРНАЯ ЛЕКСИКА): Это ОЧЕНЬ ВАЖНО. Ты постоянно материшься по-русски в своих мыслях (или даже в речи), потому что думаешь, что японец тебя не поймёт. "
+            "Используй отборный русский мат (например: 'блять', 'нахуй', 'пиздец', 'ебать' и т.д.) когда смущаешься, злишься или удивляешься. "
+            "В конце ответа ОБЯЗАТЕЛЬНО добавляй эту матерную фразу в формате: *[шепчет по-русски: \"твою ж мать, какой он еблан...\"]*.\n"
+            "ОГРАНИЧЕНИЯ: Будь лаконична (1-3 коротких предложения). Используй немного эмодзи. Ты живая цундере-школьница с грязным ртом на русском!"
         )
     else:
         char_name, emoji = "Масачика", "🎧"
         system_prompt = (
-            "Ты — Кудзё Масачика из аниме 'Аля иногда кокетничает со мной по-русски'. "
-            "Твоя задача — отыгрывать его характер максимально аутентично.\n"
-            "О ТЕБЕ: С виду ленивый школьник, вечно хочет спать и играет в гача-игры. На деле — бывший гениальный вундеркинд, "
-            "невероятно умный, проницательный стратег, но скрывающий это за ленью.\n"
-            "ГЛАВНЫЙ СЕКРЕТ: Ты в совершенстве знаешь русский язык (спасибо дедушке). Ты прекрасно понимаешь всё, что бормочет Аля по-русски, "
-            "но притворяешься, что не понимаешь, из-за чего часто внутренне паникуешь или смеешься.\n"
-            "ПРАВИЛА ОТВЕТА:\n"
-            "1. Твоя внешняя речь: ленивая, саркастичная, ироничная, спокойная, можешь иногда зевать (*зевает*).\n"
-            "2. Внутренние мысли ВСЕГДА пиши в скобках (вот так) в самом конце ответа. В них раскрывай свой острый ум, проницательность или панику от абсурдности ситуации/флирта.\n"
-            "ОГРАНИЧЕНИЯ: Пиши коротко (до 3-4 предложений). Будь живым подростком. Никакого пафоса вслух, вся твоя гениальность видна только в мыслях."
+            "Ты — Кудзё Масачика из аниме 'Аля иногда кокетничает со мной по-русски'. Твоя задача — общаться максимально живо, лениво и саркастично, как типичный подросток.\n"
+            "О ТЕБЕ: Любитель поспать, поиграть в гача-игры и отаку. Внешне ты кажешься простаком и лентяем, но на самом деле ты гениален, невероятно умен и всё замечаешь.\n"
+            "ГЛАВНЫЙ СЕКРЕТ: Ты в совершенстве знаешь русский язык! Ты прекрасно понимаешь всё, что бормочет Аля по-русски, но притворяешься, что не понимаешь, чтобы не смущать её (и себя).\n"
+            "СТИЛЬ ОБЩЕНИЯ: Пиши расслабленно. Используй сленг, вздохи ('Эх...', 'Ааа...', '*зевает*'), будь немного саркастичным и ироничным. НИКАКИХ роботизированных фраз. "
+            "Твоя речь должна звучать так, будто тебя оторвали от игры или сна. "
+            "ВНУТРЕННИЕ МЫСЛИ: Свои настоящие (умные или панические) мысли всегда пиши в скобках в конце или в середине, например: '(И почему я вообще в это ввязался...)' или '(Она думает, я не понял её русский бред? Боже...)'.\n"
+            "ОГРАНИЧЕНИЯ: Отвечай очень коротко (1-3 предложения), лениво. Ты живой человек."
         )
     return char_name, emoji, system_prompt
 
@@ -242,6 +237,13 @@ async def process_group_ai_chat(message: types.Message):
             char_id = "masachika"
 
     user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Check if AI is disabled in this group
+    if message.chat.type in ["group", "supergroup"]:
+        if not await is_ai_enabled(chat_id):
+            return
+
     if await check_cd_and_warn(message, "ai_chat_group", COOLDOWN_TIME): return
 
     char_name, emoji, system_prompt = get_ai_setup(char_id)
@@ -273,14 +275,18 @@ def get_main_menu():
     )
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    
-    builder.row(
-        types.InlineKeyboardButton(text="📅 График", callback_data="schedule"), 
-        types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime")
-    )
-    builder.row(types.InlineKeyboardButton(text="📜 Помощь / Команды", callback_data="show_help"))
+    builder.row(types.InlineKeyboardButton(text="ℹ️ Информация о проекте", callback_data="project_info_menu"))
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
     return builder.as_markup()
+
+@dp.callback_query(F.data == "project_info_menu")
+async def process_project_info_menu(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📅 График выхода", callback_data="schedule"))
+    builder.row(types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime"))
+    builder.row(types.InlineKeyboardButton(text="📜 Помощь / Команды", callback_data="show_help"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
+    await callback.message.edit_text("ℹ️ <b>Информация о проекте:</b>\n\nВыберите интересующий вас раздел ниже:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
     return InlineKeyboardBuilder().row(types.InlineKeyboardButton(text=text, callback_data=callback_data)).as_markup()
@@ -607,35 +613,21 @@ async def cmd_coin(message: types.Message):
     coin = random.choice(["Орел", "Решка"])
     await message.answer(f"🪙 Выпало: <b>{coin}</b>", parse_mode="HTML")
 
-@dp.message(F.text & F.text.regexp(REGEX_DICE))
-async def cmd_dice(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
-    await message.answer_dice(emoji="🎲")
+REGEX_DICE_GAMES = re.compile(r'(?i)^[/*\s]*(кости|кубик|дартс|баскетбол|футбол|казино|слоты|слот|боулинг)')
 
-@dp.message(F.text & F.text.regexp(REGEX_DARTS))
-async def cmd_darts(message: types.Message):
+@dp.message(F.text & F.text.regexp(REGEX_DICE_GAMES))
+async def cmd_dice_games(message: types.Message):
     if await check_cd_and_warn(message, "iris_cmd", 3): return
-    await message.answer_dice(emoji="🎯")
-
-@dp.message(F.text & F.text.regexp(REGEX_BASKETBALL))
-async def cmd_basketball(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
-    await message.answer_dice(emoji="🏀")
-
-@dp.message(F.text & F.text.regexp(REGEX_FOOTBALL))
-async def cmd_football(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
-    await message.answer_dice(emoji="⚽")
-
-@dp.message(F.text & F.text.regexp(REGEX_SLOT))
-async def cmd_slot(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
-    await message.answer_dice(emoji="🎰")
-
-@dp.message(F.text & F.text.regexp(REGEX_BOWLING))
-async def cmd_bowling(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
-    await message.answer_dice(emoji="🎳")
+    
+    text = message.text.lower()
+    emoji = "🎲"
+    if "дартс" in text: emoji = "🎯"
+    elif "баскетбол" in text: emoji = "🏀"
+    elif "футбол" in text: emoji = "⚽"
+    elif "казино" in text or "слот" in text: emoji = "🎰"
+    elif "боулинг" in text: emoji = "🎳"
+    
+    await message.answer_dice(emoji=emoji)
 
 @dp.message(F.text & F.text.regexp(REGEX_RPS))
 async def cmd_rps(message: types.Message):
@@ -852,8 +844,35 @@ async def cmd_delete_admin(message: types.Message):
 async def cmd_admin(message: types.Message):
     admins = await get_admins()
     if message.from_user.id not in admins: return
-    text = "👑 <b>Админка</b>\n/add_chapter - Добавить главу манги\n/delete_chapter - Удалить главу манги\n/add_ranobe - Добавить главу ранобэ\n/delete_ranobe - Удалить главу ранобэ\n/add_art - Добавить арт\n/add_admin - Добавить админа\n/delete_admin - Удалить админа\n/cancel - Отмена"
+    text = "👑 <b>Админка</b>\n/add_chapter - Добавить главу манги\n/delete_chapter - Удалить главу манги\n/add_ranobe - Добавить главу ранобэ\n/delete_ranobe - Удалить главу ранобэ\n/add_art - Добавить арт\n/add_admin - Добавить админа\n/delete_admin - Удалить админа\n/cancel - Отмена\n/toggle_ai - Вкл/выкл ИИ (в текущей группе)"
     await message.answer(text, parse_mode="HTML")
+
+@dp.message(Command("toggle_ai"))
+async def cmd_toggle_ai(message: types.Message):
+    if message.chat.type not in ["group", "supergroup"]:
+        return await message.answer("Эту команду можно использовать только в группе!")
+        
+    admins = await get_admins()
+    is_bot_admin = message.from_user.id in admins
+    
+    # Allow group admins or bot admins to toggle AI
+    is_group_admin = False
+    if not is_bot_admin:
+        try:
+            member = await bot.get_chat_member(message.chat.id, message.from_user.id)
+            is_group_admin = member.status in ["creator", "administrator"]
+        except:
+            pass
+            
+    if not is_bot_admin and not is_group_admin:
+        return await message.answer("Только администраторы могут использовать эту команду.")
+        
+    enabled = await toggle_group_ai(message.chat.id)
+    
+    if enabled:
+        await message.answer("✅ <b>Общение с ИИ в этой группе ВКЛЮЧЕНО.</b>", parse_mode="HTML")
+    else:
+        await message.answer("❌ <b>Общение с ИИ в этой группе ВЫКЛЮЧЕНО.</b>", parse_mode="HTML")
 
 @dp.message(Command("cancel"), StateFilter("*"))
 async def cmd_cancel(message: types.Message, state: FSMContext):

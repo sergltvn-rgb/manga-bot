@@ -8,60 +8,94 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         :root {
+            /* Basic Theme Variables */
             --bg-color: var(--tg-theme-bg-color, #ffffff);
-            --text-color: var(--tg-theme-text-color, #000000);
+            --text-color: var(--tg-theme-text-color, #222222);
             --hint-color: var(--tg-theme-hint-color, #999999);
-            --link-color: var(--tg-theme-link-color, #2481cc);
-            --button-color: var(--tg-theme-button-color, #2481cc);
+            --button-color: var(--tg-theme-button-color, #ff6b81);
             --button-text-color: var(--tg-theme-button-text-color, #ffffff);
-            --secondary-bg-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            --secondary-bg-color: rgba(255, 255, 255, 0.85); /* Glass effect */
             
-            --alya-msg-bg: var(--secondary-bg-color);
-            --user-msg-bg: var(--button-color);
-            --user-msg-text: var(--button-text-color);
+            --alya-msg-bg: #f9ecee;
+            --alya-msg-text: #333333;
+            --user-msg-bg: linear-gradient(135deg, #ff7e5f, #feb47b);
+            --user-msg-text: #ffffff;
+            
+            /* Custom WebApp styling */
+            --app-bg: url('https://i.pinimg.com/736x/8b/44/1a/8b441a7da931f825d1979ad2a4d9ab96.jpg') center/cover no-repeat;
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
+            font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             margin: 0;
             padding: 0;
             display: flex;
             flex-direction: column;
             height: 100vh;
             overflow: hidden;
+            background: var(--app-bg);
+            color: var(--text-color);
+        }
+        
+        /* Backdrop blur overlay */
+        .app-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            z-index: 0;
+        }
+
+        .header, .chat-container, .input-area {
+            position: relative;
+            z-index: 1;
         }
 
         .header {
             display: flex;
             align-items: center;
             padding: 12px 16px;
-            background-color: var(--bg-color);
-            border-bottom: 1px solid var(--secondary-bg-color);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            z-index: 10;
+            background-color: var(--secondary-bg-color);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
         }
 
         .avatar {
-            width: 40px;
-            height: 40px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
             margin-right: 12px;
             object-fit: cover;
-            border: 2px solid var(--button-color);
+            border: 2px solid #ff6b81;
+            box-shadow: 0 2px 10px rgba(255, 107, 129, 0.3);
         }
 
         .header-info h1 {
             margin: 0;
-            font-size: 16px;
-            font-weight: 600;
+            font-size: 17px;
+            font-weight: 700;
+            color: #2c3e50;
         }
 
         .header-info p {
             margin: 2px 0 0 0;
-            font-size: 12px;
-            color: var(--hint-color);
+            font-size: 13px;
+            color: #7f8c8d;
+            font-weight: 500;
+        }
+        
+        .header-info p::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background-color: #2ecc71;
+            border-radius: 50%;
+            margin-right: 5px;
+            box-shadow: 0 0 5px #2ecc71;
         }
 
         .chat-container {
@@ -74,31 +108,46 @@
             scroll-behavior: smooth;
         }
 
+        .chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+        .chat-container::-webkit-scrollbar-thumb {
+            background-color: rgba(0,0,0,0.1);
+            border-radius: 10px;
+        }
+
         .message {
-            max-width: 80%;
-            padding: 10px 14px;
-            border-radius: 18px;
+            max-width: 75%;
+            padding: 12px 16px;
+            border-radius: 20px;
             font-size: 15px;
-            line-height: 1.4;
+            line-height: 1.5;
             word-wrap: break-word;
             position: relative;
-            animation: fadeIn 0.3s ease;
+            animation: fadeIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+            from { opacity: 0; transform: translateY(15px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
         }
 
         .message.bot {
             align-self: flex-start;
             background-color: var(--alya-msg-bg);
+            color: var(--alya-msg-text);
             border-bottom-left-radius: 4px;
+        }
+        
+        .message.bot i {
+            color: #e84393;
+            font-style: italic;
         }
 
         .message.user {
             align-self: flex-end;
-            background-color: var(--user-msg-bg);
+            background-image: var(--user-msg-bg);
             color: var(--user-msg-text);
             border-bottom-right-radius: 4px;
         }
@@ -106,72 +155,83 @@
         .input-area {
             display: flex;
             padding: 12px 16px;
-            background-color: var(--bg-color);
-            border-top: 1px solid var(--secondary-bg-color);
-            gap: 10px;
+            background-color: var(--secondary-bg-color);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-top: 1px solid rgba(255, 255, 255, 0.5);
+            gap: 12px;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
         }
 
         input[type="text"] {
             flex-grow: 1;
-            padding: 12px 16px;
-            border: 1px solid var(--secondary-bg-color);
-            border-radius: 20px;
-            background-color: var(--secondary-bg-color);
+            padding: 14px 18px;
+            border: 1px solid rgba(0,0,0,0.05);
+            border-radius: 24px;
+            background-color: rgba(255,255,255,0.9);
             color: var(--text-color);
             font-size: 15px;
             outline: none;
-            transition: border-color 0.2s;
+            transition: all 0.3s ease;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
         }
 
         input[type="text"]:focus {
-            border-color: var(--button-color);
+            border-color: #ff6b81;
+            box-shadow: 0 0 0 3px rgba(255, 107, 129, 0.2), inset 0 2px 4px rgba(0,0,0,0.02);
         }
 
         button.send-btn {
-            background-color: var(--button-color);
-            color: var(--button-text-color);
+            background-image: linear-gradient(135deg, #ff7e5f, #feb47b);
+            color: #ffffff;
             border: none;
             border-radius: 50%;
-            width: 44px;
-            height: 44px;
+            width: 48px;
+            height: 48px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            transition: transform 0.1s, opacity 0.2s;
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s;
+            box-shadow: 0 4px 15px rgba(255, 126, 95, 0.4);
+            flex-shrink: 0;
         }
 
         button.send-btn:active {
-            transform: scale(0.95);
+            transform: scale(0.9);
+            box-shadow: 0 2px 8px rgba(255, 126, 95, 0.4);
         }
 
         button.send-btn:disabled {
-            opacity: 0.5;
+            background-image: linear-gradient(135deg, #ccc, #ddd);
+            box-shadow: none;
             cursor: not-allowed;
+            transform: none;
         }
 
         button.send-btn svg {
             width: 20px;
             height: 20px;
             fill: currentColor;
-            margin-left: 3px;
+            margin-left: 2px;
         }
 
         .typing-indicator {
             display: flex;
             gap: 4px;
-            padding: 12px 16px;
+            padding: 14px 18px;
             background-color: var(--alya-msg-bg);
-            border-radius: 18px;
+            border-radius: 20px;
             border-bottom-left-radius: 4px;
             align-self: flex-start;
             width: fit-content;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
         }
 
         .typing-dot {
-            width: 6px;
-            height: 6px;
-            background-color: var(--hint-color);
+            width: 7px;
+            height: 7px;
+            background-color: #ff6b81;
             border-radius: 50%;
             animation: typing 1.4s infinite ease-in-out both;
         }
@@ -180,17 +240,22 @@
         .typing-dot:nth-child(2) { animation-delay: -0.16s; }
 
         @keyframes typing {
-            0%, 80%, 100% { transform: scale(0); }
-            40% { transform: scale(1); }
+            0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
         }
 
         .settings-btn {
             margin-left: auto;
             background: none;
             border: none;
-            color: var(--hint-color);
+            color: #7f8c8d;
             cursor: pointer;
             padding: 8px;
+            transition: color 0.2s;
+        }
+        
+        .settings-btn:hover {
+            color: #ff6b81;
         }
 
         .hidden {
