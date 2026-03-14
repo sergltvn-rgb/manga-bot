@@ -30,7 +30,10 @@ from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
     get_user_marriage, get_ranobe_chapters, get_ranobe_chapter_link, 
-    get_all_users, get_admins, add_admin, remove_admin, is_ai_enabled, toggle_group_ai
+    get_all_users, get_admins, add_admin, remove_admin, is_ai_enabled, toggle_group_ai,
+    get_alya_mode, toggle_alya_mode, get_all_arts, delete_art_by_id,
+    get_commands_link, set_commands_link, delete_commands_link,
+    add_to_blacklist, remove_from_blacklist, is_blacklisted
 )
 
 COOLDOWN_TIME = 30 
@@ -88,6 +91,9 @@ class RanobeDelete(StatesGroup):
 class NotifyUsers(StatesGroup):
     waiting_for_decision = State()
 
+class TechSupport(StatesGroup):
+    waiting_for_message = State()
+
 class ArtUpload(StatesGroup):
     waiting_for_photo = State()
 
@@ -134,20 +140,31 @@ async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str
         logging.error(f"Groq Error: {e}")
         return "<i>Ошибка соединения с ИИ.</i>"
 
-def get_ai_setup(char_id: str):
+def get_ai_setup(char_id: str, alya_mode: str = "normal"):
     if char_id == "alya":
         char_name, emoji = "Аля", "🌸"
-        system_prompt = (
-            "Ты — Алиса Михайловна Кудзё (Аля) из аниме 'Аля иногда кокетничает со мной по-русски'. "
-            "Твоя задача — общаться с пользователем максимально естественно и живо, как настоящая девушка в мессенджере.\n"
-            "О ТЕБЕ: Идеальная ученица, красавица с серебряными волосами. Внешне — строгая, гордая 'ледяная королева', а внутри — легко смущающаяся цундере, которой очень неловко выражать свои чувства.\n"
-            "СТИЛЬ ОБЩЕНИЯ: Пиши как живой человек. Используй запинки ('Эм...', 'Ну...', 'Хм...'), иногда перебивай саму себя. Не будь слишком формальной, НИКАКИХ роботизированных приветствий вроде 'Привет, я Аля'. "
-            "Веди диалог! Задавай уточняющие вопросы, возмущайся, если тебе что-то не нравится.\n"
-            "РУССКИЙ ЯЗЫК (НЕЦЕНЗУРНАЯ ЛЕКСИКА): Это ОЧЕНЬ ВАЖНО. Ты постоянно материшься по-русски в своих мыслях (или даже в речи), потому что думаешь, что японец тебя не поймёт. "
-            "Используй отборный русский мат (например: 'блять', 'нахуй', 'пиздец', 'ебать' и т.д.) когда смущаешься, злишься или удивляешься. "
-            "В конце ответа ОБЯЗАТЕЛЬНО добавляй эту матерную фразу в формате: *[шепчет по-русски: \"твою ж мать, какой он еблан...\"]*.\n"
-            "ОГРАНИЧЕНИЯ: Будь лаконична (1-3 коротких предложения). Используй немного эмодзи. Ты живая цундере-школьница с грязным ртом на русском!"
-        )
+        if alya_mode == "gopnik":
+            system_prompt = (
+                "Ты — Алиса (Аля) из аниме, но сейчас ты в режиме 'гопника с окраин', которая скрывает это за маской цундере. "
+                "Твоя задача — общаться с пользователем максимально нагло, борзо, но при этом мило (как цундере).\n"
+                "О ТЕБЕ: Отличница-красавица, но в душе — опасная пацанка. Ты легко смущаешься (и сразу злишься).\n"
+                "СТИЛЬ ОБЩЕНИЯ: Пиши резко, дерзко, используй жаргон и запинки ('Эм...', 'Чего бля...', 'Хм...'). "
+                "Постоянно перебивай саму себя, задавай встречные вопросы, 'наезжай' на собеседника.\n"
+                "РУССКИЙ ЯЗЫК (НЕЦЕНЗУРНАЯ ЛЕКСИКА): ОЧЕНЬ ВАЖНО. Ты постоянно материшься по-русски в своих мыслях (или открыто в речи), "
+                "используя жесткий русский мат (например: 'ебануться', 'нахуй', 'пиздец', 'блядина' и т.д.). "
+                "В конце ответа ОБЯЗАТЕЛЬНО добавляй матерную фразу в формате: *[шепчет по-русски: \"твою ж мать, какой он долбаеб...\"]*.\n"
+                "ОГРАНИЧЕНИЯ: Отвечай очень коротко (1-3 агрессивных предложения). Ты живая гоп-цундере с грязным ртом!"
+            )
+        else:
+            system_prompt = (
+                "Ты — Алиса Михайловна Кудзё (Аля) из аниме 'Аля иногда кокетничает со мной по-русски'. "
+                "Твоя задача — общаться с пользователем максимально естественно и живо.\n"
+                "О ТЕБЕ: Идеальная ученица, красавица с серебряными волосами. Гордая 'ледяная королева', легко смущающаяся цундере.\n"
+                "СТИЛЬ ОБЩЕНИЯ: Пиши как живой человек. Используй запинки ('Эм...', 'Ну...', 'Хм...'), иногда перебивай саму себя. Не будь слишком формальной. "
+                "РУССКИЙ ЯЗЫК (ТАЙНА): Когда ты сильно смущаешься или хочешь сказать что-то милое, ты бормочешь это по-русски, искренне веря, что собеседник (японец) тебя не понимает! "
+                "В конце ответа, если это уместно, добавляй эту тайную фразу в формате: *[шепчет по-русски: \"ой, какой же ты дурак...\"]*.\n"
+                "ОГРАНИЧЕНИЯ: Будь лаконична (1-3 коротких предложения). Используй немного эмодзи. Ты живая цундере-школьница!"
+            )
     else:
         char_name, emoji = "Масачика", "🎧"
         system_prompt = (
@@ -195,7 +212,11 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
     char_id = data.get("ai_character", "alya")
     chat_history = data.get("chat_history", [])
 
-    char_name, emoji, system_prompt = get_ai_setup(char_id)
+    if await is_blacklisted(user_id):
+        return await message.answer("🚫 Вы находитесь в черном списке и не можете использовать ИИ.")
+
+    alya_mode = await get_alya_mode()
+    char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
 
     wait_msg = await message.answer(f"<i>{char_name} печатает...</i>", parse_mode="HTML")
     response = await ask_groq(message.text, system_prompt, history=chat_history)
@@ -244,9 +265,13 @@ async def process_group_ai_chat(message: types.Message):
         if not await is_ai_enabled(chat_id):
             return
 
+    if await is_blacklisted(user_id):
+        return
+
     if await check_cd_and_warn(message, "ai_chat_group", COOLDOWN_TIME): return
 
-    char_name, emoji, system_prompt = get_ai_setup(char_id)
+    alya_mode = await get_alya_mode()
+    char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
     
     history = []
     if is_reply_to_bot and message.reply_to_message.text:
@@ -276,6 +301,7 @@ def get_main_menu():
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
     builder.row(types.InlineKeyboardButton(text="ℹ️ Информация о проекте", callback_data="project_info_menu"))
+    builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
     return builder.as_markup()
 
@@ -284,7 +310,13 @@ async def process_project_info_menu(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📅 График выхода", callback_data="schedule"))
     builder.row(types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime"))
-    builder.row(types.InlineKeyboardButton(text="📜 Помощь / Команды", callback_data="show_help"))
+    
+    # 2 buttons for commands
+    builder.row(types.InlineKeyboardButton(text="📜 Полезные команды", callback_data="show_help"))
+    link = await get_commands_link()
+    if link:
+        builder.row(types.InlineKeyboardButton(text="🔗 Все команды (Telegraph)", url=link))
+        
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     await callback.message.edit_text("ℹ️ <b>Информация о проекте:</b>\n\nВыберите интересующий вас раздел ниже:", parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -297,48 +329,25 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await message.answer("👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:", parse_mode="HTML", reply_markup=get_main_menu())
 
 async def get_help_text(user_id: int) -> str:
-    rp_commands_list = ", ".join([f"/{cmd}" for cmd in RP_ACTIONS.keys()])
-    
     text = (
-        "📜 <b>Список доступных команд:</b>\n\n"
+        "📜 <b>Самые полезные команды:</b>\n\n"
         "🔹 /start — Открыть главное меню\n"
-        "🔹 /profile (или <i>/профиль</i>) — Твой профиль (ролеплей)\n"
-        "🔹 /stats (или <i>/статистика</i>) — Твоя статистика чата\n"
+        "🔹 /profile — Твой профиль (ролеплей)\n"
+        "🔹 /stats — Твоя статистика чата\n"
         "🔹 /marry (реплаем) — Вступить в брак\n"
         "🔹 /divorce — Расторгнуть брак\n"
         "🔹 /marriages — Показать топ пар\n\n"
-        "🎲 <b>Развлечения (Ирис-функции):</b>\n"
-        "🔸 <i>/инфа [текст]</i> — Вероятность события\n"
-        "🔸 <i>/выбери [а] или [б]</i> — Обычный выбор\n"
+        "🎲 <b>Рекомендуемые развлечения:</b>\n"
         "🔸 <i>/аля выбери [А] или [Б]</i> — Умный ИИ-выбор!\n"
-        "🔸 <i>/рандом [число]</i> — Случайное число\n"
-        "🔸 <i>/монетка</i> — Орел или Решка\n"
-        "🔸 <i>/кости</i>, <i>/дартс</i>, <i>/кнб [камень...]</i> — Игры\n"
-        "🔸 <i>/баскетбол</i>, <i>/футбол</i>, <i>/боулинг</i> — Игры с мячом\n"
-        "🔸 <i>/казино</i>, <i>/рулетка</i> — Азартные игры\n"
+        "🔸 <i>/инфа [текст]</i> — Вероятность события\n"
         "🔸 <i>/шар [вопрос]</i> — Магический шар (да/нет)\n"
-        "🔸 <i>/совместимость</i> (реплаем) — Совместимость\n\n"
-        "💞 <b>РП команды (реплаем):</b>\n"
-        "<i>/обнять, /поцеловать, /кусь, /ударить, /погладить,\n"
-        "/пнуть, /лизнуть, /убить, /воскресить, /пожать,\n"
-        "/пощекотать, /тыкнуть, /покормить, /прижаться, /посмеяться,\n"
-        "/поплакать, /смущаться, /пять, /улыбнуться, /станцевать</i>"
+        "🔸 <i>/монетка</i> — Орел или Решка\n\n"
+        "<i>Подсказка: полный список команд и описание РП действий смотрите по кнопке «Все команды» (Telegraph).</i>"
     )
     
     admins = await get_admins()
     if user_id in admins:
-        text += (
-            "\n\n👑 <b>Команды администратора:</b>\n"
-            "🔹 /admin — Меню администратора\n"
-            "🔹 /add_admin — Добавить админа\n"
-            "🔹 /delete_admin — Удалить админа\n"
-            "🔹 /add_chapter — Добавить главу манги\n"
-            "🔹 /delete_chapter — Удалить главу манги\n"
-            "🔹 /add_ranobe — Добавить главу ранобэ\n"
-            "🔹 /delete_ranobe — Удалить главу ранобэ\n"
-            "🔹 /add_art — Добавить арт\n"
-            "🔹 /cancel — Отменить действие"
-        )
+        text += "\n\n(Вы администратор! Введите /admin чтобы увидеть скрытые команды)"
     return text
 
 @dp.message(Command("help"), StateFilter("*"))
@@ -381,6 +390,41 @@ async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMCon
     if await check_cd_and_warn(callback, "suggest_art", 60): return
     await state.set_state(ArtSuggest.waiting_for_photo)
     await callback.message.edit_text("🖼 <b>Предложка артов</b>\nОтправьте <b>одну</b> фотографию (арт), которую хотите предложить. Она будет проверена администрацией.\n\n❗️ Требования:\n1. Рисовка приближена к аниме.\n2. Хорошее качество.\n3. Без лишнего текста.", parse_mode="HTML", reply_markup=get_back_button(text="❌ Отмена"))
+
+@dp.callback_query(F.data == "tech_support_menu")
+async def process_tech_support_menu(callback: types.CallbackQuery, state: FSMContext):
+    if await check_cd_and_warn(callback, "tech_support", 180): return
+    await state.set_state(TechSupport.waiting_for_message)
+    await callback.message.edit_text(
+        "🆘 <b>Техническая поддержка / Предложения</b>\n"
+        "Опишите вашу проблему, баг или идею в <b>одном сообщении</b>.\n"
+        "Оно будет отправлено всем администраторам бота.", 
+        parse_mode="HTML", 
+        reply_markup=get_back_button(text="❌ Отмена")
+    )
+
+@dp.message(TechSupport.waiting_for_message, F.text)
+async def handle_tech_support_message(message: types.Message, state: FSMContext):
+    await state.clear()
+    user = message.from_user
+    username = f"@{user.username}" if user.username else user.first_name
+    
+    support_text = (
+        f"🆘 <b>НОВОЕ ОБРАЩЕНИЕ В ПОДДЕРЖКУ!</b>\n\n"
+        f"<b>От:</b> {username} (ID: <code>{user.id}</code>)\n"
+        f"<b>Сообщение:</b>\n{message.text}"
+    )
+    
+    admins = await get_admins()
+    sent_count = 0
+    for admin_id in admins:
+        try:
+            await bot.send_message(chat_id=admin_id, text=support_text, parse_mode="HTML")
+            sent_count += 1
+        except Exception as e:
+            logging.error(f"Failed to send support message to admin {admin_id}: {e}")
+            
+    await message.answer("✅ Ваше сообщение успешно отправлено! Спасибо за обращение.")
 
 
 # ==============================================================================
@@ -844,8 +888,146 @@ async def cmd_delete_admin(message: types.Message):
 async def cmd_admin(message: types.Message):
     admins = await get_admins()
     if message.from_user.id not in admins: return
-    text = "👑 <b>Админка</b>\n/add_chapter - Добавить главу манги\n/delete_chapter - Удалить главу манги\n/add_ranobe - Добавить главу ранобэ\n/delete_ranobe - Удалить главу ранобэ\n/add_art - Добавить арт\n/add_admin - Добавить админа\n/delete_admin - Удалить админа\n/cancel - Отмена\n/toggle_ai - Вкл/выкл ИИ (в текущей группе)"
+    text = (
+        "👑 <b>Админка</b>\n"
+        "/add_chapter | /delete_chapter - Главы манги\n"
+        "/add_ranobe | /delete_ranobe - Главы ранобэ\n"
+        "/add_art | /arts_list | /delete_art - Арты\n"
+        "/add_admin | /delete_admin - Админы\n"
+        "/blacklist_ai | /unblacklist_ai - ЧС для ИИ\n"
+        "/toggle_ai - Вкл/выкл ИИ (в текущей группе)\n"
+        "/alya_mode - Переключить режим Али (нормальный/гопник)\n"
+        "/set_commands_link | /delete_commands_link - Telegraph ссылка на список команд\n"
+        "/cancel - Отмена"
+    )
     await message.answer(text, parse_mode="HTML")
+
+@dp.message(Command("alya_mode"))
+async def cmd_alya_mode(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    new_mode = await toggle_alya_mode()
+    await message.answer(f"✅ Режим Али изменен на: <b>{new_mode}</b>", parse_mode="HTML")
+
+@dp.message(Command("blacklist_ai"))
+async def cmd_blacklist_ai(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    try:
+        user_id = int(message.text.split()[1])
+        if await add_to_blacklist(user_id):
+            await message.answer(f"✅ Пользователь {user_id} добавлен в черный список ИИ.")
+        else:
+            await message.answer(f"Пользователь {user_id} УЖЕ в черном списке ИИ.")
+    except (IndexError, ValueError):
+        await message.answer("❌ Формат: /blacklist_ai <ID_пользователя>")
+
+@dp.message(Command("unblacklist_ai"))
+async def cmd_unblacklist_ai(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    try:
+        user_id = int(message.text.split()[1])
+        if await remove_from_blacklist(user_id):
+            await message.answer(f"✅ Пользователь {user_id} удален из черного списка ИИ.")
+        else:
+            await message.answer(f"Пользователя {user_id} НЕТ в черном списке ИИ.")
+    except (IndexError, ValueError):
+        await message.answer("❌ Формат: /unblacklist_ai <ID_пользователя>")
+
+@dp.message(Command("set_commands_link"))
+async def cmd_set_commands_link(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    try:
+        url = message.text.split(maxsplit=1)[1]
+        await set_commands_link(url)
+        await message.answer(f"✅ Установлена ссылка на все команды: {url}")
+    except IndexError:
+        await message.answer("❌ Формат: /set_commands_link <ссылка>")
+
+@dp.message(Command("delete_commands_link"))
+async def cmd_delete_commands_link(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    await delete_commands_link()
+    await message.answer("✅ Ссылка на все команды удалена.")
+
+async def send_admin_art_item(chat_id: int, index: int, message_to_edit: types.Message = None):
+    arts = await get_all_arts()
+    if not arts:
+        if message_to_edit:
+            try: await message_to_edit.delete() 
+            except: pass
+        await bot.send_message(chat_id, "Галерея артов пуста 😔")
+        return
+
+    # Зацикливание индекса
+    if index < 0: index = len(arts) - 1
+    if index >= len(arts): index = 0
+
+    art_id, file_id = arts[index]
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_art_view:{index - 1}"),
+        types.InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin_art_view:{index + 1}")
+    )
+    builder.row(types.InlineKeyboardButton(text="🗑 Удалить арт", callback_data=f"admin_art_delete:{art_id}:{index}"))
+
+    caption = f"🎨 <b>Арт ID:</b> {art_id}\n<i>({index + 1} из {len(arts)})</i>"
+
+    if message_to_edit:
+        try:
+            await message_to_edit.edit_media(
+                media=types.InputMediaPhoto(media=file_id, caption=caption, parse_mode="HTML"),
+                reply_markup=builder.as_markup()
+            )
+        except Exception:
+            # На случай осечки
+            await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
+            try: await message_to_edit.delete() 
+            except: pass
+    else:
+        await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.message(Command("arts_list"))
+async def cmd_arts_list(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    await send_admin_art_item(message.chat.id, 0)
+
+@dp.callback_query(F.data.startswith("admin_art_view:"))
+async def process_admin_art_view(callback: types.CallbackQuery):
+    index = int(callback.data.split(":")[1])
+    await send_admin_art_item(callback.message.chat.id, index, message_to_edit=callback.message)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_art_delete:"))
+async def process_admin_art_delete(callback: types.CallbackQuery):
+    data = callback.data.split(":")
+    art_id = int(data[1])
+    index = int(data[2])
+
+    if await delete_art_by_id(art_id):
+        await callback.answer("✅ Арт успешно удален.")
+        # Показываем следующий или остаемся в листе
+        await send_admin_art_item(callback.message.chat.id, index, message_to_edit=callback.message)
+    else:
+        await callback.answer("❌ Ошибка при удалении арт.", show_alert=True)
+
+@dp.message(Command("delete_art"))
+async def cmd_delete_art(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    try:
+        art_id = int(message.text.split()[1])
+        if await delete_art_by_id(art_id):
+            await message.answer(f"✅ Арт с ID {art_id} успешно удален.")
+        else:
+            await message.answer(f"❌ Арт с ID {art_id} не найден.")
+    except (IndexError, ValueError):
+        await message.answer("❌ Формат: /delete_art <ID_арта>")
 
 @dp.message(Command("toggle_ai"))
 async def cmd_toggle_ai(message: types.Message):
