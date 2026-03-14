@@ -47,7 +47,6 @@ RANOBE_LANGUAGES = {"alya": "⚔️ Воительница-Аля", "ru": "🇷�
 ITEMS_PER_PAGE = 15
 
 ART_CACHE: dict = {}
-COOLDOWNS: dict = {}
 MARRIAGE_PROPOSALS: dict = {}
 REGEX_INFA = re.compile(r'(?i)^[/*\s]*инфа\s+(.+)$')
 REGEX_RANDOM = re.compile(r'(?i)^[/*\s]*рандом\s+(\d+)$')
@@ -327,10 +326,33 @@ async def process_project_info_menu(callback: types.CallbackQuery):
 def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
     return InlineKeyboardBuilder().row(types.InlineKeyboardButton(text=text, callback_data=callback_data)).as_markup()
 
-@dp.message(Command("start"), StateFilter("*"))
+@dp.message(Command("start", ignore_mention=True), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:", parse_mode="HTML", reply_markup=get_main_menu())
+    if message.chat.type == "private":
+        reply_kb = types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="📋 Меню")]],
+            resize_keyboard=True,
+            persistent=True,
+        )
+        await message.answer(
+            "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
+            parse_mode="HTML",
+            reply_markup=reply_kb
+        )
+        await message.answer("Главное меню:", reply_markup=get_main_menu())
+    else:
+        await message.answer(
+            "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
+            parse_mode="HTML",
+            reply_markup=get_main_menu()
+        )
+
+@dp.message(F.text == "📋 Меню", StateFilter("*"))
+async def handle_menu_button(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Главное меню:", reply_markup=get_main_menu())
+
 
 async def get_help_text(user_id: int) -> str:
     text = (
