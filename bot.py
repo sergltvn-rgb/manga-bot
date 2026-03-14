@@ -94,6 +94,10 @@ class NotifyUsers(StatesGroup):
 class TechSupport(StatesGroup):
     waiting_for_message = State()
 
+class ArtView(StatesGroup):
+    waiting_for_number = State()
+    waiting_for_admin_number = State()
+
 class ArtUpload(StatesGroup):
     waiting_for_photo = State()
 
@@ -843,18 +847,124 @@ async def send_chapter(callback: types.CallbackQuery):
     else:
         await callback.answer("Глава не найдена 😔", show_alert=True)
 
+import random
+
+async def send_user_art_item(chat_id: int, index: int, message_to_edit: types.Message = None):
+    arts = await get_all_arts()
+    if not arts:
+        if message_to_edit:
+            try: await message_to_edit.delete() 
+            except: pass
+        await bot.send_message(chat_id, "Галерея пуста 😔", reply_markup=get_back_button())
+        return
+
+    # Зацикливание индекса
+    if index < 0: index = len(arts) - 1
+    if index >= len(arts): index = 0
+
+    art_id, file_id = arts[index]
+
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="⬅️", callback_data=f"user_art_view:{index - 1}"),
+        types.InlineKeyboardButton(text="➡️", callback_data=f"user_art_view:{index + 1}")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🎲 Случайный арт", callback_data="user_art_random"),
+        types.InlineKeyboardButton(text="🔢 Номер арта", callback_data="user_art_input")
+    )
+    builder.row(types.InlineKeyboardButton(text="📱 Режим сетки (9 шт)", callback_data="user_art_grid:0"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ В меню", callback_data="main_menu"))
+
+    caption = f"🎨 <b>Арт из галереи</b>\n<i>({index + 1} из {len(arts)})</i>"
+
+    if message_to_edit:
+        try:
+            await message_to_edit.edit_media(
+                media=types.InputMediaPhoto(media=file_id, caption=caption, parse_mode="HTML"),
+                reply_markup=builder.as_markup()
+            )
+        except Exception:
+            await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
+            try: await message_to_edit.delete() 
+            except: pass
+    else:
+        await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
+
 @dp.callback_query(F.data == "view_arts")
 async def view_arts(callback: types.CallbackQuery):
-    if await check_cd_and_warn(callback, "arts", 15): return
-    async with aiosqlite.connect('manga.db') as db:
-        async with db.execute('SELECT file_id FROM arts ORDER BY id DESC LIMIT 10') as cursor:
-            rows = await cursor.fetchall()
-    if not rows: return await callback.message.edit_text("Галерея пуста 😔", reply_markup=get_back_button())
-    
+    if await check_cd_and_warn(callback, "arts", 5): return
     await callback.message.delete()
-    media = [InputMediaPhoto(media=row[0]) for row in rows]
+    await send_user_art_item(callback.message.chat.id, 0)
+
+@dp.callback_query(F.data.startswith("user_art_view:"))
+async def process_user_art_view(callback: types.CallbackQuery):
+    index = int(callback.data.split(":")[1])
+    await send_user_art_item(callback.message.chat.id, index, message_to_edit=callback.message)
+    await callback.answer()
+
+@dp.callback_query(F.data == "user_art_random")
+async def process_user_art_random(callback: types.CallbackQuery):
+    arts = await get_all_arts()
+    if not arts:
+        return await callback.answer("Галерея пуста 😔", show_alert=True)
+    index = random.randint(0, len(arts) - 1)
+    await send_user_art_item(callback.message.chat.id, index, message_to_edit=callback.message)
+    await callback.answer("🎲 Случайный арт!")
+
+@dp.callback_query(F.data == "user_art_input")
+async def process_user_art_input(callback: types.CallbackQuery, state: FSMContext):
+    arts = await get_all_arts()
+    if not arts:
+         return await callback.answer("Галерея пуста 😔", show_alert=True)
+    await state.set_state(ArtView.waiting_for_number)
+    await callback.message.answer(f"🔢 <b>Переход к арту</b>\nВведите номер арта от 1 до {len(arts)}:", parse_mode="HTML")
+    await callback.answer()
+
+@dp.message(ArtView.waiting_for_number, F.text.isdigit())
+async def handle_art_number_input(message: types.Message, state: FSMContext):
+    await state.clear()
+    num = int(message.text)
+    arts = await get_all_arts()
+    if 1 <= num <= len(arts):
+        await send_user_art_item(message.chat.id, num - 1)
+    else:
+        await message.answer(f"❌ Неверный номер! Введите число от 1 до {len(arts)}.")
+
+@dp.callback_query(F.data.startswith("user_art_grid:"))
+async def process_user_art_grid(callback: types.CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    arts = await get_all_arts()
+    if not arts:
+        return await callback.answer("Галерея пуста 😔", show_alert=True)
+    
+    limit = 9
+    start = page * limit
+    end = start + limit
+    sliced = arts[start:end]
+    
+    if not sliced:
+        return await callback.answer("Больше нет артов.", show_alert=True)
+
+    await callback.message.delete()
+    
+    media = [InputMediaPhoto(media=row[1]) for row in sliced]
     await bot.send_media_group(chat_id=callback.message.chat.id, media=media)
-    await callback.message.answer("🎨 <b>Последние добавленные цветные арты!</b>\n<i>Все персонажи строго сверены с рисовкой аниме.</i>", parse_mode="HTML", reply_markup=get_back_button())
+
+    builder = InlineKeyboardBuilder()
+    if page > 0:
+        builder.button(text="⬅️ Пред. стр", callback_data=f"user_art_grid:{page - 1}")
+    if end < len(arts):
+        builder.button(text="След. стр ➡️", callback_data=f"user_art_grid:{page + 1}")
+    
+    builder.button(text="🎚 К слайдеру", callback_data="view_arts")
+    builder.button(text="⬅️ В меню", callback_data="main_menu")
+    
+    await callback.message.answer(
+        f"📱 <b>Сетка артов</b>\n<i>Страница {page + 1} (Показаны {len(sliced)} из {len(arts)})</i>",
+        parse_mode="HTML",
+        reply_markup=builder.adjust(2).as_markup()
+    )
 
 
 # ==============================================================================
@@ -973,9 +1083,13 @@ async def send_admin_art_item(chat_id: int, index: int, message_to_edit: types.M
         types.InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin_art_view:{index - 1}"),
         types.InlineKeyboardButton(text="Вперед ➡️", callback_data=f"admin_art_view:{index + 1}")
     )
-    builder.row(types.InlineKeyboardButton(text="🗑 Удалить арт", callback_data=f"admin_art_delete:{art_id}:{index}"))
+    builder.row(
+        types.InlineKeyboardButton(text="🔢 Номер арта", callback_data="admin_art_input"),
+        types.InlineKeyboardButton(text="🗑 Удалить арт", callback_data=f"admin_art_delete:{art_id}:{index}")
+    )
+    builder.row(types.InlineKeyboardButton(text="📱 Режим сетки (9 шт)", callback_data="admin_art_grid:0"))
 
-    caption = f"🎨 <b>Арт ID:</b> {art_id}\n<i>({index + 1} из {len(arts)})</i>"
+    caption = f"👑 <b>[Админ] Арт ID:</b> {art_id}\n<i>({index + 1} из {len(arts)})</i>"
 
     if message_to_edit:
         try:
@@ -1015,6 +1129,65 @@ async def process_admin_art_delete(callback: types.CallbackQuery):
         await send_admin_art_item(callback.message.chat.id, index, message_to_edit=callback.message)
     else:
         await callback.answer("❌ Ошибка при удалении арт.", show_alert=True)
+
+@dp.callback_query(F.data == "admin_art_input")
+async def process_admin_art_input(callback: types.CallbackQuery, state: FSMContext):
+    arts = await get_all_arts()
+    if not arts:
+         return await callback.answer("Галерея пуста 😔", show_alert=True)
+    await state.set_state(ArtView.waiting_for_admin_number)
+    await callback.message.answer(f"👑 <b>[Админ] Переход к арту</b>\nВведите номер арта от 1 до {len(arts)}:", parse_mode="HTML")
+    await callback.answer()
+
+@dp.message(ArtView.waiting_for_admin_number, F.text.isdigit())
+async def handle_admin_art_number_input(message: types.Message, state: FSMContext):
+    await state.clear()
+    num = int(message.text)
+    arts = await get_all_arts()
+    if 1 <= num <= len(arts):
+        await send_admin_art_item(message.chat.id, num - 1)
+    else:
+        await message.answer(f"❌ Неверный номер! Введите число от 1 до {len(arts)}.")
+
+@dp.callback_query(F.data.startswith("admin_art_grid:"))
+async def process_admin_art_grid(callback: types.CallbackQuery):
+    page = int(callback.data.split(":")[1])
+    arts = await get_all_arts()
+    if not arts:
+        return await callback.answer("Галерея пуста 😔", show_alert=True)
+    
+    limit = 9
+    start = page * limit
+    end = start + limit
+    sliced = arts[start:end]
+    
+    if not sliced:
+        return await callback.answer("Больше нет артов.", show_alert=True)
+
+    await callback.message.delete()
+    
+    media = [InputMediaPhoto(media=row[1]) for row in sliced]
+    await bot.send_media_group(chat_id=callback.message.chat.id, media=media)
+
+    builder = InlineKeyboardBuilder()
+    if page > 0:
+        builder.button(text="⬅️ Пред. стр", callback_data=f"admin_art_grid:{page - 1}")
+    if end < len(arts):
+        builder.button(text="След. стр ➡️", callback_data=f"admin_art_grid:{page + 1}")
+    
+    # Arts list Command forces send_admin_art_item(0) 
+    builder.button(text="🎚 К слайдеру", callback_data="admin_art_view_back")
+    
+    await callback.message.answer(
+        f"👑 <b>[Админ] Сетка артов</b>\n<i>Страница {page + 1} (Показаны {len(sliced)} из {len(arts)})</i>",
+        parse_mode="HTML",
+        reply_markup=builder.adjust(2).as_markup()
+    )
+
+@dp.callback_query(F.data == "admin_art_view_back")
+async def process_admin_art_view_back(callback: types.CallbackQuery):
+    await callback.message.delete()
+    await send_admin_art_item(callback.message.chat.id, 0)
 
 @dp.message(Command("delete_art"))
 async def cmd_delete_art(message: types.Message):
