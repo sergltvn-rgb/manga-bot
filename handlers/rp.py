@@ -10,7 +10,7 @@ from database import update_rp_stat, get_admins
 rp_router = Router()
 
 RP_ACTIONS = {
-    # Существующие
+    # Существующие SFW
     "обнять": ("hugs", "🤗", "тепло обнял(а)"),
     "поцеловать": ("kisses", "😘", "нежно поцеловал(а)"),
     "кусь": ("bites", "🧛‍♀️", "сделал(а) кусь"),
@@ -21,7 +21,6 @@ RP_ACTIONS = {
     "убить": ("slaps", "💀", "жестоко убил(а)"),
     "воскресить": ("hugs", "👼", "чудесно воскресил(а)"),
     "пожать": ("pats", "🤝", "пожал(а) руку"),
-    # Новые
     "пощекотать": ("pats", "🪶", "пощекотал(а)"),
     "тыкнуть": ("pats", "👈", "тыкнул(а) пальцем в"),
     "покормить": ("hugs", "🍲", "покормил(а)"),
@@ -31,7 +30,13 @@ RP_ACTIONS = {
     "смущаться": ("hugs", "😳", "засмущался(ась) из-за"),
     "пять": ("pats", "✋", "дал(а) пять"),
     "улыбнуться": ("hugs", "😊", "мило улыбнулся(ась)"),
-    "станцевать": ("hugs", "💃", "станцевал(а) с")
+    "станцевать": ("hugs", "💃", "станцевал(а) с"),
+    # Новые 18+ (NSFW)
+    "трахаться": ("kisses", "🔞", "жестко трахнул(а)"),
+    "секс": ("kisses", "🔞", "занялся(ась) сексом с"),
+    "минет": ("kisses", "🔞", "сделал(а) минет"),
+    "отсосать": ("kisses", "🔞", "отсосал(а) у"),
+    "спать вместе": ("hugs", "🛌", "лёг(ла) спать вместе с")
 }
 
 # Эндпоинты nekos.best для аниме-гифок
@@ -58,7 +63,29 @@ NEKOS_ENDPOINTS = {
     "станцевать":"dance",
 }
 
-async def get_nekos_gif(action: str) -> str | None:
+# Эндпоинты PurrBot (SFW / NSFW)
+PURR_ENDPOINTS = {
+    "трахаться": "nsfw/fuck",
+    "секс": "nsfw/fuck",
+    "минет": "nsfw/blowjob",
+    "отсосать": "nsfw/blowjob",
+    "спать вместе": "sfw/lay",
+}
+
+async def get_rp_gif(action: str) -> str | None:
+    # 1. Сначала проверяем PurrBot (для 18+ и сна)
+    if action in PURR_ENDPOINTS:
+        endpoint = PURR_ENDPOINTS[action]
+        url = f"https://api.purrbot.site/v2/img/{endpoint}/gif"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                    data = await resp.json()
+                    return data.get("link")
+        except Exception:
+            pass
+
+    # 2. Потом Nekos.best (стандартные SFW)
     endpoint = NEKOS_ENDPOINTS.get(action)
     if not endpoint: return None
     try:
@@ -69,7 +96,9 @@ async def get_nekos_gif(action: str) -> str | None:
     except Exception:
         return None
 
-REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(list(RP_ACTIONS.keys())) + r')')
+# Сортировка по длине в обратном порядке для предотвращения багов частичного маппинга (например "спать" vs "спать вместе")
+keys_sorted = sorted(RP_ACTIONS.keys(), key=len, reverse=True)
+REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(keys_sorted) + r')')
 
 # Временно дублируем функцию COOLDOWN из `bot.py` для корректной работы здесь (или выносим в отдельный `utils.py`)
 # Для простоты, перенесем её сюда:
@@ -94,7 +123,7 @@ async def rp_commands(message: types.Message):
     await update_rp_stat(user1.id, stat_type)
     
     caption = f"{emoji} {user1.mention_html()} {text_act} {user2.mention_html()}"
-    gif_url = await get_nekos_gif(action_key)
+    gif_url = await get_rp_gif(action_key)
     if gif_url:
         await message.answer_animation(animation=gif_url, caption=caption, parse_mode="HTML")
     else:
