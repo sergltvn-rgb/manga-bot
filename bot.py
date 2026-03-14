@@ -1174,7 +1174,14 @@ async def handle_admin_art_number_input(message: types.Message, state: FSMContex
         await message.answer(f"❌ Неверный номер! Введите число от 1 до {len(arts)}.")
 
 @dp.callback_query(F.data.startswith("admin_art_grid:"))
-async def process_admin_art_grid(callback: types.CallbackQuery):
+async def process_admin_art_grid(callback: types.CallbackQuery, state: FSMContext):
+    # 1. Удаляем предыдущее превью (media group) если оно сохранено в state
+    data = await state.get_data()
+    prev_photos = data.get("grid_photos", [])
+    for mid in prev_photos:
+        try: await bot.delete_message(callback.message.chat.id, mid)
+        except: pass
+
     page = int(callback.data.split(":")[1])
     arts = await get_all_arts()
     if not arts:
@@ -1191,7 +1198,8 @@ async def process_admin_art_grid(callback: types.CallbackQuery):
     await callback.message.delete()
     
     media = [InputMediaPhoto(media=row[1]) for row in sliced]
-    await bot.send_media_group(chat_id=callback.message.chat.id, media=media)
+    messages = await bot.send_media_group(chat_id=callback.message.chat.id, media=media)
+    photo_ids = [m.message_id for m in messages]
 
     builder = InlineKeyboardBuilder()
     if page > 0:
@@ -1202,14 +1210,33 @@ async def process_admin_art_grid(callback: types.CallbackQuery):
     # Arts list Command forces send_admin_art_item(0) 
     builder.button(text="🎚 К слайдеру", callback_data="admin_art_view_back")
     
-    await callback.message.answer(
+    control_msg = await callback.message.answer(
         f"👑 <b>[Админ] Сетка артов</b>\n<i>Страница {page + 1} (Показаны {len(sliced)} из {len(arts)})</i>",
         parse_mode="HTML",
         reply_markup=builder.adjust(2).as_markup()
     )
 
+    # Сохраняем новые IDs для следующего перехода
+    await state.update_data(grid_photos=photo_ids)
+
+    # Функция автоочистки через 2 минуты
+    async def auto_cleanup(chat_id: int, ids: list):
+        await asyncio.sleep(120)
+        for mid in ids:
+            try: await bot.delete_message(chat_id, mid)
+            except: pass
+
+    asyncio.create_task(auto_cleanup(callback.message.chat.id, photo_ids + [control_msg.message_id]))
+
 @dp.callback_query(F.data == "admin_art_view_back")
-async def process_admin_art_view_back(callback: types.CallbackQuery):
+async def process_admin_art_view_back(callback: types.CallbackQuery, state: FSMContext):
+    # Удаляем фото при возврате к списку
+    data = await state.get_data()
+    for mid in data.get("grid_photos", []):
+        try: await bot.delete_message(callback.message.chat.id, mid)
+        except: pass
+    await state.update_data(grid_photos=[]) # Очищаем
+    
     await callback.message.delete()
     await send_admin_art_item(callback.message.chat.id, 0)
 
