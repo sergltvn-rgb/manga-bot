@@ -291,7 +291,7 @@ async def process_group_ai_chat(message: types.Message):
 # ==============================================================================
 # БЛОК 5: ГЛАВНОЕ МЕНЮ И БАЗОВЫЕ КОМАНДЫ
 # ==============================================================================
-def get_main_menu():
+def get_main_menu(is_group: bool = False):
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="📖 Читать мангу", callback_data="read_langs"),
@@ -305,7 +305,8 @@ def get_main_menu():
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
     builder.row(types.InlineKeyboardButton(text="ℹ️ Информация о проекте", callback_data="project_info_menu"))
     builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
-    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
+    if not is_group:
+        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
     return builder.as_markup()
 
 @dp.callback_query(F.data == "project_info_menu")
@@ -345,7 +346,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         await message.answer(
             "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
             parse_mode="HTML",
-            reply_markup=get_main_menu()
+            reply_markup=get_main_menu(is_group=True)
         )
 
 @dp.message(F.text == "📋 Меню", StateFilter("*"))
@@ -387,7 +388,8 @@ async def process_show_help(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "main_menu")
 async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("Главное меню:", reply_markup=get_main_menu())
+    is_group = callback.message.chat.type in ["group", "supergroup"]
+    await callback.message.edit_text("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
 
 def get_langs_menu(prefix="lang"):
     builder = InlineKeyboardBuilder()
