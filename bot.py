@@ -250,8 +250,12 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder().row(types.InlineKeyboardButton(text="🚪 Выйти из чата", callback_data="main_menu"))
     await message.answer(f"{emoji} <b>{char_name}:</b>\n{response}", parse_mode="HTML", reply_markup=builder.as_markup())
 
+_REPLY_KB_TEXTS = {"📖 Читать", "🎨 Арты", "🤖 ИИ чаты", "ℹ️ Проект", "📋 Меню"}
+
 def is_ai_trigger(message: types.Message):
     if not message.text or message.text.startswith('/'): 
+        return False
+    if message.text in _REPLY_KB_TEXTS:
         return False
     text_lower = message.text.lower()
     if text_lower.startswith("аля") or text_lower.startswith("масачика"): 
