@@ -540,9 +540,6 @@ async def process_schedule(callback: types.CallbackQuery):
 async def process_vs_anime(callback: types.CallbackQuery):
     await callback.message.edit_text("<b>📺 Аниме vs Манга:</b>\nМанга подробнее раскрывает монологи и шутки. Читай мангу примерно с 35 главы после 1 сезона аниме!", parse_mode="HTML", reply_markup=get_back_button())
 
-class ArtView(StatesGroup):
-    waiting_for_grid_page = State()
-    waiting_for_grid_index = State()
 
 @dp.callback_query(F.data == "suggest_art_menu")
 async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMContext):
