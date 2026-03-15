@@ -257,6 +257,10 @@ def is_ai_trigger(message: types.Message):
         return False
     if message.text in _REPLY_KB_TEXTS:
         return False
+    # Не перехватываем РП-команды (обнять, поцеловать и т.д.)
+    from handlers.rp import REGEX_RP
+    if REGEX_RP.search(message.text):
+        return False
     text_lower = message.text.lower()
     if text_lower.startswith("аля") or text_lower.startswith("масачика"): 
         return True
@@ -352,6 +356,16 @@ async def process_section_read(callback: types.CallbackQuery):
 # --- Подменю: Арты ---
 @dp.callback_query(F.data == "section_arts")
 async def process_section_arts(callback: types.CallbackQuery):
+    is_group = callback.message.chat.type in ["group", "supergroup"]
+    if is_group:
+        me = await bot.get_me()
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="➡️ Арты (в ЛС)", url=f"https://t.me/{me.username}?start=arts"))
+        try:
+            await callback.message.edit_text("<i>Арты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
+        except Exception:
+            await callback.message.answer("<i>Арты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
+        return await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
     builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
@@ -367,11 +381,19 @@ async def process_section_arts(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "section_ai")
 async def process_section_ai(callback: types.CallbackQuery):
     is_group = callback.message.chat.type in ["group", "supergroup"]
+    if is_group:
+        me = await bot.get_me()
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="➡️ ИИ чаты (в ЛС)", url=f"https://t.me/{me.username}?start=ai"))
+        try:
+            await callback.message.edit_text("<i>ИИ чаты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
+        except Exception:
+            await callback.message.answer("<i>ИИ чаты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
+        return await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    if not is_group:
-        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
+    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     try:
         await callback.message.edit_text("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -382,6 +404,16 @@ async def process_section_ai(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "project_info_menu")
 async def process_project_info_menu(callback: types.CallbackQuery):
+    is_group = callback.message.chat.type in ["group", "supergroup"]
+    if is_group:
+        me = await bot.get_me()
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="➡️ Проект (в ЛС)", url=f"https://t.me/{me.username}?start=project"))
+        try:
+            await callback.message.edit_text("<i>Информация доступна в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
+        except Exception:
+            await callback.message.answer("<i>Информация доступна в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
+        return await callback.answer()
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📅 График выхода", callback_data="schedule"))
     builder.row(types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime"))
