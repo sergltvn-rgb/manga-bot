@@ -107,6 +107,8 @@ class ArtView(StatesGroup):
     waiting_for_number = State()
     waiting_for_admin_number = State()
     waiting_for_page = State()
+    waiting_for_grid_page = State()
+    waiting_for_grid_art_number = State()
 
 class ArtUpload(StatesGroup):
     waiting_for_photo = State()
@@ -306,38 +308,91 @@ async def process_group_ai_chat(message: types.Message):
 # ==============================================================================
 # БЛОК 5: ГЛАВНОЕ МЕНЮ И БАЗОВЫЕ КОМАНДЫ
 # ==============================================================================
+
+# --- Reply-клавиатура (4 кнопки) ---
+REPLY_KB = types.ReplyKeyboardMarkup(
+    keyboard=[
+        [types.KeyboardButton(text="📖 Читать"), types.KeyboardButton(text="🎨 Арты")],
+        [types.KeyboardButton(text="🤖 ИИ чаты"), types.KeyboardButton(text="ℹ️ Проект")]
+    ],
+    resize_keyboard=True,
+    persistent=True,
+)
+
 def get_main_menu(is_group: bool = False):
     builder = InlineKeyboardBuilder()
     builder.row(
-        types.InlineKeyboardButton(text="📖 Читать мангу", callback_data="read_langs"),
-        types.InlineKeyboardButton(text="📚 Читать ранобэ", callback_data="read_ranobe_langs")
+        types.InlineKeyboardButton(text="📖 Читать", callback_data="section_read"),
+        types.InlineKeyboardButton(text="🎨 Арты", callback_data="section_arts")
     )
     builder.row(
-        types.InlineKeyboardButton(text="🎨 Цветные арты", callback_data="view_arts"),
-        types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu")
+        types.InlineKeyboardButton(text="🤖 ИИ чаты", callback_data="section_ai"),
+        types.InlineKeyboardButton(text="ℹ️ Проект", callback_data="project_info_menu")
     )
+    return builder.as_markup()
+
+# --- Подменю: Читать ---
+@dp.callback_query(F.data == "section_read")
+async def process_section_read(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📖 Читать мангу", callback_data="read_langs"))
+    builder.row(types.InlineKeyboardButton(text="📚 Читать ранобэ", callback_data="read_ranobe_langs"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
+    try:
+        await callback.message.edit_text("📖 <b>Чтение:</b>\nВыберите, что хотите читать:", parse_mode="HTML", reply_markup=builder.as_markup())
+    except Exception:
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer("📖 <b>Чтение:</b>\nВыберите, что хотите читать:", parse_mode="HTML", reply_markup=builder.as_markup())
+
+# --- Подменю: Арты ---
+@dp.callback_query(F.data == "section_arts")
+async def process_section_arts(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
+    builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
+    try:
+        await callback.message.edit_text("🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup())
+    except Exception:
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer("🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup())
+
+# --- Подменю: ИИ чаты ---
+@dp.callback_query(F.data == "section_ai")
+async def process_section_ai(callback: types.CallbackQuery):
+    is_group = callback.message.chat.type in ["group", "supergroup"]
+    builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    builder.row(types.InlineKeyboardButton(text="ℹ️ Информация о проекте", callback_data="project_info_menu"))
-    builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
     if not is_group:
         builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
-    return builder.as_markup()
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
+    try:
+        await callback.message.edit_text("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
+    except Exception:
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data == "project_info_menu")
 async def process_project_info_menu(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📅 График выхода", callback_data="schedule"))
     builder.row(types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime"))
-    
-    # 2 buttons for commands
     builder.row(types.InlineKeyboardButton(text="📜 Полезные команды", callback_data="show_help"))
     link = await get_commands_link()
     if link:
         builder.row(types.InlineKeyboardButton(text="🔗 Все команды (Telegraph)", url=link))
-        
+    builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
-    await callback.message.edit_text("ℹ️ <b>Информация о проекте:</b>\n\nВыберите интересующий вас раздел ниже:", parse_mode="HTML", reply_markup=builder.as_markup())
+    try:
+        await callback.message.edit_text("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
+    except Exception:
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
     return InlineKeyboardBuilder().row(types.InlineKeyboardButton(text=text, callback_data=callback_data)).as_markup()
@@ -345,56 +400,107 @@ def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
 @dp.message(Command("start", ignore_mention=True), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    if message.chat.type == "private":
-        reply_kb = types.ReplyKeyboardMarkup(
-            keyboard=[[types.KeyboardButton(text="📋 Меню")]],
-            resize_keyboard=True,
-            persistent=True,
-        )
-        await message.answer(
-            "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
-            parse_mode="HTML",
-            reply_markup=reply_kb
-        )
-        await message.answer("Главное меню:", reply_markup=get_main_menu())
-    else:
-        await message.answer(
-            "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
-            parse_mode="HTML",
-            reply_markup=get_main_menu(is_group=True)
-        )
+    await message.answer(
+        "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
+        parse_mode="HTML",
+        reply_markup=REPLY_KB
+    )
+    is_group = message.chat.type in ["group", "supergroup"]
+    await message.answer("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
+
+# --- Обработчики reply-кнопок ---
+@dp.message(F.text == "📖 Читать", StateFilter("*"))
+async def handle_reply_read(message: types.Message, state: FSMContext):
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📖 Читать мангу", callback_data="read_langs"))
+    builder.row(types.InlineKeyboardButton(text="📚 Читать ранобэ", callback_data="read_ranobe_langs"))
+    builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+    await message.answer("📖 <b>Чтение:</b>\nВыберите, что хотите читать:", parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.message(F.text == "🎨 Арты", StateFilter("*"))
+async def handle_reply_arts(message: types.Message, state: FSMContext):
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
+    builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
+    builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+    await message.answer("🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.message(F.text == "🤖 ИИ чаты", StateFilter("*"))
+async def handle_reply_ai(message: types.Message, state: FSMContext):
+    await state.clear()
+    is_group = message.chat.type in ["group", "supergroup"]
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
+    builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
+    if not is_group:
+        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
+    builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+    await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.message(F.text == "ℹ️ Проект", StateFilter("*"))
+async def handle_reply_project(message: types.Message, state: FSMContext):
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📅 График выхода", callback_data="schedule"))
+    builder.row(types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime"))
+    builder.row(types.InlineKeyboardButton(text="📜 Полезные команды", callback_data="show_help"))
+    link = await get_commands_link()
+    if link:
+        builder.row(types.InlineKeyboardButton(text="🔗 Все команды (Telegraph)", url=link))
+    builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
+    builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+    await message.answer("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.message(F.text == "📋 Меню", StateFilter("*"))
 async def handle_menu_button(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("Главное меню:", reply_markup=get_main_menu())
+    is_group = message.chat.type in ["group", "supergroup"]
+    await message.answer("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
 
 
 async def get_help_text(user_id: int) -> str:
+    link = await get_commands_link()
+    link_line = f'\n🔗 <a href="{link}">Полный список всех команд (Telegraph)</a>' if link else ''
+    
     text = (
-        "📜 <b>Самые полезные команды:</b>\n\n"
-        "🔹 /start — Открыть главное меню\n"
-        "🔹 /profile — Твой профиль (ролеплей)\n"
-        "🔹 /stats — Твоя статистика чата\n"
-        "🔹 /marry (реплаем) — Вступить в брак\n"
-        "🔹 /divorce — Расторгнуть брак\n"
-        "🔹 /marriages — Показать топ пар\n\n"
-        "🎲 <b>Рекомендуемые развлечения:</b>\n"
-        "🔸 <i>/аля выбери [А] или [Б]</i> — Умный ИИ-выбор!\n"
-        "🔸 <i>/инфа [текст]</i> — Вероятность события\n"
-        "🔸 <i>/шар [вопрос]</i> — Магический шар (да/нет)\n"
-        "🔸 <i>/монетка</i> — Орел или Решка\n\n"
-        "<i>Подсказка: полный список команд и описание РП действий смотрите по кнопке «Все команды» (Telegraph).</i>"
+        "📜 <b>Все команды бота:</b>\n\n"
+        "<b>📋 Основные:</b>\n"
+        "/start — Главное меню\n"
+        "/help — Эта справка\n"
+        "/profile — РП-профиль (брак, действия)\n"
+        "/stats — Статистика чата (сообщения, стикеры)\n\n"
+        "<b>💍 Браки:</b>\n"
+        "/marry (реплаем) — Предложить брак\n"
+        "/divorce — Развод\n"
+        "/marriages — Топ пар\n\n"
+        "<b>🎭 РП-действия</b> (реплаем):\n"
+        "<i>обнять, поцеловать, кусь, ударить, погладить, пнуть, лизнуть, убить, воскресить, пожать, пощекотать, тыкнуть, покормить, прижаться, станцевать</i> и др.\n\n"
+        "<b>🎲 Мини-игры:</b>\n"
+        "/инфа [текст] — Вероятность\n"
+        "/шар [вопрос] — Магический шар\n"
+        "/монетка — Орёл/Решка\n"
+        "/кости, /дартс, /баскетбол, /футбол, /боулинг, /казино\n"
+        "/кнб [камень/ножницы/бумага]\n"
+        "/рулетка — Русская рулетка\n"
+        "/совместимость (реплаем)\n"
+        "/рандом [число] — Случайное число\n"
+        "/выбери [А] или [Б]\n"
+        "/аля выбери [А] или [Б] — ИИ-выбор\n\n"
+        "<b>🤖 ИИ-чат:</b>\n"
+        "Напиши <i>"аля [текст]"</i> или <i>"масачика [текст]"</i> в любом чате"
+        f"{link_line}"
     )
     
     admins = await get_admins()
     if user_id in admins:
-        text += "\n\n(Вы администратор! Введите /admin чтобы увидеть скрытые команды)"
+        text += "\n\n👑 <i>Вы админ — /admin для скрытых команд</i>"
     return text
 
 @dp.message(Command("help"), StateFilter("*"))
 async def cmd_help(message: types.Message):
-    await message.answer(await get_help_text(message.from_user.id), parse_mode="HTML")
+    await message.answer(await get_help_text(message.from_user.id), parse_mode="HTML", disable_web_page_preview=True)
 
 @dp.callback_query(F.data == "show_help")
 async def process_show_help(callback: types.CallbackQuery):
@@ -404,7 +510,13 @@ async def process_show_help(callback: types.CallbackQuery):
 async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     is_group = callback.message.chat.type in ["group", "supergroup"]
-    await callback.message.edit_text("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
+    try:
+        await callback.message.edit_text("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
+    except Exception:
+        # Не удалось edit_text (например, сообщение — фото из галереи артов)
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
 
 def get_langs_menu(prefix="lang"):
     builder = InlineKeyboardBuilder()
@@ -427,6 +539,10 @@ async def process_schedule(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "vs_anime")
 async def process_vs_anime(callback: types.CallbackQuery):
     await callback.message.edit_text("<b>📺 Аниме vs Манга:</b>\nМанга подробнее раскрывает монологи и шутки. Читай мангу примерно с 35 главы после 1 сезона аниме!", parse_mode="HTML", reply_markup=get_back_button())
+
+class ArtView(StatesGroup):
+    waiting_for_grid_page = State()
+    waiting_for_grid_index = State()
 
 @dp.callback_query(F.data == "suggest_art_menu")
 async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMContext):
@@ -835,7 +951,12 @@ def get_ranobe_chapters_menu(lang: str, chapters: list, page: int = 0):
 
 @dp.callback_query(F.data == "read_langs")
 async def process_read_langs(callback: types.CallbackQuery):
-    await callback.message.edit_text("🌐 Выберите язык для чтения:", reply_markup=get_langs_menu("readlang"))
+    try:
+        await callback.message.edit_text("🌐 Выберите язык для чтения:", reply_markup=get_langs_menu("readlang"))
+    except Exception:
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer("🌐 Выберите язык для чтения:", reply_markup=get_langs_menu("readlang"))
 
 @dp.callback_query(F.data.startswith("readlang_"))
 async def process_read_chapters(callback: types.CallbackQuery):
@@ -845,7 +966,12 @@ async def process_read_chapters(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "read_ranobe_langs")
 async def process_read_ranobe_langs(callback: types.CallbackQuery):
-    await callback.message.edit_text("📖 Выберите ранобэ для чтения:", reply_markup=get_ranobe_langs_menu("readranobelang"))
+    try:
+        await callback.message.edit_text("📖 Выберите ранобэ для чтения:", reply_markup=get_ranobe_langs_menu("readranobelang"))
+    except Exception:
+        try: await callback.message.delete()
+        except Exception: pass
+        await callback.message.answer("📖 Выберите ранобэ для чтения:", reply_markup=get_ranobe_langs_menu("readranobelang"))
 
 @dp.callback_query(F.data.startswith("readranobelang_"))
 async def process_read_ranobe_chapters(callback: types.CallbackQuery):
@@ -1093,8 +1219,12 @@ async def process_user_art_grid(callback: types.CallbackQuery):
         return await callback.answer("Галерея пуста 😔", show_alert=True)
     
     limit = 9
+    total_pages = math.ceil(len(arts) / limit)
+    if page < 0: page = 0
+    if page >= total_pages: page = total_pages - 1
+    
     start = page * limit
-    end = start + limit
+    end = min(start + limit, len(arts))
     sliced = arts[start:end]
     
     if not sliced:
@@ -1108,17 +1238,104 @@ async def process_user_art_grid(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     if page > 0:
         builder.button(text="⬅️ Пред. стр", callback_data=f"user_art_grid:{page - 1}")
-    if end < len(arts):
+    if page < total_pages - 1:
         builder.button(text="След. стр ➡️", callback_data=f"user_art_grid:{page + 1}")
     
-    builder.button(text="🎚 К слайдеру", callback_data="view_arts")
-    builder.button(text="⬅️ В меню", callback_data="main_menu")
-    
-    await callback.message.answer(
-        f"📱 <b>Сетка артов</b>\n<i>Страница {page + 1} (Показаны {len(sliced)} из {len(arts)})</i>",
-        parse_mode="HTML",
-        reply_markup=builder.adjust(2).as_markup()
+    # Переход к слайдеру на первый арт ЭТОЙ страницы
+    builder.row(
+        types.InlineKeyboardButton(text="🎚 К слайдеру", callback_data=f"user_art_view:{start}"),
+        types.InlineKeyboardButton(text="🔢 Номер арта", callback_data="grid_art_input")
     )
+    builder.row(
+        types.InlineKeyboardButton(text="📄 На страницу", callback_data="grid_page_input"),
+        types.InlineKeyboardButton(text="⬅️ В меню", callback_data="main_menu")
+    )
+    
+    art_from = start + 1
+    art_to = end
+    await callback.message.answer(
+        f"📱 <b>Сетка артов</b>\n"
+        f"🎨 Арты <b>{art_from}–{art_to}</b> из {len(arts)}\n"
+        f"📄 Страница <b>{page + 1}</b> из <b>{total_pages}</b>",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+# --- Ввод номера страницы в сетке ---
+@dp.callback_query(F.data == "grid_page_input")
+async def process_grid_page_input(callback: types.CallbackQuery, state: FSMContext):
+    arts = await get_all_arts()
+    if not arts:
+        return await callback.answer("Галерея пуста 😔", show_alert=True)
+    total_pages = math.ceil(len(arts) / 9)
+    await state.set_state(ArtView.waiting_for_grid_page)
+    await callback.message.answer(
+        f"📄 <b>Переход к странице</b>\nВведите номер страницы от 1 до {total_pages}:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@dp.message(ArtView.waiting_for_grid_page, F.text.isdigit())
+async def handle_grid_page_input(message: types.Message, state: FSMContext):
+    await state.clear()
+    num = int(message.text)
+    arts = await get_all_arts()
+    total_pages = math.ceil(len(arts) / 9)
+    if 1 <= num <= total_pages:
+        # Эмулируем нажатие кнопки сетки
+        limit = 9
+        page = num - 1
+        start = page * limit
+        end = min(start + limit, len(arts))
+        sliced = arts[start:end]
+        
+        media = [InputMediaPhoto(media=row[1]) for row in sliced]
+        await bot.send_media_group(chat_id=message.chat.id, media=media)
+        
+        builder = InlineKeyboardBuilder()
+        if page > 0:
+            builder.button(text="⬅️ Пред. стр", callback_data=f"user_art_grid:{page - 1}")
+        if page < total_pages - 1:
+            builder.button(text="След. стр ➡️", callback_data=f"user_art_grid:{page + 1}")
+        builder.row(
+            types.InlineKeyboardButton(text="🎚 К слайдеру", callback_data=f"user_art_view:{start}"),
+            types.InlineKeyboardButton(text="🔢 Номер арта", callback_data="grid_art_input")
+        )
+        builder.row(
+            types.InlineKeyboardButton(text="📄 На страницу", callback_data="grid_page_input"),
+            types.InlineKeyboardButton(text="⬅️ В меню", callback_data="main_menu")
+        )
+        await message.answer(
+            f"📱 <b>Сетка артов</b>\n"
+            f"🎨 Арты <b>{start+1}–{end}</b> из {len(arts)}\n"
+            f"📄 Страница <b>{page+1}</b> из <b>{total_pages}</b>",
+            parse_mode="HTML", reply_markup=builder.as_markup()
+        )
+    else:
+        await message.answer(f"❌ Неверный номер! Введите от 1 до {total_pages}.")
+
+# --- Ввод номера арта из сетки ---
+@dp.callback_query(F.data == "grid_art_input")
+async def process_grid_art_input(callback: types.CallbackQuery, state: FSMContext):
+    arts = await get_all_arts()
+    if not arts:
+        return await callback.answer("Галерея пуста 😔", show_alert=True)
+    await state.set_state(ArtView.waiting_for_grid_art_number)
+    await callback.message.answer(
+        f"🔢 <b>Переход к арту</b>\nВведите номер арта от 1 до {len(arts)}:",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@dp.message(ArtView.waiting_for_grid_art_number, F.text.isdigit())
+async def handle_grid_art_number_input(message: types.Message, state: FSMContext):
+    await state.clear()
+    num = int(message.text)
+    arts = await get_all_arts()
+    if 1 <= num <= len(arts):
+        await send_user_art_item(message.chat.id, num - 1, user_id=message.from_user.id)
+    else:
+        await message.answer(f"❌ Неверный номер! Введите от 1 до {len(arts)}.")
 
 
 # ==============================================================================
