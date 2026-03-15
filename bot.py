@@ -33,7 +33,7 @@ from database import (
     get_all_users, get_admins, add_admin, remove_admin, is_ai_enabled, toggle_group_ai,
     get_alya_mode, toggle_alya_mode, get_all_arts, delete_art_by_id,
     get_commands_link, set_commands_link, delete_commands_link,
-    add_to_blacklist, remove_from_blacklist, is_blacklisted
+    add_to_blacklist, remove_from_blacklist, is_blacklisted, get_blacklist
 )
 
 COOLDOWN_TIME = 30 
@@ -252,15 +252,26 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
 
 _REPLY_KB_TEXTS = {"📖 Читать", "🎨 Арты", "🤖 ИИ чаты", "ℹ️ Проект", "📋 Меню"}
 
+# Все регулярки игр/команд, которые не должны перехватываться ИИ
+_GAME_REGEXES = [
+    REGEX_INFA, REGEX_RANDOM, REGEX_CHOOSE, REGEX_ALYA_CHOOSE, REGEX_COIN,
+    REGEX_DICE, REGEX_MARRY, REGEX_DIVORCE, REGEX_MARRIAGES, REGEX_PROFILE,
+    REGEX_STATS, REGEX_DARTS, REGEX_BASKETBALL, REGEX_FOOTBALL, REGEX_SLOT,
+    REGEX_BOWLING, REGEX_RPS, REGEX_COMPATIBILITY, REGEX_MAGIC_BALL, REGEX_ROULETTE,
+]
+
 def is_ai_trigger(message: types.Message):
     if not message.text or message.text.startswith('/'): 
         return False
     if message.text in _REPLY_KB_TEXTS:
         return False
-    # Не перехватываем РП-команды (обнять, поцеловать и т.д.)
+    # Не перехватываем РП-команды и мини-игры
     from handlers.rp import REGEX_RP
     if REGEX_RP.search(message.text):
         return False
+    for rx in _GAME_REGEXES:
+        if rx.search(message.text):
+            return False
     text_lower = message.text.lower()
     if text_lower.startswith("аля") or text_lower.startswith("масачика"): 
         return True
@@ -695,16 +706,20 @@ async def cmd_profile(message: types.Message):
             partner_text = f"В браке с <b>{partner_name}</b> 💍 ({date})"
     
     hugs, kisses, bites, slaps, pats, m_count, s_count = await get_user_stats(user_id)
+    total_rp = hugs + kisses + bites + slaps + pats
     
     profile_text = (
-        f"👤 <b>Профиль пользователя {name}</b>\n\n"
-        f"👩‍❤️‍👨 <b>Статус в чате:</b> {partner_text}\n\n"
-        f"📊 <b>Твоя активность (РП):</b>\n"
-        f"❤️ Нежность (поцеловал/лизнул): {kisses}\n"
+        f"👤 <b>Профиль — {name}</b>\n\n"
+        f"👩‍❤️‍👨 <b>Статус:</b> {partner_text}\n\n"
+        f"📊 <b>Статистика чата:</b>\n"
+        f"✉️ Сообщений: <b>{m_count}</b>\n"
+        f"🌟 Стикеров: <b>{s_count}</b>\n\n"
+        f"🎭 <b>РП-действия</b> (всего {total_rp}):\n"
+        f"❤️ Нежность (поцелуй/лизнул): {kisses}\n"
         f"🤗 Забота (обнял/воскресил): {hugs}\n"
-        f"🥰 Утешение (погладил/пожал руку): {pats}\n"
+        f"🥰 Утешение (погладил/пожал): {pats}\n"
         f"🧛‍♀️ Вампиризм (кусь): {bites}\n"
-        f"😠 Агрессия (ударил/пнул/убил): {slaps}\n"
+        f"😠 Агрессия (удар/пнул/убил): {slaps}\n"
     )
     
     builder = InlineKeyboardBuilder()
@@ -747,22 +762,7 @@ async def callback_roast_profile(callback: types.CallbackQuery):
 
 @dp.message(F.text & F.text.regexp(REGEX_STATS))
 async def cmd_stats(message: types.Message):
-    if await check_cd_and_warn(message, "stats", 5): return
-    user_id = message.from_user.id
-    name = message.from_user.first_name
-    
-    hugs, kisses, bites, slaps, pats, m_count, s_count = await get_user_stats(user_id)
-    
-    stats_text = (
-        f"📊 <b>Полная статистика {name}</b>\n\n"
-        f"✉️ <b>Всего сообщений:</b> {m_count}\n"
-        f"🌟 <b>Отправлено стикеров:</b> {s_count}\n\n"
-        f"🎭 <b>РП Активность:</b>\n"
-        f"Спокойствие (обнял, погладил и т.д.): {hugs + pats} раз\n"
-        f"Агрессия (ударил, пнул и т.д.): {slaps + bites} раз\n"
-        f"Любовь (поцеловал): {kisses} раз\n"
-    )
-    await message.answer(stats_text, parse_mode="HTML")
+    await cmd_profile(message)
 
 # РП команды теперь в handlers/rp.py
 
@@ -1497,6 +1497,16 @@ async def cmd_unblacklist_ai(message: types.Message):
             await message.answer(f"Пользователя {user_id} НЕТ в черном списке ИИ.")
     except (IndexError, ValueError):
         await message.answer("❌ Формат: /unblacklist_ai <ID_пользователя>")
+
+@dp.message(Command("blacklist_view"))
+async def cmd_blacklist_view(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    bl = await get_blacklist()
+    if not bl:
+        return await message.answer("📝 Чёрный список ИИ пуст.")
+    lines = [f"<code>{uid}</code>" for uid in bl]
+    await message.answer(f"🚫 <b>Чёрный список ИИ ({len(bl)}):</b>\n" + "\n".join(lines), parse_mode="HTML")
 
 @dp.message(Command("set_commands_link"))
 async def cmd_set_commands_link(message: types.Message):

@@ -102,6 +102,12 @@ async def is_blacklisted(user_id: int) -> bool:
         async with db.execute('SELECT 1 FROM ai_blacklist WHERE user_id = ?', (user_id,)) as cursor:
             return bool(await cursor.fetchone())
 
+async def get_blacklist() -> list:
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT user_id FROM ai_blacklist') as cursor:
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
 async def toggle_group_ai(chat_id: int) -> bool:
     '''Toggles AI for a group. Returns True if enabled, False if disabled.'''
     async with aiosqlite.connect('manga.db') as db:
