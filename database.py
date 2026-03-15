@@ -3,6 +3,9 @@ import aiosqlite
 import sqlite3
 from datetime import datetime
 
+# Белый список допустимых колонок для update_rp_stat
+_VALID_STAT_COLUMNS = frozenset({"hugs", "kisses", "bites", "slaps", "pats"})
+
 async def init_db():
     async with aiosqlite.connect('manga.db') as db:
         await db.execute('CREATE TABLE IF NOT EXISTS chapters_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))')
@@ -19,19 +22,12 @@ async def init_db():
         try:
             await db.execute('ALTER TABLE users_stats ADD COLUMN messages_count INTEGER DEFAULT 0')
             await db.execute('ALTER TABLE users_stats ADD COLUMN stickers_count INTEGER DEFAULT 0')
-        except:
+        except Exception:
             pass
 
-        # Таблица для отключения ИИ в группах
         await db.execute('CREATE TABLE IF NOT EXISTS ai_disabled_groups (chat_id INTEGER PRIMARY KEY)')
-
-        # Таблица для режима Али (normal или gopnik)
         await db.execute('CREATE TABLE IF NOT EXISTS alya_settings (bot_id INTEGER PRIMARY KEY, mode TEXT DEFAULT "normal")')
-
-        # Таблица для черного списка ИИ
         await db.execute('CREATE TABLE IF NOT EXISTS ai_blacklist (user_id INTEGER PRIMARY KEY)')
-
-        # Таблица для общих настроек бота (ссылка на Telegraph)
         await db.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT)')
 
         # Инициализация режима Али по умолчанию (если пусто)
@@ -43,8 +39,7 @@ async def get_alya_mode() -> str:
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT mode FROM alya_settings WHERE bot_id = 1') as cursor:
             row = await cursor.fetchone()
-            if row: return row[0]
-            return "normal"
+            return row[0] if row else "normal"
 
 async def toggle_alya_mode() -> str:
     current_mode = await get_alya_mode()
@@ -57,25 +52,22 @@ async def toggle_alya_mode() -> str:
 async def get_all_arts() -> list:
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT id, file_id FROM arts') as cursor:
-            res = await cursor.fetchall()
-            if res: return res
-            return []
+            return await cursor.fetchall() or []
 
 async def delete_art_by_id(art_id: int) -> bool:
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT 1 FROM arts WHERE id = ?', (art_id,)) as cursor:
-            if not await cursor.fetchone(): return False
+            if not await cursor.fetchone():
+                return False
         await db.execute('DELETE FROM arts WHERE id = ?', (art_id,))
         await db.commit()
         return True
-    return False
 
 async def get_commands_link() -> str | None:
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT value FROM bot_settings WHERE key = "commands_link"') as cursor:
             row = await cursor.fetchone()
-            if row: return row[0]
-            return None
+            return row[0] if row else None
 
 async def set_commands_link(url: str):
     async with aiosqlite.connect('manga.db') as db:
@@ -95,24 +87,20 @@ async def add_to_blacklist(user_id: int) -> bool:
             return True
         except sqlite3.IntegrityError:
             return False
-    return False
 
 async def remove_from_blacklist(user_id: int) -> bool:
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT 1 FROM ai_blacklist WHERE user_id = ?', (user_id,)) as cursor:
-            if not await cursor.fetchone(): return False
+            if not await cursor.fetchone():
+                return False
         await db.execute('DELETE FROM ai_blacklist WHERE user_id = ?', (user_id,))
         await db.commit()
         return True
-    return False
 
 async def is_blacklisted(user_id: int) -> bool:
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT 1 FROM ai_blacklist WHERE user_id = ?', (user_id,)) as cursor:
-            res = await cursor.fetchone()
-            if res: return True
-            return False
-    return False
+            return bool(await cursor.fetchone())
 
 async def toggle_group_ai(chat_id: int) -> bool:
     '''Toggles AI for a group. Returns True if enabled, False if disabled.'''
@@ -127,17 +115,16 @@ async def toggle_group_ai(chat_id: int) -> bool:
         await db.execute('INSERT INTO ai_disabled_groups (chat_id) VALUES (?)', (chat_id,))
         await db.commit()
         return False
-    return False
 
 async def is_ai_enabled(chat_id: int) -> bool:
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT 1 FROM ai_disabled_groups WHERE chat_id = ?', (chat_id,)) as cursor:
-            res = await cursor.fetchone()
-            if res: return False
-            return True
-    return False
+            return not bool(await cursor.fetchone())
 
 async def update_rp_stat(user_id: int, stat_name: str):
+    # Защита от SQL-инъекции: проверяем по белому списку
+    if stat_name not in _VALID_STAT_COLUMNS:
+        return
     async with aiosqlite.connect('manga.db') as db:
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
         await db.execute(f'UPDATE users_stats SET {stat_name} = {stat_name} + 1 WHERE user_id = ?', (user_id,))
@@ -151,14 +138,12 @@ async def get_user_stats(user_id: int):
 
 async def get_admins():
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)')
         async with db.execute('SELECT user_id FROM admins') as cursor:
             rows = await cursor.fetchall()
             return [row[0] for row in rows] + [6210312655] 
 
 async def add_admin(user_id: int):
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)')
         await db.execute('INSERT OR IGNORE INTO admins (user_id) VALUES (?)', (user_id,))
         await db.commit()
 

@@ -42,6 +42,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Глобальная aiohttp сессия (открывается один раз при старте)
+_http_session: aiohttp.ClientSession | None = None
+
+async def get_http_session() -> aiohttp.ClientSession:
+    """Возвращает единственную aiohttp-сессию, создаёт лениво."""
+    global _http_session
+    if _http_session is None or _http_session.closed:
+        _http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
+    return _http_session
+
 LANGUAGES = {"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "jp": "🇯🇵 日本語", "color": "🎨 Цветная манга"}
 RANOBE_LANGUAGES = {"alya": "⚔️ Воительница-Аля", "ru": "🇷🇺 Русский (Ранобэ)"}
 ITEMS_PER_PAGE = 15
@@ -96,6 +106,7 @@ class TechSupport(StatesGroup):
 class ArtView(StatesGroup):
     waiting_for_number = State()
     waiting_for_admin_number = State()
+    waiting_for_page = State()
 
 class ArtUpload(StatesGroup):
     waiting_for_photo = State()
@@ -105,6 +116,10 @@ class ArtSuggest(StatesGroup):
 
 class AIChat(StatesGroup):
     chatting = State()
+
+class ChapterJump(StatesGroup):
+    waiting_for_manga_page = State()
+    waiting_for_ranobe_page = State()
 
 
 # ==============================================================================
@@ -133,12 +148,12 @@ async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str
         "max_tokens": 300    
     }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data['choices'][0]['message']['content']
-                return f"<i>Ошибка ИИ: {resp.status}</i>"
+        session = await get_http_session()
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data['choices'][0]['message']['content']
+            return f"<i>Ошибка ИИ: {resp.status}</i>"
     except Exception as e:
         logging.error(f"Groq Error: {e}")
         return "<i>Ошибка соединения с ИИ.</i>"
@@ -791,6 +806,9 @@ def get_chapters_menu(lang: str, chapters: list, page: int = 0):
     if page < total_pages - 1: nav_buttons.append(types.InlineKeyboardButton(text="След. ▶️", callback_data=f"page_manga_{lang}_{page+1}"))
     if nav_buttons: builder.row(*nav_buttons)
 
+    # Кнопка перехода на страницу
+    builder.row(types.InlineKeyboardButton(text="🔢 На страницу", callback_data=f"jump_manga_{lang}"))
+
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="read_langs"))
     return builder.as_markup()
 
@@ -808,6 +826,9 @@ def get_ranobe_chapters_menu(lang: str, chapters: list, page: int = 0):
     if page > 0: nav_buttons.append(types.InlineKeyboardButton(text="◀️ Пред.", callback_data=f"page_ranobe_{lang}_{page-1}"))
     if page < total_pages - 1: nav_buttons.append(types.InlineKeyboardButton(text="След. ▶️", callback_data=f"page_ranobe_{lang}_{page+1}"))
     if nav_buttons: builder.row(*nav_buttons)
+
+    # Кнопка перехода на страницу
+    builder.row(types.InlineKeyboardButton(text="🔢 На страницу", callback_data=f"jump_ranobe_{lang}"))
 
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="read_ranobe_langs"))
     return builder.as_markup()
@@ -849,8 +870,19 @@ async def send_chapter(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     if await check_cd_and_warn(callback, "read", 5): return
 
-    _, lang, chapter_num = callback.data.split("_")
-    link = await get_chapter_link(lang, chapter_num)
+    data = callback.data.split("_")
+    is_ranobe = "ranobe" in data
+    
+    if is_ranobe:
+        # read_ranobe_lang_num
+        lang = data[2]
+        chapter_num = data[3]
+        link = await get_ranobe_chapter_link(lang, chapter_num)
+    else:
+        # read_lang_num
+        lang = data[1]
+        chapter_num = data[2]
+        link = await get_chapter_link(lang, chapter_num)
 
     if link:
         await callback.message.delete() 
@@ -867,18 +899,111 @@ async def send_chapter(callback: types.CallbackQuery):
         builder = InlineKeyboardBuilder()
         builder.button(text=f"🔗 Читать главу {chapter_num}", url=link)
         builder.button(text="📚 К главам", callback_data=f"readlang_{lang}")
+        
+        admins = await get_admins()
+        if user_id in admins:
+             builder.button(text="🗑 Удалить главу", callback_data=f"admin_del_{'ranobe' if is_ranobe else 'manga'}_{lang}_{chapter_num}")
+
         await callback.message.answer("✅ Приятного чтения!", reply_markup=builder.adjust(1).as_markup())
     else:
         await callback.answer("Глава не найдена 😔", show_alert=True)
 
-import random
+# --- Обработчик удаления главы с карточки чтения ---
+@dp.callback_query(F.data.startswith("admin_del_manga_") | F.data.startswith("admin_del_ranobe_"))
+async def process_admin_del_chapter_item(callback: types.CallbackQuery):
+    admins = await get_admins()
+    if callback.from_user.id not in admins:
+         return await callback.answer("❌ У вас нет прав!", show_alert=True)
 
-async def send_user_art_item(chat_id: int, index: int, message_to_edit: types.Message = None):
+    data = callback.data.split("_")
+    is_ranobe = data[2] == "ranobe"
+    lang = data[3]
+    chapter_num = data[4]
+
+    async with aiosqlite.connect('manga.db') as db:
+         if is_ranobe:
+              cursor = await db.execute('DELETE FROM ranobe_urls WHERE chapter_number = ? AND lang = ?', (chapter_num, lang))
+         else:
+              cursor = await db.execute('DELETE FROM chapters_urls WHERE chapter_number = ? AND lang = ?', (chapter_num, lang))
+         await db.commit()
+         deleted = cursor.rowcount > 0
+
+    if deleted:
+         await callback.answer("✅ Глава успешно удалена!", show_alert=True)
+         await callback.message.delete()
+    else:
+         await callback.answer("❌ Ошибка удаления или глава не найдена.", show_alert=True)
+
+# --- Обработчики перехода по страницам Глав ---
+@dp.callback_query(F.data.startswith("jump_manga_"))
+async def trigger_manga_jump(callback: types.CallbackQuery, state: FSMContext):
+    lang = callback.data.split("_")[2]
+    await state.set_state(ChapterJump.waiting_for_manga_page)
+    await state.update_data(lang=lang)
+    await callback.message.answer("🔢 <b>Введите номер страницы</b> (например, 2):", parse_mode="HTML")
+    await callback.answer()
+
+@dp.message(ChapterJump.waiting_for_manga_page, F.text.isdigit())
+async def handle_manga_jump(message: types.Message, state: FSMContext):
+    page = int(message.text) - 1
+    data = await state.get_data()
+    lang = data.get("lang")
+    await state.clear()
+    
+    chapters = await get_chapters(lang)
+    total_pages = math.ceil(len(chapters) / ITEMS_PER_PAGE)
+    if page < 0 or page >= total_pages:
+        return await message.answer(f"❌ Неверный номер страницы! Доступно от 1 до {total_pages}.")
+
+    await message.answer(f"Перехожу на страницу {page + 1}...")
+    await message.answer(f"📚 Доступные главы:", reply_markup=get_chapters_menu(lang, chapters, page=page))
+
+@dp.callback_query(F.data.startswith("jump_ranobe_"))
+async def trigger_ranobe_jump(callback: types.CallbackQuery, state: FSMContext):
+    lang = callback.data.split("_")[2]
+    await state.set_state(ChapterJump.waiting_for_ranobe_page)
+    await state.update_data(lang=lang)
+    await callback.message.answer("🔢 <b>Введите номер страницы ранобэ</b> (например, 2):", parse_mode="HTML")
+    await callback.answer()
+
+@dp.message(ChapterJump.waiting_for_ranobe_page, F.text.isdigit())
+async def handle_ranobe_jump(message: types.Message, state: FSMContext):
+    page = int(message.text) - 1
+    data = await state.get_data()
+    lang = data.get("lang")
+    await state.clear()
+    
+    chapters = await get_ranobe_chapters(lang)
+    total_pages = math.ceil(len(chapters) / ITEMS_PER_PAGE)
+    if page < 0 or page >= total_pages:
+        return await message.answer(f"❌ Неверный номер страницы! Доступно от 1 до {total_pages}.")
+
+    await message.answer(f"Перехожу на страницу {page + 1}...")
+    await message.answer(f"📚 Доступные главы (Ранобэ):", reply_markup=get_ranobe_chapters_menu(lang, chapters, page=page))
+
+# --- Обработчик удаления арта для обывателя (Админская кнопка в User View) ---
+@dp.callback_query(F.data.startswith("user_art_delete:"))
+async def process_user_art_delete(callback: types.CallbackQuery):
+    admins = await get_admins()
+    if callback.from_user.id not in admins:
+         return await callback.answer("❌ У вас нет прав!", show_alert=True)
+
+    data = callback.data.split(":")
+    art_id = int(data[1])
+    index = int(data[2])
+
+    if await delete_art_by_id(art_id):
+         await callback.answer("✅ Арт успешно удален.")
+         await send_user_art_item(callback.message.chat.id, index, user_id=callback.from_user.id, message_to_edit=callback.message)
+    else:
+         await callback.answer("❌ Ошибка при удалении арта.", show_alert=True)
+
+async def send_user_art_item(chat_id: int, index: int, user_id: int, message_to_edit: types.Message = None):
     arts = await get_all_arts()
     if not arts:
         if message_to_edit:
             try: await message_to_edit.delete() 
-            except: pass
+            except Exception: pass
         await bot.send_message(chat_id, "Галерея пуста 😔", reply_markup=get_back_button())
         return
 
@@ -897,10 +1022,15 @@ async def send_user_art_item(chat_id: int, index: int, message_to_edit: types.Me
         types.InlineKeyboardButton(text="🎲 Случайный арт", callback_data="user_art_random"),
         types.InlineKeyboardButton(text="🔢 Номер арта", callback_data="user_art_input")
     )
+    
+    admins = await get_admins()
+    if user_id in admins:
+         builder.row(types.InlineKeyboardButton(text="🗑 Удалить арт", callback_data=f"user_art_delete:{art_id}:{index}"))
+
     builder.row(types.InlineKeyboardButton(text="📱 Режим сетки (9 шт)", callback_data="user_art_grid:0"))
     builder.row(types.InlineKeyboardButton(text="⬅️ В меню", callback_data="main_menu"))
 
-    caption = f"🎨 <b>Арт из галереи</b>\n<i>({index + 1} из {len(arts)})</i>"
+    caption = f"🎨 <b>Арт №{index + 1}</b> (всего {len(arts)})"
 
     if message_to_edit:
         try:
@@ -911,7 +1041,7 @@ async def send_user_art_item(chat_id: int, index: int, message_to_edit: types.Me
         except Exception:
             await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
             try: await message_to_edit.delete() 
-            except: pass
+            except Exception: pass
     else:
         await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -919,12 +1049,12 @@ async def send_user_art_item(chat_id: int, index: int, message_to_edit: types.Me
 async def view_arts(callback: types.CallbackQuery):
     if await check_cd_and_warn(callback, "arts", 5): return
     await callback.message.delete()
-    await send_user_art_item(callback.message.chat.id, 0)
+    await send_user_art_item(callback.message.chat.id, 0, user_id=callback.from_user.id)
 
 @dp.callback_query(F.data.startswith("user_art_view:"))
 async def process_user_art_view(callback: types.CallbackQuery):
     index = int(callback.data.split(":")[1])
-    await send_user_art_item(callback.message.chat.id, index, message_to_edit=callback.message)
+    await send_user_art_item(callback.message.chat.id, index, user_id=callback.from_user.id, message_to_edit=callback.message)
     await callback.answer()
 
 @dp.callback_query(F.data == "user_art_random")
@@ -933,7 +1063,7 @@ async def process_user_art_random(callback: types.CallbackQuery):
     if not arts:
         return await callback.answer("Галерея пуста 😔", show_alert=True)
     index = random.randint(0, len(arts) - 1)
-    await send_user_art_item(callback.message.chat.id, index, message_to_edit=callback.message)
+    await send_user_art_item(callback.message.chat.id, index, user_id=callback.from_user.id, message_to_edit=callback.message)
     await callback.answer("🎲 Случайный арт!")
 
 @dp.callback_query(F.data == "user_art_input")
@@ -951,7 +1081,7 @@ async def handle_art_number_input(message: types.Message, state: FSMContext):
     num = int(message.text)
     arts = await get_all_arts()
     if 1 <= num <= len(arts):
-        await send_user_art_item(message.chat.id, num - 1)
+        await send_user_art_item(message.chat.id, num - 1, user_id=message.from_user.id)
     else:
         await message.answer(f"❌ Неверный номер! Введите число от 1 до {len(arts)}.")
 
@@ -1224,7 +1354,7 @@ async def process_admin_art_grid(callback: types.CallbackQuery, state: FSMContex
         await asyncio.sleep(120)
         for mid in ids:
             try: await bot.delete_message(chat_id, mid)
-            except: pass
+            except Exception: pass
 
     asyncio.create_task(auto_cleanup(callback.message.chat.id, photo_ids + [control_msg.message_id]))
 
@@ -1267,7 +1397,7 @@ async def cmd_toggle_ai(message: types.Message):
         try:
             member = await bot.get_chat_member(message.chat.id, message.from_user.id)
             is_group_admin = member.status in ["creator", "administrator"]
-        except:
+        except Exception:
             pass
             
     if not is_bot_admin and not is_group_admin:
@@ -1563,15 +1693,16 @@ class StatsMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, types.Message) and event.from_user:
             user_id = event.from_user.id
-            is_sticker = 1 if getattr(event, 'sticker', None) else 0
-            
-            async with aiosqlite.connect('manga.db') as db:
-                await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
-                if is_sticker:
-                    await db.execute('UPDATE users_stats SET stickers_count = stickers_count + 1 WHERE user_id = ?', (user_id,))
-                elif getattr(event, 'text', None) or getattr(event, 'caption', None):
-                    await db.execute('UPDATE users_stats SET messages_count = messages_count + 1 WHERE user_id = ?', (user_id,))
-                await db.commit()
+            try:
+                async with aiosqlite.connect('manga.db') as db:
+                    await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
+                    if getattr(event, 'sticker', None):
+                        await db.execute('UPDATE users_stats SET stickers_count = stickers_count + 1 WHERE user_id = ?', (user_id,))
+                    elif getattr(event, 'text', None) or getattr(event, 'caption', None):
+                        await db.execute('UPDATE users_stats SET messages_count = messages_count + 1 WHERE user_id = ?', (user_id,))
+                    await db.commit()
+            except Exception as e:
+                logging.error(f"StatsMiddleware error: {e}")
                 
         return await handler(event, data)
 
@@ -1597,7 +1728,13 @@ async def main():
     
     logging.info("Бот запущен. База данных готова.")
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        # Корректно закрываем aiohttp-сессию при остановке
+        global _http_session
+        if _http_session and not _http_session.closed:
+            await _http_session.close()
 
 if __name__ == "__main__":
     try: asyncio.run(main())

@@ -31,13 +31,17 @@ RP_ACTIONS = {
     "пять": ("pats", "✋", "дал(а) пять"),
     "улыбнуться": ("hugs", "😊", "мило улыбнулся(ась)"),
     "станцевать": ("hugs", "💃", "станцевал(а) с"),
-    # Новые 18+ (NSFW)
+    # Новые 18+ (NSFW) - ТОЛЬКО ДЛЯ АДМИНОВ
     "трахаться": ("kisses", "🔞", "жестко трахнул(а)"),
+    "трахнуть": ("kisses", "🔞", "трахнул(а)"),
     "секс": ("kisses", "🔞", "занялся(ась) сексом с"),
     "минет": ("kisses", "🔞", "сделал(а) минет"),
     "отсосать": ("kisses", "🔞", "отсосал(а) у"),
+    "сосать": ("kisses", "🔞", "отсосал(а) у"),
     "спать вместе": ("hugs", "🛌", "лёг(ла) спать вместе с")
 }
+
+RP_18PLUS = ["трахаться", "трахнуть", "секс", "минет", "отсосать", "сосать", "спать вместе"]
 
 # Эндпоинты nekos.best для аниме-гифок
 NEKOS_ENDPOINTS = {
@@ -73,15 +77,18 @@ PURR_ENDPOINTS = {
 }
 
 async def get_rp_gif(action: str) -> str | None:
+    # Переиспользуем глобальную сессию из bot.py
+    from bot import get_http_session
+    session = await get_http_session()
+    
     # 1. Сначала проверяем PurrBot (для 18+ и сна)
     if action in PURR_ENDPOINTS:
         endpoint = PURR_ENDPOINTS[action]
         url = f"https://api.purrbot.site/v2/img/{endpoint}/gif"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                    data = await resp.json()
-                    return data.get("link")
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+                data = await resp.json()
+                return data.get("link")
         except Exception:
             pass
 
@@ -89,10 +96,9 @@ async def get_rp_gif(action: str) -> str | None:
     endpoint = NEKOS_ENDPOINTS.get(action)
     if not endpoint: return None
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://nekos.best/api/v2/{endpoint}", timeout=aiohttp.ClientTimeout(total=5)) as resp:
-                data = await resp.json()
-                return data["results"][0]["url"]
+        async with session.get(f"https://nekos.best/api/v2/{endpoint}", timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            data = await resp.json()
+            return data["results"][0]["url"]
     except Exception:
         return None
 
@@ -100,8 +106,6 @@ async def get_rp_gif(action: str) -> str | None:
 keys_sorted = sorted(RP_ACTIONS.keys(), key=len, reverse=True)
 REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(keys_sorted) + r')')
 
-# Временно дублируем функцию COOLDOWN из `bot.py` для корректной работы здесь (или выносим в отдельный `utils.py`)
-# Для простоты, перенесем её сюда:
 from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply
 
 @rp_router.message(F.text & F.text.regexp(REGEX_RP))
@@ -113,6 +117,12 @@ async def rp_commands(message: types.Message):
     if not match: return
     action_key = match.group(1).lower()
             
+    # Проверка на 18+ ограничение (Только для админов)
+    if action_key in RP_18PLUS:
+        admins = await get_admins()
+        if message.from_user.id not in admins:
+            return await temp_reply(message, "🔞 18+ действия доступны только администраторам бота!", delay=5)
+
     user1, user2 = message.from_user, message.reply_to_message.from_user
     if user1.id == user2.id: return await temp_reply(message, "Ты не можешь применить это на себе!")
     if user2.is_bot: return await temp_reply(message, "Боты ничего не почувствуют 🤖")
