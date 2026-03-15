@@ -404,13 +404,67 @@ def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
 @dp.message(Command("start", ignore_mention=True), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
-        parse_mode="HTML",
-        reply_markup=REPLY_KB
-    )
     is_group = message.chat.type in ["group", "supergroup"]
-    await message.answer("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
+    
+    # Обработка deep link (из группы → ЛС)
+    args = message.text.split(maxsplit=1)
+    deep_link = args[1] if len(args) > 1 else None
+    
+    if not is_group:
+        await message.answer(
+            "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
+            parse_mode="HTML",
+            reply_markup=REPLY_KB
+        )
+    
+    if deep_link == "arts":
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
+        builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
+        builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+        return await message.answer("🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup())
+    elif deep_link == "ai":
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
+        builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
+        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
+        builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+        return await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
+    elif deep_link == "project":
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="📅 График выхода", callback_data="schedule"))
+        builder.row(types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime"))
+        builder.row(types.InlineKeyboardButton(text="📜 Полезные команды", callback_data="show_help"))
+        link = await get_commands_link()
+        if link:
+            builder.row(types.InlineKeyboardButton(text="🔗 Все команды (Telegraph)", url=link))
+        builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
+        builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+        return await message.answer("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
+    
+    # Обычный /start (без deep link)
+    if is_group:
+        await message.answer(
+            "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
+            parse_mode="HTML",
+            reply_markup=get_main_menu(is_group=True)
+        )
+    else:
+        await message.answer("Главное меню:", reply_markup=get_main_menu())
+
+async def _redirect_to_dm(message: types.Message, section: str, label: str):
+    """В группе отправляет кнопку-ссылку на ЛС бота."""
+    me = await bot.get_me()
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text=f"➡️ {label} (в ЛС)", url=f"https://t.me/{me.username}?start={section}"))
+    msg = await message.answer(
+        f"<i>Перейдите в ЛС бота для этого раздела:</i>",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+    await delete_after(msg, 8)
+    try: await message.delete()
+    except Exception: pass
 
 # --- Обработчики reply-кнопок ---
 @dp.message(F.text == "📖 Читать", StateFilter("*"))
@@ -425,6 +479,8 @@ async def handle_reply_read(message: types.Message, state: FSMContext):
 @dp.message(F.text == "🎨 Арты", StateFilter("*"))
 async def handle_reply_arts(message: types.Message, state: FSMContext):
     await state.clear()
+    if message.chat.type in ["group", "supergroup"]:
+        return await _redirect_to_dm(message, "arts", "Арты")
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
     builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
@@ -434,18 +490,20 @@ async def handle_reply_arts(message: types.Message, state: FSMContext):
 @dp.message(F.text == "🤖 ИИ чаты", StateFilter("*"))
 async def handle_reply_ai(message: types.Message, state: FSMContext):
     await state.clear()
-    is_group = message.chat.type in ["group", "supergroup"]
+    if message.chat.type in ["group", "supergroup"]:
+        return await _redirect_to_dm(message, "ai", "ИИ чаты")
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    if not is_group:
-        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
+    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=WEBAPP_URL)))
     builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
     await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.message(F.text == "ℹ️ Проект", StateFilter("*"))
 async def handle_reply_project(message: types.Message, state: FSMContext):
     await state.clear()
+    if message.chat.type in ["group", "supergroup"]:
+        return await _redirect_to_dm(message, "project", "Проект")
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📅 График выхода", callback_data="schedule"))
     builder.row(types.InlineKeyboardButton(text="📺 Аниме vs Манга", callback_data="vs_anime"))
@@ -1012,17 +1070,8 @@ async def send_chapter(callback: types.CallbackQuery):
         link = await get_chapter_link(lang, chapter_num)
 
     if link:
-        await callback.message.delete() 
-        status_msg = await callback.message.answer(f"⏳ Загружаю информацию о главе {chapter_num}...")
+        await callback.message.delete()
         
-        # Soft cooldown for AI recap to prevent UI blocking
-        if not await is_on_cooldown(user_id, "ai_recap", 20):
-            sys_prompt = "Ты фанат манги Roshidere. Коротко (2-3 предложения) опиши сюжет в районе этой главы."
-            recap = await ask_groq(f"Напомни сюжет без спойлеров к главе {chapter_num}", sys_prompt)
-            await status_msg.edit_text(f"✨ <b>Рекап сюжета:</b>\n<i>{recap}</i>", parse_mode="HTML")
-        else:
-            await status_msg.edit_text(f"⏳ <b>Глава найдена!</b>\n<i>(Рекап временно недоступен, Алиса отдыхает).</i>", parse_mode="HTML")
-            
         builder = InlineKeyboardBuilder()
         builder.button(text=f"🔗 Читать главу {chapter_num}", url=link)
         builder.button(text="📚 К главам", callback_data=f"readlang_{lang}")
