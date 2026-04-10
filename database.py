@@ -11,6 +11,7 @@ async def init_db():
         await db.execute('CREATE TABLE IF NOT EXISTS chapters_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))')
         await db.execute('CREATE TABLE IF NOT EXISTS ranobe_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))')
         await db.execute('CREATE TABLE IF NOT EXISTS akashic_ranobe (volume INTEGER, chapter TEXT, url TEXT, PRIMARY KEY (volume, chapter))')
+        await db.execute('CREATE TABLE IF NOT EXISTS british_ranobe (volume INTEGER, chapter TEXT, url TEXT, PRIMARY KEY (volume, chapter))')
         await db.execute('CREATE TABLE IF NOT EXISTS arts (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id TEXT)')
         await db.execute('CREATE TABLE IF NOT EXISTS suggested_arts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, file_id TEXT)')
         await db.execute('CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)')
@@ -214,5 +215,30 @@ async def get_akashic_chapters(volume: int):
 async def get_akashic_chapter_link(volume: int, chapter: str):
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT url FROM akashic_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+async def get_british_volumes():
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows] if rows else []
+
+async def get_british_chapters(volume: int):
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT chapter FROM british_ranobe WHERE volume = ?', (volume,)) as cursor:
+            rows = await cursor.fetchall()
+            
+            def parse_chapter(chap_str):
+                import re
+                match = re.search(r'\d+', chap_str)
+                return float(match.group()) if match else float('inf')
+                
+            chapters = [row[0] for row in rows]
+            return sorted(chapters, key=parse_chapter) if chapters else []
+
+async def get_british_chapter_link(volume: int, chapter: str):
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT url FROM british_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter)) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None

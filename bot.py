@@ -17,6 +17,7 @@ from typing import Union
 
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command, StateFilter
+from aiogram.filters.callback_data import CallbackData
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -34,7 +35,8 @@ from database import (
     get_alya_mode, toggle_alya_mode, get_all_arts, delete_art_by_id,
     get_commands_link, set_commands_link, delete_commands_link,
     add_to_blacklist, remove_from_blacklist, is_blacklisted, get_blacklist,
-    get_akashic_volumes, get_akashic_chapters, get_akashic_chapter_link
+    get_akashic_volumes, get_akashic_chapters, get_akashic_chapter_link,
+    get_british_volumes, get_british_chapters, get_british_chapter_link
 )
 
 COOLDOWN_TIME = 30 
@@ -134,6 +136,20 @@ class AkashicDelete(StatesGroup):
     waiting_for_chapter = State()
 
 class AkashicCallback(CallbackData, prefix="akashic"):
+    action: str
+    volume: int = 0
+    chapter: str = ""
+
+class BritishUpload(StatesGroup):
+    waiting_for_volume = State()
+    waiting_for_chapter = State()
+    waiting_for_link = State()
+
+class BritishDelete(StatesGroup):
+    waiting_for_volume = State()
+    waiting_for_chapter = State()
+
+class BritishCallback(CallbackData, prefix="british"):
     action: str
     volume: int = 0
     chapter: str = ""
@@ -652,6 +668,7 @@ def get_ranobe_langs_menu(prefix="ranobelang"):
         
     if prefix == "readranobelang":
         builder.row(types.InlineKeyboardButton(text="📖 Хроники Акаши", callback_data="akashic_vols"))
+        builder.row(types.InlineKeyboardButton(text="👸 Британская красавица", callback_data="british_vols"))
         builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="section_read"))
     elif prefix == "adminranobe":
         builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
@@ -1013,12 +1030,7 @@ async def cmd_roulette(message: types.Message):
 # ==============================================================================
 # БЛОК 9: ЧТЕНИЕ МАНГИ И ГАЛЕРЕЯ АРТОВ
 # ==============================================================================
-def get_langs_menu(prefix: str):
-    builder = InlineKeyboardBuilder()
-    for code, name in LANGUAGES.items(): builder.button(text=name, callback_data=f"{prefix}_{code}")
-    builder.adjust(1)
-    if prefix.startswith("read"): builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
-    return builder.as_markup()
+
 
 def get_chapters_menu(lang: str, chapters: list, page: int = 0):
     builder = InlineKeyboardBuilder()
@@ -1214,6 +1226,63 @@ async def process_admin_del_akashic_item(callback: types.CallbackQuery):
     volume, chapter = int(data[3]), data[4]
     async with aiosqlite.connect('manga.db') as db:
          cursor = await db.execute('DELETE FROM akashic_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter))
+         await db.commit()
+         deleted = cursor.rowcount > 0
+    if deleted:
+         await callback.answer("✅ Глава успешно удалена!", show_alert=True)
+         await callback.message.delete()
+    else:
+         await callback.answer("❌ Ошибка удаления.", show_alert=True)
+
+# --- БРИТАНСКАЯ КРАСАВИЦА (READ) ---
+@dp.callback_query(F.data == "british_vols")
+@dp.callback_query(BritishCallback.filter(F.action == "vols"))
+async def british_show_volumes(callback: types.CallbackQuery):
+    volumes = await get_british_volumes()
+    builder = InlineKeyboardBuilder()
+    if not volumes:
+        return await callback.answer("Тома пока не добавлены 😔", show_alert=True)
+    for vol in volumes:
+        builder.button(text=f"Том {vol}", callback_data=BritishCallback(action="chaps", volume=vol).pack())
+    builder.adjust(2)
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="read_ranobe_langs"))
+    await callback.message.edit_text("👸 <b>Британская красавица</b>\nВыберите том:", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@dp.callback_query(BritishCallback.filter(F.action == "chaps"))
+async def british_show_chapters(callback: types.CallbackQuery, callback_data: BritishCallback):
+    chapters = await get_british_chapters(callback_data.volume)
+    builder = InlineKeyboardBuilder()
+    for chap in chapters:
+        builder.button(text=f"Глава {chap}", callback_data=BritishCallback(action="read", volume=callback_data.volume, chapter=chap).pack())
+    builder.adjust(3)
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад к томам", callback_data=BritishCallback(action="vols").pack()))
+    await callback.message.edit_text(f"👸 <b>Британская красавица</b> — Том {callback_data.volume}\nВыберите главу:", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@dp.callback_query(BritishCallback.filter(F.action == "read"))
+async def british_read_chapter(callback: types.CallbackQuery, callback_data: BritishCallback):
+    url = await get_british_chapter_link(callback_data.volume, callback_data.chapter)
+    if url:
+        builder = InlineKeyboardBuilder()
+        builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
+        builder.button(text="📚 К главам", callback_data=BritishCallback(action="chaps", volume=callback_data.volume).pack())
+        
+        admins = await get_admins()
+        if callback.from_user.id in admins:
+            builder.button(text="🗑 Удалить главу", callback_data=f"admin_del_british_{callback_data.volume}_{callback_data.chapter}")
+
+        await callback.message.answer(f"✅ <b>Британская красавица</b> — Том {callback_data.volume}, Глава {callback_data.chapter}\nПриятного чтения!", reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
+    else:
+        await callback.answer("Глава не найдена 😔", show_alert=True)
+
+@dp.callback_query(F.data.startswith("admin_del_british_"))
+async def process_admin_del_british_item(callback: types.CallbackQuery):
+    admins = await get_admins()
+    if callback.from_user.id not in admins:
+         return await callback.answer("❌ У вас нет прав!", show_alert=True)
+    data = callback.data.split("_")
+    volume, chapter = int(data[3]), data[4]
+    async with aiosqlite.connect('manga.db') as db:
+         cursor = await db.execute('DELETE FROM british_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter))
          await db.commit()
          deleted = cursor.rowcount > 0
     if deleted:
@@ -1536,6 +1605,7 @@ async def cmd_admin(message: types.Message):
         "/add_chapter | /delete_chapter - Главы манги\n"
         "/add_ranobe | /delete_ranobe - Главы ранобэ\n"
         "/add_akashic | /delete_akashic - Хроники Акаши\n"
+        "/add_british | /delete_british - Британская красавица\n"
         "/add_art | /arts_list | /delete_art - Арты\n"
         "/add_admin | /delete_admin - Админы\n"
         "/blacklist_ai | /unblacklist_ai - ЧС для ИИ\n"
@@ -2017,6 +2087,69 @@ async def admin_process_del_akashic_chapter(message: types.Message, state: FSMCo
     vol, chap = data['volume'], message.text.strip()
     async with aiosqlite.connect('manga.db') as db:
         cursor = await db.execute('DELETE FROM akashic_ranobe WHERE volume = ? AND chapter = ?', (vol, chap))
+        if cursor.rowcount > 0:
+            await message.answer(f"✅ Глава {chap} (Том {vol}) успешно удалена из базы!")
+        else:
+            await message.answer(f"❌ Глава {chap} (Том {vol}) не найдена!")
+        await db.commit()
+    await state.clear()
+
+# --- ДОБАВЛЕНА ФУНКЦИЯ ДОБАВЛЕНИЯ/УДАЛЕНИЯ БРИТАНСКОЙ КРАСАВИЦЫ ---
+@dp.message(Command("add_british"))
+async def cmd_add_british(message: types.Message, state: FSMContext):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    await state.set_state(BritishUpload.waiting_for_volume)
+    await message.answer("👸 <b>Добавление Британской красавицы</b>\nВведите номер тома (число):", parse_mode="HTML")
+
+@dp.message(BritishUpload.waiting_for_volume, F.text.isdigit())
+async def admin_process_british_volume(message: types.Message, state: FSMContext):
+    await state.update_data(volume=int(message.text))
+    await state.set_state(BritishUpload.waiting_for_chapter)
+    await message.answer("Введите номер главы:")
+
+@dp.message(BritishUpload.waiting_for_chapter)
+async def admin_process_british_chapter(message: types.Message, state: FSMContext):
+    await state.update_data(chapter_number=message.text.strip())
+    await state.set_state(BritishUpload.waiting_for_link)
+    await message.answer("🔗 Отправьте ссылку на главу:")
+
+@dp.message(BritishUpload.waiting_for_link, F.text)
+async def admin_process_british_link(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    vol, chap, link = data['volume'], data['chapter_number'], message.text.strip()
+    
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('INSERT OR REPLACE INTO british_ranobe (volume, chapter, url) VALUES (?, ?, ?)', (vol, chap, link))
+        await db.commit()
+    
+    await message.answer(f"✅ Глава {chap} для Тома {vol} добавлена!\n🔗 Ссылка: {link}")
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Да, разослать", callback_data="notify_yes")
+    builder.button(text="Нет", callback_data="notify_no")
+    await state.set_state(NotifyUsers.waiting_for_decision)
+    await state.update_data(notify_text=f"👸 <b>Вышла новая глава Британской красавицы!</b>\nТом {vol}, Глава {chap}\n🔗 {link}")
+    await message.answer("Отправить уведомление всем пользователям?", reply_markup=builder.as_markup())
+
+@dp.message(Command("delete_british"))
+async def cmd_delete_british(message: types.Message, state: FSMContext):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    await state.set_state(BritishDelete.waiting_for_volume)
+    await message.answer("🗑 <b>Удаление Британской красавицы</b>\nВведите номер тома (число):", parse_mode="HTML")
+
+@dp.message(BritishDelete.waiting_for_volume, F.text.isdigit())
+async def admin_process_del_british_volume(message: types.Message, state: FSMContext):
+    await state.update_data(volume=int(message.text))
+    await state.set_state(BritishDelete.waiting_for_chapter)
+    await message.answer("Введите номер/название главы для удаления:")
+
+@dp.message(BritishDelete.waiting_for_chapter)
+async def admin_process_del_british_chapter(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    vol, chap = data['volume'], message.text.strip()
+    async with aiosqlite.connect('manga.db') as db:
+        cursor = await db.execute('DELETE FROM british_ranobe WHERE volume = ? AND chapter = ?', (vol, chap))
         if cursor.rowcount > 0:
             await message.answer(f"✅ Глава {chap} (Том {vol}) успешно удалена из базы!")
         else:
