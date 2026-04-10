@@ -134,11 +134,12 @@ async function sendMessage() {
     } catch (error) {
         console.error("Chat Error:", error);
         setTyping(false);
-        addMessage("Прости, я немного задумалась и не расслышала... Повторишь?", false);
+        addMessage(`Случилась ошибка: ${error.message}. Попробуй еще раз!`, false);
         messageHistory.pop(); // Удаляем последнее сообщение юзера, так как оно не дошло
     } finally {
         sendBtn.disabled = false;
         userInput.focus();
+        console.log("Chat ready for next message.");
     }
 }
 
