@@ -168,12 +168,16 @@
             padding: 14px 18px;
             border: 1px solid rgba(0,0,0,0.05);
             border-radius: 24px;
-            background-color: rgba(255,255,255,0.9);
-            color: var(--text-color);
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #222222);
             font-size: 15px;
             outline: none;
             transition: all 0.3s ease;
             box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
+        }
+
+        input[type="text"]::placeholder {
+            color: var(--tg-theme-hint-color, #999999);
         }
 
         input[type="text"]:focus {
@@ -266,7 +270,7 @@
 <body>
 
     <div class="header">
-        <img src="https://i.pinimg.com/736x/8b/44/1a/8b441a7da931f825d1979ad2a4d9ab96.jpg" alt="Alya" class="avatar">
+        <img src="https://i.imgur.com/rObL4tT.jpeg" alt="Alya" class="avatar">
         <div class="header-info">
             <h1>Аля</h1>
             <p>Бот • онлайн</p>
@@ -300,6 +304,6 @@
         </button>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
 </body>
 </html>

@@ -65,8 +65,9 @@ function setTyping(isTyping) {
 const urlParams = new URLSearchParams(window.location.search);
 const apiKeyFromUrl = urlParams.get('api_key');
 
-// Очищаем URL от API ключа для безопасности (чтобы не светить при демонстрации экрана)
+// Очищаем URL от API ключа для безопасности и сохраняем его
 if (apiKeyFromUrl) {
+    localStorage.setItem("alya_groq_key", apiKeyFromUrl);
     window.history.replaceState({}, document.title, window.location.pathname);
 }
 
