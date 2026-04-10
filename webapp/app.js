@@ -44,7 +44,7 @@ function addMessage(text, isUser = false) {
     formattedText = formattedText.replace(/\n/g, "<br>");
     msgDiv.innerHTML = formattedText;
 
-    // Вставляем сообщение перед индикатором печатания (если он есть)
+    // Вставляем сообщение ПЕРЕД индикатором печатания, чтобы он всегда был внизу
     chat.insertBefore(msgDiv, typingIndicator);
     scrollToBottom();
 }
@@ -53,11 +53,21 @@ function addMessage(text, isUser = false) {
 function setTyping(isTyping) {
     if (isTyping) {
         typingIndicator.classList.remove('hidden');
-        chat.appendChild(typingIndicator); // Перемещаем в конец
+        // Принудительно перемещаем в самый низ при активации
+        chat.appendChild(typingIndicator);
     } else {
         typingIndicator.classList.add('hidden');
     }
     scrollToBottom();
+}
+
+// Получаем API ключ из URL параметров
+const urlParams = new URLSearchParams(window.location.search);
+const apiKeyFromUrl = urlParams.get('api_key');
+
+// Очищаем URL от API ключа для безопасности (чтобы не светить при демонстрации экрана)
+if (apiKeyFromUrl) {
+    window.history.replaceState({}, document.title, window.location.pathname);
 }
 
 // Функция общения с API
@@ -72,26 +82,23 @@ async function sendMessage() {
     // Отображаем сообщение юзера
     addMessage(text, true);
     messageHistory.push({ role: "user", content: text });
+    
+    // Добавляем тактильный отклик Telegram
+    if (tg.HapticFeedback) {
+        tg.HapticFeedback.impactOccurred('light');
+    }
 
     setTyping(true);
 
     try {
-        // Вызов Groq API. В целях безопасности ключ не хранится в коде на GitHub.
-        // Запросим его у пользователя (один раз) и сохраним в локальное хранилище браузера TG.
-        let API_KEY = localStorage.getItem("alya_groq_key");
+        // Ключ берется либо из URL (новый способ), либо из localStorage (старый способ)
+        const API_KEY = apiKeyFromUrl || localStorage.getItem("alya_groq_key");
         
-        if (!API_KEY || API_KEY === "null") {
-            API_KEY = prompt("Для работы ИИ введите ваш GROQ API KEY (из файла codes.env):");
-            if (API_KEY) {
-                localStorage.setItem("alya_groq_key", API_KEY);
-            } else {
-                setTimeout(() => {
-                    setTyping(false);
-                    addMessage("⚠️ Ошибка: API ключ не предоставлен. Перезапустите приложение, чтобы ввести ключ.");
-                    sendBtn.disabled = false;
-                }, 1000);
-                return;
-            }
+        if (!API_KEY) {
+            setTyping(false);
+            addMessage("⚠️ Ошибка: API ключ не найден. Пожалуйста, перезапустите бота или введите ключ через настройки.");
+            sendBtn.disabled = false;
+            return;
         }
 
         const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -101,7 +108,7 @@ async function sendMessage() {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                model: "llama-3.3-70b-versatile", // Или gemma2-9b-it
+                model: "llama-3.3-70b-versatile",
                 messages: messageHistory,
                 max_tokens: 300,
                 temperature: 0.7
@@ -126,7 +133,7 @@ async function sendMessage() {
     } catch (error) {
         console.error("Chat Error:", error);
         setTyping(false);
-        addMessage("Прости, я немного задумалась и не расслышала... Повторишь?");
+        addMessage("Прости, я немного задумалась и не расслышала... Повторишь?", false);
         messageHistory.pop(); // Удаляем последнее сообщение юзера, так как оно не дошло
     } finally {
         sendBtn.disabled = false;
@@ -138,23 +145,25 @@ async function sendMessage() {
 sendBtn.addEventListener('click', sendMessage);
 
 userInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !sendBtn.disabled) {
         sendMessage();
     }
 });
 
 clearBtn.addEventListener('click', () => {
     if (confirm("Хочешь забыть этот диалог и начать заново?")) {
+        // Тактильный отклик
+        if (tg.HapticFeedback) {
+            tg.HapticFeedback.notificationOccurred('success');
+        }
+
         messageHistory = [{ role: "system", content: SYSTEM_PROMPT }];
-
-        // Очищаем чат, оставляем только начальное сообщение
-        const chatMessages = chat.querySelectorAll('.message');
-        chatMessages.forEach((msg, index) => {
-            if (index !== 0) msg.remove();
-        });
-
-        // Скидываем Алю к исходникам
-        chat.innerHTML = '';
+        
+        // Очищаем чат, удаляя все сообщения, но сохраняя typingIndicator (если он там есть)
+        const messages = chat.querySelectorAll('.message');
+        messages.forEach(msg => msg.remove());
+        
+        // Добавляем приветственное сообщение
         addMessage("Привет! Я Аля. О чём хочешь поговорить? 😊", false);
     }
 });
