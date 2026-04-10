@@ -97,7 +97,8 @@ async function sendMessage() {
         
         if (!API_KEY) {
             setTyping(false);
-            addMessage("⚠️ Ошибка: API ключ не найден. Пожалуйста, перезапустите бота или введите ключ через настройки.");
+            const debugInfo = apiKeyFromUrl ? "URL(present)" : "URL(absent)";
+            addMessage(`⚠️ Ошибка: API ключ не найден (Debug: ${debugInfo}). Пожалуйста, перезапустите бота или убедитесь, что бот обновлен на сервере.`);
             sendBtn.disabled = false;
             return;
         }

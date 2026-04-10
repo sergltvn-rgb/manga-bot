@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta http-equiv="refresh" content="0; url=webapp/index.html">
     <title>Redirecting...</title>
+    <script>
+        // Берем текущие параметры (например, ?api_key=...)
+        const searchParams = window.location.search;
+        // Перенаправляем в папку webapp, сохраняя параметры
+        window.location.href = "webapp/index.html" + searchParams;
+    </script>
 </head>
 <body>
-    <p>If you are not redirected automatically, follow this <a href="webapp/index.html">link</a>.</p>
+    <p>Если перенаправление не произошло, перейдите по <a id="fallback" href="webapp/index.html">этой ссылке</a>.</p>
+    <script>
+        document.getElementById('fallback').href = "webapp/index.html" + window.location.search;
+    </script>
 </body>
 </html>
