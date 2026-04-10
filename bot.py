@@ -1925,16 +1925,16 @@ async def admin_process_chapter_number(message: types.Message, state: FSMContext
 async def admin_process_link(message: types.Message, state: FSMContext):
     data = await state.get_data()
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('INSERT OR REPLACE INTO chapters_urls (chapter_number, lang, url) VALUES (?, ?, ?)', (data['chapter_number'], data['lang'], message.text.strip()))
+        await db.execute('INSERT OR REPLACE INTO chapters_urls (chapter_number, lang, url) VALUES (?, ?, ?)', (data['chapter_number'], data['lang'], message.html_text.strip()))
         await db.commit()
     
-    await message.answer(f"✅ Глава манги {data['chapter_number']} добавлена!\n🔗 Ссылка: {message.text.strip()}")
+    await message.answer(f"✅ Глава манги {data['chapter_number']} добавлена!\n🔗 Ссылка: {message.html_text.strip()}")
     
     builder = InlineKeyboardBuilder()
     builder.button(text="Да, разослать", callback_data="notify_yes")
     builder.button(text="Нет", callback_data="notify_no")
     await state.set_state(NotifyUsers.waiting_for_decision)
-    await state.update_data(notify_text=f"📚 <b>Вышла новая глава манги:</b> {data['chapter_number']} ({LANGUAGES.get(data['lang'], data['lang'])})\n🔗 {message.text.strip()}")
+    await state.update_data(notify_text=f"📚 <b>Вышла новая глава манги:</b> {data['chapter_number']} ({LANGUAGES.get(data['lang'], data['lang'])})\n🔗 {message.html_text.strip()}")
     await message.answer("Отправить уведомление всем пользователям?", reply_markup=builder.as_markup())
 
 # --- РАНОБЭ ДОБАВЛЕНИЕ ---
@@ -1961,16 +1961,16 @@ async def admin_process_ranobe_chapter_number(message: types.Message, state: FSM
 async def admin_process_ranobe_link(message: types.Message, state: FSMContext):
     data = await state.get_data()
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('INSERT OR REPLACE INTO ranobe_urls (chapter_number, lang, url) VALUES (?, ?, ?)', (data['chapter_number'], data['lang'], message.text.strip()))
+        await db.execute('INSERT OR REPLACE INTO ranobe_urls (chapter_number, lang, url) VALUES (?, ?, ?)', (data['chapter_number'], data['lang'], message.html_text.strip()))
         await db.commit()
     
-    await message.answer(f"✅ Глава ранобэ {data['chapter_number']} добавлена!\n🔗 Ссылка: {message.text.strip()}")
+    await message.answer(f"✅ Глава ранобэ {data['chapter_number']} добавлена!\n🔗 Ссылка: {message.html_text.strip()}")
     
     builder = InlineKeyboardBuilder()
     builder.button(text="Да, разослать", callback_data="notify_yes")
     builder.button(text="Нет", callback_data="notify_no")
     await state.set_state(NotifyUsers.waiting_for_decision)
-    await state.update_data(notify_text=f"📚 <b>Вышла новая глава ранобэ:</b> {data['chapter_number']} ({RANOBE_LANGUAGES.get(data['lang'], data['lang'])})\n🔗 {message.text.strip()}")
+    await state.update_data(notify_text=f"📚 <b>Вышла новая глава ранобэ:</b> {data['chapter_number']} ({RANOBE_LANGUAGES.get(data['lang'], data['lang'])})\n🔗 {message.html_text.strip()}")
     await message.answer("Отправить уведомление всем пользователям?", reply_markup=builder.as_markup())
 
 # --- УВЕДОМЛЕНИЯ ---
@@ -2080,7 +2080,7 @@ async def admin_process_akashic_chapter(message: types.Message, state: FSMContex
 @dp.message(AkashicUpload.waiting_for_link, F.text)
 async def admin_process_akashic_link(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    vol, chap, link = data['volume'], data['chapter_number'], message.text.strip()
+    vol, chap, link = data['volume'], data['chapter_number'], message.html_text.strip()
     
     async with aiosqlite.connect('manga.db') as db:
         await db.execute('INSERT OR REPLACE INTO akashic_ranobe (volume, chapter, url) VALUES (?, ?, ?)', (vol, chap, link))
@@ -2143,7 +2143,7 @@ async def admin_process_british_chapter(message: types.Message, state: FSMContex
 @dp.message(BritishUpload.waiting_for_link, F.text)
 async def admin_process_british_link(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    vol, chap, link = data['volume'], data['chapter_number'], message.text.strip()
+    vol, chap, link = data['volume'], data['chapter_number'], message.html_text.strip()
     
     async with aiosqlite.connect('manga.db') as db:
         await db.execute('INSERT OR REPLACE INTO british_ranobe (volume, chapter, url) VALUES (?, ?, ?)', (vol, chap, link))
