@@ -1136,6 +1136,8 @@ async def send_chapter(callback: types.CallbackQuery):
         link = await get_chapter_link(lang, chapter_num)
 
     if link:
+        if not link.startswith(("http://", "https://", "tg://")):
+            link = "https://" + link
         await callback.message.delete()
         
         builder = InlineKeyboardBuilder()
@@ -1204,6 +1206,8 @@ async def akashic_show_chapters(callback: types.CallbackQuery, callback_data: Ak
 async def akashic_read_chapter(callback: types.CallbackQuery, callback_data: AkashicCallback):
     url = await get_akashic_chapter_link(callback_data.volume, callback_data.chapter)
     if url:
+        if not url.startswith(("http://", "https://", "tg://")):
+            url = "https://" + url
         builder = InlineKeyboardBuilder()
         builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
         builder.button(text="📚 К главам", callback_data=AkashicCallback(action="chaps", volume=callback_data.volume).pack())
@@ -1262,6 +1266,8 @@ async def british_show_chapters(callback: types.CallbackQuery, callback_data: Br
 async def british_read_chapter(callback: types.CallbackQuery, callback_data: BritishCallback):
     url = await get_british_chapter_link(callback_data.volume, callback_data.chapter)
     if url:
+        if not url.startswith(("http://", "https://", "tg://")):
+            url = "https://" + url
         builder = InlineKeyboardBuilder()
         builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
         builder.button(text="📚 К главам", callback_data=BritishCallback(action="chaps", volume=callback_data.volume).pack())
