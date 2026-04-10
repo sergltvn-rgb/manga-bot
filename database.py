@@ -10,6 +10,7 @@ async def init_db():
     async with aiosqlite.connect('manga.db') as db:
         await db.execute('CREATE TABLE IF NOT EXISTS chapters_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))')
         await db.execute('CREATE TABLE IF NOT EXISTS ranobe_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))')
+        await db.execute('CREATE TABLE IF NOT EXISTS akashic_ranobe (volume INTEGER, chapter TEXT, url TEXT, PRIMARY KEY (volume, chapter))')
         await db.execute('CREATE TABLE IF NOT EXISTS arts (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id TEXT)')
         await db.execute('CREATE TABLE IF NOT EXISTS suggested_arts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, file_id TEXT)')
         await db.execute('CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)')
@@ -192,3 +193,26 @@ async def get_user_marriage(chat_id: int, user_id: int):
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT user1_id, user1_name, user2_id, user2_name, date FROM marriages WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)', (chat_id, user_id, user_id)) as cursor:
             return await cursor.fetchone()
+
+async def get_akashic_volumes():
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+async def get_akashic_chapters(volume: int):
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT chapter FROM akashic_ranobe WHERE volume = ?', (volume,)) as cursor:
+            rows = await cursor.fetchall()
+            chapters = [row[0] for row in rows]
+            try:
+                # Пытаемся отсортировать как числа, чтобы 2 шло перед 10
+                return sorted(chapters, key=float)
+            except ValueError:
+                return sorted(chapters)
+
+async def get_akashic_chapter_link(volume: int, chapter: str):
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT url FROM akashic_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None

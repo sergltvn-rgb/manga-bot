@@ -33,7 +33,8 @@ from database import (
     get_all_users, get_admins, add_admin, remove_admin, is_ai_enabled, toggle_group_ai,
     get_alya_mode, toggle_alya_mode, get_all_arts, delete_art_by_id,
     get_commands_link, set_commands_link, delete_commands_link,
-    add_to_blacklist, remove_from_blacklist, is_blacklisted, get_blacklist
+    add_to_blacklist, remove_from_blacklist, is_blacklisted, get_blacklist,
+    get_akashic_volumes, get_akashic_chapters, get_akashic_chapter_link
 )
 
 COOLDOWN_TIME = 30 
@@ -122,6 +123,20 @@ class AIChat(StatesGroup):
 class ChapterJump(StatesGroup):
     waiting_for_manga_page = State()
     waiting_for_ranobe_page = State()
+
+class AkashicUpload(StatesGroup):
+    waiting_for_volume = State()
+    waiting_for_chapter = State()
+    waiting_for_link = State()
+
+class AkashicDelete(StatesGroup):
+    waiting_for_volume = State()
+    waiting_for_chapter = State()
+
+class AkashicCallback(CallbackData, prefix="akashic"):
+    action: str
+    volume: int = 0
+    chapter: str = ""
 
 
 # ==============================================================================
@@ -634,7 +649,14 @@ def get_ranobe_langs_menu(prefix="ranobelang"):
     builder = InlineKeyboardBuilder()
     for code, name in RANOBE_LANGUAGES.items():
         builder.row(types.InlineKeyboardButton(text=name, callback_data=f"{prefix}_{code}"))
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu" if prefix == "ranobelang" else "admin_menu"))
+        
+    if prefix == "readranobelang":
+        builder.row(types.InlineKeyboardButton(text="📖 Хроники Акаши", callback_data="akashic_vols"))
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="section_read"))
+    elif prefix == "adminranobe":
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
+    else:
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     return builder.as_markup()
 
 @dp.callback_query(F.data == "schedule")
@@ -1142,6 +1164,64 @@ async def process_admin_del_chapter_item(callback: types.CallbackQuery):
     else:
          await callback.answer("❌ Ошибка удаления или глава не найдена.", show_alert=True)
 
+# --- ХРОНИКИ АКАШИ (READ) ---
+@dp.callback_query(F.data == "akashic_vols")
+@dp.callback_query(AkashicCallback.filter(F.action == "vols"))
+async def akashic_show_volumes(callback: types.CallbackQuery):
+    volumes = await get_akashic_volumes()
+    builder = InlineKeyboardBuilder()
+    if not volumes:
+        return await callback.answer("Тома пока не добавлены 😔", show_alert=True)
+    for vol in volumes:
+        builder.button(text=f"Том {vol}", callback_data=AkashicCallback(action="chaps", volume=vol).pack())
+    builder.adjust(2)
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="read_ranobe_langs"))
+    await callback.message.edit_text("📖 <b>Хроники Акаши</b>\nВыберите том:", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@dp.callback_query(AkashicCallback.filter(F.action == "chaps"))
+async def akashic_show_chapters(callback: types.CallbackQuery, callback_data: AkashicCallback):
+    chapters = await get_akashic_chapters(callback_data.volume)
+    builder = InlineKeyboardBuilder()
+    for chap in chapters:
+        builder.button(text=f"Глава {chap}", callback_data=AkashicCallback(action="read", volume=callback_data.volume, chapter=chap).pack())
+    builder.adjust(3)
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад к томам", callback_data=AkashicCallback(action="vols").pack()))
+    await callback.message.edit_text(f"📖 <b>Хроники Акаши</b> — Том {callback_data.volume}\nВыберите главу:", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@dp.callback_query(AkashicCallback.filter(F.action == "read"))
+async def akashic_read_chapter(callback: types.CallbackQuery, callback_data: AkashicCallback):
+    url = await get_akashic_chapter_link(callback_data.volume, callback_data.chapter)
+    if url:
+        builder = InlineKeyboardBuilder()
+        builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
+        builder.button(text="📚 К главам", callback_data=AkashicCallback(action="chaps", volume=callback_data.volume).pack())
+        
+        admins = await get_admins()
+        if callback.from_user.id in admins:
+            builder.button(text="🗑 Удалить главу", callback_data=f"admin_del_akashic_{callback_data.volume}_{callback_data.chapter}")
+
+        await callback.message.delete()
+        await callback.message.answer(f"✅ <b>Хроники Акаши</b> — Том {callback_data.volume}, Глава {callback_data.chapter}\nПриятного чтения!", reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
+    else:
+        await callback.answer("Глава не найдена 😔", show_alert=True)
+
+@dp.callback_query(F.data.startswith("admin_del_akashic_"))
+async def process_admin_del_akashic_item(callback: types.CallbackQuery):
+    admins = await get_admins()
+    if callback.from_user.id not in admins:
+         return await callback.answer("❌ У вас нет прав!", show_alert=True)
+    data = callback.data.split("_")
+    volume, chapter = int(data[3]), data[4]
+    async with aiosqlite.connect('manga.db') as db:
+         cursor = await db.execute('DELETE FROM akashic_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter))
+         await db.commit()
+         deleted = cursor.rowcount > 0
+    if deleted:
+         await callback.answer("✅ Глава успешно удалена!", show_alert=True)
+         await callback.message.delete()
+    else:
+         await callback.answer("❌ Ошибка удаления.", show_alert=True)
+
 # --- Обработчики перехода по страницам Глав ---
 @dp.callback_query(F.data.startswith("jump_manga_"))
 async def trigger_manga_jump(callback: types.CallbackQuery, state: FSMContext):
@@ -1455,6 +1535,7 @@ async def cmd_admin(message: types.Message):
         "👑 <b>Админка</b>\n"
         "/add_chapter | /delete_chapter - Главы манги\n"
         "/add_ranobe | /delete_ranobe - Главы ранобэ\n"
+        "/add_akashic | /delete_akashic - Хроники Акаши\n"
         "/add_art | /arts_list | /delete_art - Арты\n"
         "/add_admin | /delete_admin - Админы\n"
         "/blacklist_ai | /unblacklist_ai - ЧС для ИИ\n"
@@ -1876,6 +1957,70 @@ async def admin_process_del_ranobe_chapter_number(message: types.Message, state:
             await message.answer(f"✅ Глава ранобэ {chapter_number} ({RANOBE_LANGUAGES.get(lang, lang)}) успешно удалена из базы!")
         else:
             await message.answer(f"❌ Глава ранобэ {chapter_number} ({RANOBE_LANGUAGES.get(lang, lang)}) не найдена!")
+        await db.commit()
+    await state.clear()
+# ----------------------------------------
+
+# --- ДОБАВЛЕНА ФУНКЦИЯ ДОБАВЛЕНИЯ/УДАЛЕНИЯ ХРОНИК АКАШИ ---
+@dp.message(Command("add_akashic"))
+async def cmd_add_akashic(message: types.Message, state: FSMContext):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    await state.set_state(AkashicUpload.waiting_for_volume)
+    await message.answer("📖 <b>Добавление Хроник Акаши</b>\nВведите номер тома (число):", parse_mode="HTML")
+
+@dp.message(AkashicUpload.waiting_for_volume, F.text.isdigit())
+async def admin_process_akashic_volume(message: types.Message, state: FSMContext):
+    await state.update_data(volume=int(message.text))
+    await state.set_state(AkashicUpload.waiting_for_chapter)
+    await message.answer("Введите номер главы:")
+
+@dp.message(AkashicUpload.waiting_for_chapter)
+async def admin_process_akashic_chapter(message: types.Message, state: FSMContext):
+    await state.update_data(chapter_number=message.text.strip())
+    await state.set_state(AkashicUpload.waiting_for_link)
+    await message.answer("🔗 Отправьте ссылку на главу:")
+
+@dp.message(AkashicUpload.waiting_for_link, F.text)
+async def admin_process_akashic_link(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    vol, chap, link = data['volume'], data['chapter_number'], message.text.strip()
+    
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('INSERT OR REPLACE INTO akashic_ranobe (volume, chapter, url) VALUES (?, ?, ?)', (vol, chap, link))
+        await db.commit()
+    
+    await message.answer(f"✅ Глава {chap} для Тома {vol} добавлена!\n🔗 Ссылка: {link}")
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Да, разослать", callback_data="notify_yes")
+    builder.button(text="Нет", callback_data="notify_no")
+    await state.set_state(NotifyUsers.waiting_for_decision)
+    await state.update_data(notify_text=f"📚 <b>Вышла новая глава Хроник Акаши!</b>\nТом {vol}, Глава {chap}\n🔗 {link}")
+    await message.answer("Отправить уведомление всем пользователям?", reply_markup=builder.as_markup())
+
+@dp.message(Command("delete_akashic"))
+async def cmd_delete_akashic(message: types.Message, state: FSMContext):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    await state.set_state(AkashicDelete.waiting_for_volume)
+    await message.answer("🗑 <b>Удаление Хроник Акаши</b>\nВведите номер тома (число):", parse_mode="HTML")
+
+@dp.message(AkashicDelete.waiting_for_volume, F.text.isdigit())
+async def admin_process_del_akashic_volume(message: types.Message, state: FSMContext):
+    await state.update_data(volume=int(message.text))
+    await state.set_state(AkashicDelete.waiting_for_chapter)
+    await message.answer("Введите номер/название главы для удаления:")
+
+@dp.message(AkashicDelete.waiting_for_chapter)
+async def admin_process_del_akashic_chapter(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    vol, chap = data['volume'], message.text.strip()
+    async with aiosqlite.connect('manga.db') as db:
+        cursor = await db.execute('DELETE FROM akashic_ranobe WHERE volume = ? AND chapter = ?', (vol, chap))
+        if cursor.rowcount > 0:
+            await message.answer(f"✅ Глава {chap} (Том {vol}) успешно удалена из базы!")
+        else:
+            await message.answer(f"❌ Глава {chap} (Том {vol}) не найдена!")
         await db.commit()
     await state.clear()
 # ----------------------------------------
