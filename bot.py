@@ -1136,19 +1136,25 @@ async def send_chapter(callback: types.CallbackQuery):
         link = await get_chapter_link(lang, chapter_num)
 
     if link:
-        if not link.startswith(("http://", "https://", "tg://")):
+        is_url = link.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
+        if is_url and not link.startswith(("http://", "https://", "tg://")):
             link = "https://" + link
         await callback.message.delete()
         
         builder = InlineKeyboardBuilder()
-        builder.button(text=f"🔗 Читать главу {chapter_num}", url=link)
+        if is_url:
+            builder.button(text=f"🔗 Читать главу {chapter_num}", url=link)
         builder.button(text="📚 К главам", callback_data=f"readlang_{lang}")
         
         admins = await get_admins()
         if user_id in admins:
              builder.button(text="🗑 Удалить главу", callback_data=f"admin_del_{'ranobe' if is_ranobe else 'manga'}_{lang}_{chapter_num}")
 
-        await callback.message.answer("✅ Приятного чтения!", reply_markup=builder.adjust(1).as_markup())
+        msg_text = "✅ Приятного чтения!"
+        if not is_url and link and link != "-" and link.lower() != "нет" and link.lower() != "none":
+            msg_text = f"✅ Глава {chapter_num}\n\n📝 <b>Текст:</b>\n{link}"
+
+        await callback.message.answer(msg_text, reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
     else:
         await callback.answer("Глава не найдена 😔", show_alert=True)
 
@@ -1206,10 +1212,12 @@ async def akashic_show_chapters(callback: types.CallbackQuery, callback_data: Ak
 async def akashic_read_chapter(callback: types.CallbackQuery, callback_data: AkashicCallback):
     url = await get_akashic_chapter_link(callback_data.volume, callback_data.chapter)
     if url:
-        if not url.startswith(("http://", "https://", "tg://")):
+        is_url = url.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
+        if is_url and not url.startswith(("http://", "https://", "tg://")):
             url = "https://" + url
         builder = InlineKeyboardBuilder()
-        builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
+        if is_url:
+            builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
         builder.button(text="📚 К главам", callback_data=AkashicCallback(action="chaps", volume=callback_data.volume).pack())
         
         admins = await get_admins()
@@ -1217,7 +1225,12 @@ async def akashic_read_chapter(callback: types.CallbackQuery, callback_data: Aka
             builder.button(text="🗑 Удалить главу", callback_data=f"admin_del_akashic_{callback_data.volume}_{callback_data.chapter}")
 
         await callback.message.delete()
-        await callback.message.answer(f"✅ <b>Хроники Акаши</b> — Том {callback_data.volume}, Глава {callback_data.chapter}\nПриятного чтения!", reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
+        msg_text = f"✅ <b>Хроники Акаши</b> — Том {callback_data.volume}, Глава {callback_data.chapter}"
+        if not is_url and url and url != "-" and url.lower() != "нет" and url.lower() != "none":
+            msg_text += f"\n\n📝 <b>Текст:</b>\n{url}"
+        else:
+            msg_text += "\nПриятного чтения!"
+        await callback.message.answer(msg_text, reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
     else:
         await callback.answer("Глава не найдена 😔", show_alert=True)
 
@@ -1266,17 +1279,24 @@ async def british_show_chapters(callback: types.CallbackQuery, callback_data: Br
 async def british_read_chapter(callback: types.CallbackQuery, callback_data: BritishCallback):
     url = await get_british_chapter_link(callback_data.volume, callback_data.chapter)
     if url:
-        if not url.startswith(("http://", "https://", "tg://")):
+        is_url = url.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
+        if is_url and not url.startswith(("http://", "https://", "tg://")):
             url = "https://" + url
         builder = InlineKeyboardBuilder()
-        builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
+        if is_url:
+            builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
         builder.button(text="📚 К главам", callback_data=BritishCallback(action="chaps", volume=callback_data.volume).pack())
         
         admins = await get_admins()
         if callback.from_user.id in admins:
             builder.button(text="🗑 Удалить главу", callback_data=f"admin_del_british_{callback_data.volume}_{callback_data.chapter}")
 
-        await callback.message.answer(f"✅ <b>Британская красавица</b> — Том {callback_data.volume}, Глава {callback_data.chapter}\nПриятного чтения!", reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
+        msg_text = f"✅ <b>Британская красавица</b> — Том {callback_data.volume}, Глава {callback_data.chapter}"
+        if not is_url and url and url != "-" and url.lower() != "нет" and url.lower() != "none":
+            msg_text += f"\n\n📝 <b>Текст:</b>\n{url}"
+        else:
+            msg_text += "\nПриятного чтения!"
+        await callback.message.answer(msg_text, reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
     else:
         await callback.answer("Глава не найдена 😔", show_alert=True)
 
