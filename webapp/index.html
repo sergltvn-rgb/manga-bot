@@ -4,306 +4,54 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Чат с Алей</title>
-    <!-- Подключение Telegram Web App SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         :root {
-            /* Basic Theme Variables */
             --bg-color: var(--tg-theme-bg-color, #ffffff);
             --text-color: var(--tg-theme-text-color, #222222);
             --hint-color: var(--tg-theme-hint-color, #999999);
             --button-color: var(--tg-theme-button-color, #ff6b81);
             --button-text-color: var(--tg-theme-button-text-color, #ffffff);
-            --secondary-bg-color: rgba(255, 255, 255, 0.85); /* Glass effect */
-            
+            --secondary-bg-color: rgba(255, 255, 255, 0.85);
             --alya-msg-bg: #f9ecee;
             --alya-msg-text: #333333;
             --user-msg-bg: linear-gradient(135deg, #ff7e5f, #feb47b);
             --user-msg-text: #ffffff;
-            
-            /* Custom WebApp styling */
             --app-bg: url('https://i.pinimg.com/736x/8b/44/1a/8b441a7da931f825d1979ad2a4d9ab96.jpg') center/cover no-repeat;
         }
-
-        body {
-            font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            overflow: hidden;
-            background: var(--app-bg);
-            color: var(--text-color);
-        }
-        
-        /* Backdrop blur overlay */
-        .app-overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(255, 255, 255, 0.75);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            z-index: 0;
-        }
-
-        .header, .chat-container, .input-area {
-            position: relative;
-            z-index: 1;
-        }
-
-        .header {
-            display: flex;
-            align-items: center;
-            padding: 12px 16px;
-            background-color: var(--secondary-bg-color);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.5);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        }
-
-        .avatar {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            margin-right: 12px;
-            object-fit: cover;
-            border: 2px solid #ff6b81;
-            box-shadow: 0 2px 10px rgba(255, 107, 129, 0.3);
-        }
-
-        .header-info h1 {
-            margin: 0;
-            font-size: 17px;
-            font-weight: 700;
-            color: #2c3e50;
-        }
-
-        .header-info p {
-            margin: 2px 0 0 0;
-            font-size: 13px;
-            color: #7f8c8d;
-            font-weight: 500;
-        }
-        
-        .header-info p::before {
-            content: '';
-            display: inline-block;
-            width: 8px;
-            height: 8px;
-            background-color: #2ecc71;
-            border-radius: 50%;
-            margin-right: 5px;
-            box-shadow: 0 0 5px #2ecc71;
-        }
-
-        .chat-container {
-            flex-grow: 1;
-            padding: 16px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            scroll-behavior: smooth;
-        }
-
-        .chat-container::-webkit-scrollbar {
-            width: 6px;
-        }
-        .chat-container::-webkit-scrollbar-thumb {
-            background-color: rgba(0,0,0,0.1);
-            border-radius: 10px;
-        }
-
-        .message {
-            max-width: 75%;
-            padding: 12px 16px;
-            border-radius: 20px;
-            font-size: 15px;
-            line-height: 1.5;
-            word-wrap: break-word;
-            position: relative;
-            animation: fadeIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(15px) scale(0.95); }
-            to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-
-        .message.bot {
-            align-self: flex-start;
-            background-color: var(--alya-msg-bg);
-            color: var(--alya-msg-text);
-            border-bottom-left-radius: 4px;
-        }
-        
-        .message.bot i {
-            color: #e84393;
-            font-style: italic;
-        }
-
-        .message.user {
-            align-self: flex-end;
-            background-image: var(--user-msg-bg);
-            color: var(--user-msg-text);
-            border-bottom-right-radius: 4px;
-        }
-
-        .input-area {
-            display: flex;
-            padding: 12px 16px;
-            background-color: var(--secondary-bg-color);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-top: 1px solid rgba(255, 255, 255, 0.5);
-            gap: 12px;
-            padding-bottom: max(12px, env(safe-area-inset-bottom));
-        }
-
-        input[type="text"] {
-            flex-grow: 1;
-            padding: 14px 18px;
-            border: 1px solid rgba(0,0,0,0.05);
-            border-radius: 24px;
-            background-color: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #222222);
-            font-size: 15px;
-            outline: none;
-            transition: all 0.3s ease;
-            box-shadow: inset 0 2px 4px rgba(0,0,0,0.02);
-        }
-
-        input[type="text"]::placeholder {
-            color: var(--tg-theme-hint-color, #999999);
-        }
-
-        input[type="text"]:focus {
-            border-color: #ff6b81;
-            box-shadow: 0 0 0 3px rgba(255, 107, 129, 0.2), inset 0 2px 4px rgba(0,0,0,0.02);
-        }
-
-        button.send-btn {
-            background-image: linear-gradient(135deg, #ff7e5f, #feb47b);
-            color: #ffffff;
-            border: none;
-            border-radius: 50%;
-            width: 48px;
-            height: 48px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s;
-            box-shadow: 0 4px 15px rgba(255, 126, 95, 0.4);
-            flex-shrink: 0;
-        }
-
-        button.send-btn:active {
-            transform: scale(0.9);
-            box-shadow: 0 2px 8px rgba(255, 126, 95, 0.4);
-        }
-
-        button.send-btn:disabled {
-            background-image: linear-gradient(135deg, #ccc, #ddd);
-            box-shadow: none;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        button.send-btn svg {
-            width: 20px;
-            height: 20px;
-            fill: currentColor;
-            margin-left: 2px;
-        }
-
-        .typing-indicator {
-            display: flex;
-            gap: 4px;
-            padding: 14px 18px;
-            background-color: var(--alya-msg-bg);
-            border-radius: 20px;
-            border-bottom-left-radius: 4px;
-            align-self: flex-start;
-            width: fit-content;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
-        }
-
-        .typing-dot {
-            width: 7px;
-            height: 7px;
-            background-color: #ff6b81;
-            border-radius: 50%;
-            animation: typing 1.4s infinite ease-in-out both;
-        }
-
-        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
-        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
-
-        @keyframes typing {
-            0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
-            40% { transform: scale(1); opacity: 1; }
-        }
-
-        .settings-btn {
-            margin-left: auto;
-            background: none;
-            border: none;
-            color: #7f8c8d;
-            cursor: pointer;
-            padding: 8px;
-            transition: color 0.2s;
-        }
-        
-        .settings-btn:hover {
-            color: #ff6b81;
-        }
-
-        .hidden {
-            display: none !important;
-        }
+        body { font-family: -apple-system, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--app-bg); }
+        .header { display: flex; align-items: center; padding: 12px; background: var(--secondary-bg-color); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(0,0,0,0.05); }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 12px; border: 2px solid #ff6b81; }
+        .header-info h1 { margin: 0; font-size: 16px; }
+        .header-info p { margin: 0; font-size: 12px; color: #2ecc71; }
+        .chat-container { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        .message { max-width: 80%; padding: 10px 14px; border-radius: 18px; font-size: 15px; }
+        .message.bot { align-self: flex-start; background: var(--alya-msg-bg); color: var(--alya-msg-text); }
+        .message.user { align-self: flex-end; background: var(--user-msg-bg); color: var(--user-msg-text); }
+        .input-area { display: flex; padding: 10px; background: var(--secondary-bg-color); gap: 10px; }
+        input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ddd; outline: none; }
+        button { background: #ff6b81; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; }
+        .typing-indicator { font-size: 12px; color: #999; padding: 5px 15px; }
+        .hidden { display: none; }
     </style>
 </head>
 <body>
-
     <div class="header">
-        <img src="https://s4.anilist.co/file/anilistcdn/character/large/b139745-f0v8bWvOqgY0.png" alt="Alya" class="avatar">
+        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAADtElEQVR4nO2Yv2sjQRTHP7uX9EgVvS6InX+A/4MguZ0H6XIn90pByO08V6SInX8guZ0H6XInVxByO88V6SOn90pByJWvCH7rYWF3Z76S7GZf8YFlmX1v3779vHnzZp6SST/u6fnT+3ADfof+O3D+pP7A7AduB9pHzp8X+z2zP8Xzt70fnva0XefHbu+T97uXOnSdD7vdxW7f7f9X98H90P2pX5v9P92HvW/f77f97/A+fO77/069D5//69f/R/ff7vfu/637v/2/v/7+1D8/z93fTq8X/8+6/7vfu/+37v/2//76+1P//Dx3fz69Xvw/6/7vfu/+37v/2//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//P9z8O3/uN+37r/u//79/v9/9P98fP75f8f3x/v++v+r36/9f+/9O9H/F/vP+fH3//f79X/f7o/D/P/79D/mO77j/f/v3Tf0v7j59f/pL9P2n/8vPT/97v90v8vXe9X/D/jP3P/OD+eP78/vP+/v/78+p8f5+7v6X8Af9e6/7vfu/+37v/2//t///f7vfr/D/vP+fX9f/n/f78/vP+/v/78+p8f5+7v6X8Af9G6/7vfu/+37v/2/f3/tf/9/v9///f//v8D/t///f7///L9v/79/v///f/C/uP/7/f8f//v8P7///9/9///90f6fX/vX79v/7/9P8L74/l/3Px0/v7/9P//T+C99v0f/v8P7f8v3b///9D9fPv+H/N/P9H9+e6H+p8fj98/3Px/9f7t//H9v/z/P0f+f//P/3e7/7L///r///f7X7///z+P9/v6v9///P8D+4/9x///f/v/mP+f//9///f7X7///z+P9/v6v9///P8D+4/9x///f/v/mP+f///f/////8=" alt="Alya" class="avatar">
         <div class="header-info">
             <h1>Аля</h1>
-            <p>Бот • онлайн</p>
+            <p>в сети</p>
         </div>
-        <button class="settings-btn" id="clearBtn">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="3 6 5 6 21 6"></polyline>
-                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-        </button>
+        <button id="clearBtn" style="background:none; margin-left:auto; color:#999;">🗑️</button>
     </div>
-
     <div class="chat-container" id="chat">
-        <div class="message bot">
-            Привет! Я Аля. О чём хочешь поговорить? 😊
-        </div>
-        
-        <div class="typing-indicator hidden" id="typing">
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-            <div class="typing-dot"></div>
-        </div>
+        <div class="message bot">Привет! Я Аля. О чём хочешь поговорить? 😊</div>
+        <div class="typing-indicator hidden" id="typing">Аля печатает...</div>
     </div>
-
     <div class="input-area">
-        <input type="text" id="userInput" placeholder="Написать сообщение..." autocomplete="off">
-        <button class="send-btn" id="sendBtn">
-            <svg viewBox="0 0 24 24">
-                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
-            </svg>
-        </button>
+        <input type="text" id="userInput" placeholder="Сообщение...">
+        <button id="sendBtn">➤</button>
     </div>
-
-    <script src="app.js?v=4"></script>
+    <script src="alya_chat.js?v=5"></script>
 </body>
 </html>
