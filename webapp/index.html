@@ -12,7 +12,7 @@
             --hint-color: var(--tg-theme-hint-color, #999999);
             --button-color: var(--tg-theme-button-color, #ff6b81);
             --button-text-color: var(--tg-theme-button-text-color, #ffffff);
-            --secondary-bg-color: rgba(255, 255, 255, 0.85);
+            --secondary-bg-color: rgba(255, 255, 255, 0.9);
             --alya-msg-bg: #f9ecee;
             --alya-msg-text: #333333;
             --user-msg-bg: linear-gradient(135deg, #ff7e5f, #feb47b);
@@ -20,38 +20,71 @@
             --app-bg: url('https://i.pinimg.com/736x/8b/44/1a/8b441a7da931f825d1979ad2a4d9ab96.jpg') center/cover no-repeat;
         }
         body { font-family: -apple-system, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--app-bg); }
-        .header { display: flex; align-items: center; padding: 12px; background: var(--secondary-bg-color); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(0,0,0,0.05); }
+        .header { display: flex; align-items: center; padding: 12px; background: var(--secondary-bg-color); backdrop-filter: blur(10px); border-bottom: 1px solid rgba(0,0,0,0.05); z-index: 10; }
         .avatar { width: 40px; height: 40px; border-radius: 50%; margin-right: 12px; border: 2px solid #ff6b81; }
         .header-info h1 { margin: 0; font-size: 16px; }
         .header-info p { margin: 0; font-size: 12px; color: #2ecc71; }
-        .chat-container { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-        .message { max-width: 80%; padding: 10px 14px; border-radius: 18px; font-size: 15px; }
-        .message.bot { align-self: flex-start; background: var(--alya-msg-bg); color: var(--alya-msg-text); }
-        .message.user { align-self: flex-end; background: var(--user-msg-bg); color: var(--user-msg-text); }
-        .input-area { display: flex; padding: 10px; background: var(--secondary-bg-color); gap: 10px; }
-        input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ddd; outline: none; }
-        button { background: #ff6b81; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; }
-        .typing-indicator { font-size: 12px; color: #999; padding: 5px 15px; }
-        .hidden { display: none; }
+        .chat-container { flex: 1; padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; z-index: 1; }
+        .message { max-width: 80%; padding: 10px 14px; border-radius: 18px; font-size: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .message.bot { align-self: flex-start; background: var(--alya-msg-bg); color: var(--alya-msg-text); border-bottom-left-radius: 4px; }
+        .message.user { align-self: flex-end; background: var(--user-msg-bg); color: var(--user-msg-text); border-bottom-right-radius: 4px; }
+        .input-area { display: flex; padding: 10px; background: var(--secondary-bg-color); gap: 10px; z-index: 10; padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+        input { flex: 1; padding: 10px 15px; border-radius: 20px; border: 1px solid #ddd; outline: none; font-size: 16px; }
+        button { background: #ff6b81; color: white; border: none; border-radius: 20px; padding: 0 15px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .typing-indicator { font-size: 12px; color: #e84393; padding: 5px 15px; font-style: italic; }
+        .hidden { display: none !important; }
+        
+        /* Modal for settings */
+        #settingsModal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100;
+        }
+        .modal-content {
+            background: white; padding: 20px; border-radius: 20px; width: 85%; max-width: 400px;
+            display: flex; flex-direction: column; gap: 15px;
+        }
+        .modal-content h2 { margin: 0; font-size: 18px; text-align: center; }
+        .modal-content input { width: 100%; box-sizing: border-box; }
+        .modal-buttons { display: flex; gap: 10px; }
+        .modal-buttons button { flex: 1; border-radius: 10px; }
     </style>
 </head>
 <body>
     <div class="header">
-        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAADtElEQVR4nO2Yv2sjQRTHP7uX9EgVvS6InX+A/4MguZ0H6XIn90pByO08V6SInX8guZ0H6XInVxByO88V6SOn90pByJWvCH7rYWF3Z76S7GZf8YFlmX1v3779vHnzZp6SST/u6fnT+3ADfof+O3D+pP7A7AduB9pHzp8X+z2zP8Xzt70fnva0XefHbu+T97uXOnSdD7vdxW7f7f9X98H90P2pX5v9P92HvW/f77f97/A+fO77/069D5//69f/R/ff7vfu/637v/2/v/7+1D8/z93fTq8X/8+6/7vfu/+37v/2//76+1P//Dx3fz69Xvw/6/7vfu/+37v/2//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//P9z8O3/uN+37r/u//79/v9/9P98fP75f8f3x/v++v+r36/9f+/9O9H/F/vP+fH3//f79X/f7o/D/P/79D/mO77j/f/v3Tf0v7j59f/pL9P2n/8vPT/97v90v8vXe9X/D/jP3P/OD+eP78/vP+/v/78+p8f5+7v6X8Af9e6/7vfu/+37v/2//t///f7vfr/D/vP+fX9f/n/f78/vP+/v/78+p8f5+7v6X8Af9G6/7vfu/+37v/2/f3/tf/9/v9///f//v8D/t///f7///L9v/79/v///f/C/uP/7/f8f//v8P7///9/9///90f6fX/vX79v/7/9P8L74/l/3Px0/v7/9P//T+C99v0f/v8P7f8v3b///9D9fPv+H/N/P9H9+e6H+p8fj98/3Px/9f7t//H9v/z/P0f+f//P/3e7/7L///r///f7X7///z+P9/v6v9///P8D+4/9x///f/v/mP+f//9///f7X7///z+P9/v6v9///P8D+4/9x///f/v/mP+f///f/////8=" alt="Alya" class="avatar">
-        <div class="header-info">
-            <h1>Аля</h1>
-            <p>в сети</p>
+        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAADtElEQVR4nO2Yv2sjQRTHP7uX9EgVvS6InX+A/4MguZ0H6XIn90pByO08V6SInX8guZ0H6XInVxByO88V6SOn90pByJWvCH7rYWF3Z76S7GZf8YFlmX1v3779vHnzZp6SST/u6fnT+3ADfof+O3D+pP7A7AduB9pHzp8X+z2zP8Xzt70fnva0XefHbu+T97uXOnSdD7vdxW7f7f9X98H90P2pX5v9P92HvW/f77f97/A+fO77/069D5//69f/R/ff7vfu/637v/2/v/7+1D8/z93fTq8X/8+6/7vfu/+37v/2//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//Pz3P359Hrx/6z7v/u9+3/r/m//76+1P//P9z8O3/uN+37r/u//79/v9/9P98fP75f8f3x/v++v+r36/9f+/9O9H/F/vP+fH3//f79X/f7o/D/P/79D/mO77j/f/v3Tf0v7j59f/pL9P2n/8vPT/97v90v8vXe9X/D/jP3P/OD+eP78/vP+/v/78+p8f5+7v6X8Af9e6/7vfu/+37v/2//t///f7vfr/D/vP+fX9f/n/f78/vP+/v/78+p8f5+7v6X8Af9G6/7vfu/+37v/2/f3/tf/9/v9///f//v8D/t///f7///L9v/79/v///f/C/uP/7/f8f//v8P7///9/9///90f6fX/vX79v/7/9P8L74/l/3Px0/v7/9P//T+C99v0f/v8P7f8v3b///9D9fPv+H/N/P9H9+e6H+p8fj98/3Px/9f7t//H9v/z/P0f+f//P/3e7/7L///r///f7X7///z+P9/v6v9///P8D+4/9x///f/v/mP+f//9///f7X7///z+P9/v6v9///P8D+4/9x///f/v/mP+f///f/////8=" alt="Alya" class="avatar">
+    <div class="header-info">
+        <h1>Аля</h1>
+        <p>в сети</p>
+    </div>
+    <button id="openSettings" style="background:none; margin-left:auto; font-size:24px;">⚙️</button>
+</div>
+
+<div class="chat-container" id="chat">
+    <div class="message bot">Привет! Я Аля. О чём хочешь поговорить? 😊</div>
+    <div class="typing-indicator hidden" id="typing">Аля печатает...</div>
+</div>
+
+<div class="input-area">
+    <input type="text" id="userInput" placeholder="Сообщение...">
+    <button id="sendBtn" style="border-radius:50%; width:40px; padding:0;">➤</button>
+</div>
+
+<div id="settingsModal" class="hidden">
+    <div class="modal-content">
+        <h2>Настройки API</h2>
+        <label>API Токен (Groq или Local):</label>
+        <input type="text" id="tokenInput" placeholder="gsk_... или sk-lm-...">
+        <label>Базовый URL (для LM Studio):</label>
+        <input type="text" id="urlInput" placeholder="http://127.0.0.1:1234/v1">
+        <label>Модель:</label>
+        <input type="text" id="modelInput" placeholder="llama-3.3-70b-versatile">
+        <div class="modal-buttons">
+            <button id="saveSettings" style="background:#2ecc71;">Сохранить</button>
+            <button id="closeSettings" style="background:#e74c3c;">Закрыть</button>
         </div>
-        <button id="clearBtn" style="background:none; margin-left:auto; color:#999;">🗑️</button>
     </div>
-    <div class="chat-container" id="chat">
-        <div class="message bot">Привет! Я Аля. О чём хочешь поговорить? 😊</div>
-        <div class="typing-indicator hidden" id="typing">Аля печатает...</div>
-    </div>
-    <div class="input-area">
-        <input type="text" id="userInput" placeholder="Сообщение...">
-        <button id="sendBtn">➤</button>
-    </div>
-    <script src="alya_chat.js?v=5"></script>
+</div>
+
+<script src="alya_chat.js?v=6"></script>
 </body>
 </html>
