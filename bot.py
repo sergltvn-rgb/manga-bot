@@ -175,7 +175,7 @@ AI_PROVIDERS = {
     },
     "gemma": {
         "name": "🖥 Gemma 4 (Локально)",
-        "model": "google/gemma-4-e4b:2",
+        "model": "google/gemma-4-e4b",
     },
 }
 
@@ -187,45 +187,77 @@ async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider
         if not GEMMA_API_KEY:
             return "<i>❌ Ошибка: Нет ключа Gemma (LM Studio).</i>"
         
-        api_url = f"{LOCAL_API_URL}/chat"
+        # Попробуем v1 API, а потом OpenAI-совместимый как fallback
+        api_url_v1 = f"{LOCAL_API_URL}/chat"
+        api_url_openai = f"{LOCAL_API_URL.replace('/api/v1', '')}/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {GEMMA_API_KEY}",
             "Content-Type": "application/json",
         }
         
-        # LM Studio v1 API использует поле "input" и "system_prompt"
-        # Собираем контекст из истории, если есть
+        # Собираем контекст из истории
         full_prompt = prompt
         if history:
             context_lines = []
-            for msg in history[-10:]:  # Берем последние 10 сообщений
+            for msg in history[-10:]:
                 role = "Пользователь" if msg["role"] == "user" else "Аля"
                 context_lines.append(f"{role}: {msg['content']}")
             context_lines.append(f"Пользователь: {prompt}")
             full_prompt = "\n".join(context_lines)
         
-        payload = {
+        # Payload для LM Studio v1 API
+        payload_v1 = {
             "model": AI_PROVIDERS["gemma"]["model"],
             "system_prompt": system_prompt,
             "input": full_prompt,
             "temperature": 0.65,
         }
         
+        # Payload для OpenAI-совместимого API (fallback)
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            messages.extend(history[-10:])
+        messages.append({"role": "user", "content": prompt})
+        payload_openai = {
+            "model": AI_PROVIDERS["gemma"]["model"],
+            "messages": messages,
+            "temperature": 0.65,
+            "max_tokens": 500,
+        }
+        
         try:
             session = await get_http_session()
-            async with session.post(api_url, headers=headers, json=payload) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    # LM Studio v1 API возвращает поле "message"
-                    if "message" in data:
-                        return data["message"]
-                    # Fallback: если формат OpenAI-совместимый
-                    if "choices" in data:
+            
+            # Попытка 1: LM Studio v1 API (/api/v1/chat)
+            try:
+                async with session.post(api_url_v1, headers=headers, json=payload_v1, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # v1 API: ответ в output[].content
+                        if "output" in data and isinstance(data["output"], list):
+                            for item in data["output"]:
+                                if item.get("type") == "message" and "content" in item:
+                                    return item["content"]
+                        # Fallback: может вернуть в другом формате
+                        if "choices" in data:
+                            return data["choices"][0]["message"]["content"]
+                        logging.warning(f"Gemma v1 unknown format: {str(data)[:200]}")
+                    else:
+                        error_text = await resp.text()
+                        logging.warning(f"Gemma v1 API {resp.status}: {error_text[:200]}, trying OpenAI compat...")
+                        raise Exception(f"v1 failed: {resp.status}")
+            except Exception as e1:
+                logging.info(f"v1 API failed ({e1}), trying OpenAI-compatible endpoint...")
+                
+                # Попытка 2: OpenAI-совместимый API (/v1/chat/completions)
+                async with session.post(api_url_openai, headers=headers, json=payload_openai, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
                         return data["choices"][0]["message"]["content"]
-                    return "<i>Ответ получен, но в неизвестном формате.</i>"
-                error_text = await resp.text()
-                logging.error(f"Gemma Error {resp.status}: {error_text[:200]}")
-                return f"<i>Ошибка Gemma: {resp.status}</i>"
+                    error_text = await resp.text()
+                    logging.error(f"Gemma OpenAI compat Error {resp.status}: {error_text[:200]}")
+                    return f"<i>Ошибка Gemma: {resp.status}</i>"
+                        
         except Exception as e:
             logging.error(f"Gemma Connection Error: {e}")
             return "<i>Ошибка: Не удалось подключиться к LM Studio. Убедись, что сервер запущен.</i>"
