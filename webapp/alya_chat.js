@@ -23,10 +23,10 @@ const keyFromUrl = urlParams.get('key');
 
 if (keyFromUrl) {
     localStorage.setItem("alya_groq_key", keyFromUrl);
-    // Чистим URL чтобы ключ не торчал
     window.history.replaceState({}, document.title, window.location.pathname);
 }
 
+// Fallback: ключ сохраняется в localStorage при первом получении через URL
 const GROQ_KEY = localStorage.getItem("alya_groq_key") || "";
 
 // === Утилиты ===

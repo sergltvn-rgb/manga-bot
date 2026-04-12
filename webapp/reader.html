@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>📖 Читалка — Аля</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="reader.css?v=1">
+</head>
+<body>
+    <!-- === ЭКРАН 1: Выбор серии === -->
+    <div id="screen-series" class="screen active">
+        <div class="reader-header">
+            <div class="header-title">
+                <span class="header-icon">📖</span>
+                <h1>Библиотека</h1>
+            </div>
+            <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+        </div>
+        <div id="series-list" class="content-area">
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <p>Загрузка библиотеки...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- === ЭКРАН 2: Выбор главы === -->
+    <div id="screen-chapters" class="screen">
+        <div class="reader-header">
+            <button class="back-btn" onclick="showScreen('series')">←</button>
+            <div class="header-title">
+                <h1 id="chapters-title">Том 1</h1>
+            </div>
+            <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+        </div>
+        <div class="volume-tabs" id="volume-tabs"></div>
+        <div id="chapters-list" class="content-area"></div>
+    </div>
+
+    <!-- === ЭКРАН 3: Чтение === -->
+    <div id="screen-reader" class="screen">
+        <div class="reader-header reader-top-bar" id="reader-top-bar">
+            <button class="back-btn" onclick="showScreen('chapters')">←</button>
+            <div class="header-title">
+                <h1 id="reader-title">Глава 1</h1>
+            </div>
+            <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+        </div>
+        <div class="reader-content" id="reader-content">
+            <div class="reader-text" id="reader-text">
+                <div class="loading-spinner">
+                    <div class="spinner"></div>
+                    <p>Загрузка главы...</p>
+                </div>
+            </div>
+        </div>
+        <div class="reader-bottom-bar" id="reader-bottom-bar">
+            <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">← Пред.</button>
+            <span class="chapter-indicator" id="chapter-indicator">1 / 10</span>
+            <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">След. →</button>
+        </div>
+    </div>
+
+    <!-- === Панель настроек === -->
+    <div id="settings-overlay" class="settings-overlay hidden" onclick="toggleSettings()"></div>
+    <div id="settings-panel" class="settings-panel hidden">
+        <h2>⚙️ Настройки чтения</h2>
+        
+        <div class="setting-group">
+            <label>📝 Размер шрифта</label>
+            <div class="setting-buttons">
+                <button onclick="setFontSize(14)" data-size="14">A<small>−</small></button>
+                <button onclick="setFontSize(17)" data-size="17" class="active">A</button>
+                <button onclick="setFontSize(20)" data-size="20">A<small>+</small></button>
+                <button onclick="setFontSize(24)" data-size="24">A<small>++</small></button>
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <label>🎨 Тема</label>
+            <div class="setting-buttons theme-buttons">
+                <button onclick="setTheme('light')" data-theme="light" class="theme-light-btn active">☀️</button>
+                <button onclick="setTheme('sepia')" data-theme="sepia" class="theme-sepia-btn">📜</button>
+                <button onclick="setTheme('dark')" data-theme="dark" class="theme-dark-btn">🌙</button>
+                <button onclick="setTheme('amoled')" data-theme="amoled" class="theme-amoled-btn">⚫</button>
+            </div>
+        </div>
+
+        <div class="setting-group">
+            <label>📏 Ширина текста</label>
+            <input type="range" id="width-slider" min="60" max="100" value="90" oninput="setTextWidth(this.value)">
+        </div>
+
+        <div class="setting-group">
+            <label>📖 Шрифт</label>
+            <div class="setting-buttons font-buttons">
+                <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">Серифный</button>
+                <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
+            </div>
+        </div>
+        
+        <button class="close-settings-btn" onclick="toggleSettings()">Готово</button>
+    </div>
+
+    <script src="reader.js?v=1"></script>
+</body>
+</html>

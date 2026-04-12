@@ -12,6 +12,7 @@ import re
 import random
 import aiosqlite
 import aiohttp
+import aiohttp.web
 from datetime import datetime
 from typing import Union
 
@@ -468,9 +469,13 @@ def get_main_menu(is_group: bool = False):
 # --- Подменю: Читать ---
 @dp.callback_query(F.data == "section_read")
 async def process_section_read(callback: types.CallbackQuery):
+    # URL читалки (рядом с основным WebApp)
+    reader_url = WEBAPP_URL.rstrip('/').rsplit('/', 1)[0] + '/reader.html' if '/' in WEBAPP_URL.rstrip('/') else WEBAPP_URL.rstrip('/') + '/reader.html'
+    
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📖 Читать мангу", callback_data="read_langs"))
     builder.row(types.InlineKeyboardButton(text="📚 Читать ранобэ", callback_data="read_ranobe_langs"))
+    builder.row(types.InlineKeyboardButton(text="🌸 Читалка (WebApp)", web_app=WebAppInfo(url=reader_url)))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     try:
         await callback.message.edit_text("📖 <b>Чтение:</b>\nВыберите, что хотите читать:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -2405,6 +2410,95 @@ class StatsMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 # ==============================================================================
+# БЛОК: API СЕРВЕР ДЛЯ ЧИТАЛКИ (WebApp Reader)
+# ==============================================================================
+
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+}
+
+async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Возвращает ВСЕ данные для читалки одним запросом: тома и главы."""
+    try:
+        async with aiosqlite.connect('manga.db') as db:
+            result = {"series": []}
+            
+            # === Akashic Ranobe ===
+            async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
+                akashic_vols = [row[0] for row in await cursor.fetchall()]
+            
+            if akashic_vols:
+                akashic = {"id": "akashic", "title": "Иногда Аля кокетничает со мной по-русски", "volumes": []}
+                for vol in akashic_vols:
+                    async with db.execute('SELECT chapter, url FROM akashic_ranobe WHERE volume = ? ORDER BY chapter', (vol,)) as cursor:
+                        chapters = [{"chapter": row[0], "url": row[1]} for row in await cursor.fetchall()]
+                    # Сортируем главы по числам
+                    try:
+                        chapters.sort(key=lambda c: float(c["chapter"]))
+                    except (ValueError, TypeError):
+                        pass
+                    akashic["volumes"].append({"volume": vol, "chapters": chapters})
+                result["series"].append(akashic)
+            
+            # === British Ranobe ===
+            async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
+                british_vols = [row[0] for row in await cursor.fetchall()]
+            
+            if british_vols:
+                british = {"id": "british", "title": "Британец (Дополнительные истории)", "volumes": []}
+                for vol in british_vols:
+                    async with db.execute('SELECT chapter, url FROM british_ranobe WHERE volume = ? ORDER BY chapter', (vol,)) as cursor:
+                        chapters = [{"chapter": row[0], "url": row[1]} for row in await cursor.fetchall()]
+                    try:
+                        chapters.sort(key=lambda c: float(re.search(r'\d+', c["chapter"]).group()) if re.search(r'\d+', c["chapter"]) else float('inf'))
+                    except (ValueError, TypeError):
+                        pass
+                    british["volumes"].append({"volume": vol, "chapters": chapters})
+                result["series"].append(british)
+            
+            # === Обычное ранобэ (ranobe_urls) ===
+            async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
+                langs = [row[0] for row in await cursor.fetchall()]
+            
+            for lang in langs:
+                async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as cursor:
+                    chapters = [{"chapter": row[0], "url": row[1]} for row in await cursor.fetchall()]
+                if chapters:
+                    lang_name = "Русский" if lang == "ru" else "English" if lang == "en" else lang
+                    result["series"].append({
+                        "id": f"ranobe_{lang}",
+                        "title": f"Ранобэ ({lang_name})",
+                        "volumes": [{"volume": 1, "chapters": chapters}]
+                    })
+            
+            # === Манга (chapters_urls) ===
+            async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
+                langs = [row[0] for row in await cursor.fetchall()]
+            
+            for lang in langs:
+                async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as cursor:
+                    chapters = [{"chapter": row[0], "url": row[1]} for row in await cursor.fetchall()]
+                if chapters:
+                    lang_name = "Русский" if lang == "ru" else "English" if lang == "en" else lang
+                    result["series"].append({
+                        "id": f"manga_{lang}",
+                        "title": f"Манга ({lang_name})",
+                        "volumes": [{"volume": 1, "chapters": chapters}]
+                    })
+            
+        return aiohttp.web.json_response(result, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Reader API Error: {e}")
+        return aiohttp.web.json_response({"error": str(e), "series": []}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    return aiohttp.web.Response(status=200, headers=CORS_HEADERS)
+
+
+# ==============================================================================
 # БЛОК: ЗАПУСК БОТА
 # ==============================================================================
 
@@ -2427,6 +2521,17 @@ async def main():
     ]
     await bot.set_my_commands(commands, BotCommandScopeDefault())
     
+    # === API сервер для WebApp читалки ===
+    app = aiohttp.web.Application()
+    app.router.add_get("/api/reader", handle_reader_data)
+    app.router.add_options("/api/reader", handle_cors_preflight)
+    
+    runner = aiohttp.web.AppRunner(app)
+    await runner.setup()
+    site = aiohttp.web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+    logging.info("API сервер для читалки запущен на порту 8080")
+    
     logging.info("Бот запущен. База данных готова.")
     await bot.delete_webhook(drop_pending_updates=True)
     try:
@@ -2435,6 +2540,7 @@ async def main():
         global _http_session
         if _http_session and not _http_session.closed:
             await _http_session.close()
+        await runner.cleanup()
 
 if __name__ == "__main__":
     try: asyncio.run(main())

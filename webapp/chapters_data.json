@@ -1,0 +1,19 @@
+{
+    "series": [
+        {
+            "id": "akashic",
+            "title": "Иногда Аля кокетничает со мной по-русски",
+            "volumes": [
+                {
+                    "volume": 1,
+                    "chapters": [
+                        {"chapter": "Пролог", "url": ""},
+                        {"chapter": "1", "url": ""},
+                        {"chapter": "2", "url": ""},
+                        {"chapter": "3", "url": ""}
+                    ]
+                }
+            ]
+        }
+    ]
+}
