@@ -6,8 +6,8 @@
     <title>📖 Читалка — Аля</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="reader.css?v=1">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="reader.css?v=3">
 </head>
 <body>
     <!-- === ЭКРАН 1: Выбор серии === -->
@@ -43,7 +43,7 @@
     <!-- === ЭКРАН 3: Чтение === -->
     <div id="screen-reader" class="screen">
         <div class="reader-header reader-top-bar" id="reader-top-bar">
-            <button class="back-btn" onclick="showScreen('chapters')">←</button>
+            <button class="back-btn" onclick="backFromReader()">←</button>
             <div class="header-title">
                 <h1 id="reader-title">Глава 1</h1>
             </div>
@@ -54,6 +54,29 @@
                 <div class="loading-spinner">
                     <div class="spinner"></div>
                     <p>Загрузка главы...</p>
+                </div>
+            </div>
+
+            <!-- Лайк и комментарии (после текста) -->
+            <div id="social-section" class="social-section" style="display:none;">
+                <!-- Лайк -->
+                <div class="like-section">
+                    <button class="like-btn" id="like-btn" onclick="toggleLike()">
+                        <span class="like-icon" id="like-icon">🤍</span>
+                        <span class="like-count" id="like-count">0</span>
+                    </button>
+                </div>
+
+                <!-- Комментарии -->
+                <div class="comments-section">
+                    <h3 class="comments-title">💬 Комментарии <span class="comments-count" id="comments-count-badge"></span></h3>
+                    
+                    <div class="comment-form" id="comment-form">
+                        <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="2"></textarea>
+                        <button class="comment-submit-btn" onclick="postComment()">Отправить</button>
+                    </div>
+
+                    <div id="comments-list" class="comments-list"></div>
                 </div>
             </div>
         </div>
@@ -95,16 +118,53 @@
         </div>
 
         <div class="setting-group">
+            <label>↕️ Межстрочный интервал</label>
+            <div class="setting-buttons">
+                <button onclick="setLineHeight(1.5)" data-lh="1.5">Компактный</button>
+                <button onclick="setLineHeight(1.8)" data-lh="1.8" class="active">Обычный</button>
+                <button onclick="setLineHeight(2.2)" data-lh="2.2">Свободный</button>
+            </div>
+        </div>
+
+        <div class="setting-group">
             <label>📖 Шрифт</label>
             <div class="setting-buttons font-buttons">
                 <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">Серифный</button>
                 <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
+                <button onclick="setFont('slab')" data-font="slab" style="font-family: 'Roboto Slab'">Слэб</button>
             </div>
+        </div>
+
+        <div class="setting-group">
+            <label>📐 Выравнивание текста</label>
+            <div class="setting-buttons">
+                <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
+                <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
+            </div>
+        </div>
+
+        <div class="setting-group" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+            <label style="margin-bottom:0;">¶ Абзацный отступ</label>
+            <label class="switch">
+                <input type="checkbox" id="indent-toggle" checked onchange="setIndent(this.checked)">
+                <span class="slider round"></span>
+            </label>
+        </div>
+
+        <div class="setting-group" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--divider);">
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+                <span>🔧 Режим редактора</span>
+                <label class="switch">
+                    <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
+                    <span class="slider round"></span>
+                </label>
+            </label>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px; line-height: 1.3;">Включает ✏️ для переименования проектов, томов и глав.</p>
         </div>
         
         <button class="close-settings-btn" onclick="toggleSettings()">Готово</button>
     </div>
 
-    <script src="reader.js?v=1"></script>
+    <script src="reader.js?v=3"></script>
 </body>
 </html>

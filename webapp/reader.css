@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Читалка ранобэ — Стили
+   Читалка ранобэ — Стили v3
    Темы: light, sepia, dark, amoled
    ========================================================================== */
 
@@ -221,6 +221,23 @@ body {
 .series-info p { font-size: 12px; color: var(--text-secondary); }
 .series-arrow { color: var(--text-secondary); font-size: 20px; }
 
+/* Бейдж «Продолжить» */
+.continue-badge {
+    display: inline-block;
+    font-size: 10px;
+    background: var(--accent);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    margin-top: 4px;
+    animation: pulse-badge 2s ease-in-out infinite;
+}
+@keyframes pulse-badge {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
 /* === ТАБЫ ТОМОВ === */
 .volume-tabs {
     display: flex;
@@ -307,23 +324,33 @@ body {
 .reader-text {
     max-width: 90%;
     margin: 0 auto;
-    padding: 24px 16px 80px;
+    padding: 24px 16px 40px;
     font-size: 17px;
     line-height: 1.8;
     color: var(--reader-text);
     font-family: 'Noto Serif', Georgia, serif;
     word-wrap: break-word;
-    transition: font-size 0.2s, color 0.3s, max-width 0.3s;
+    transition: font-size 0.2s, color 0.3s, max-width 0.3s, line-height 0.2s;
 }
 
 .reader-text.font-sans {
     font-family: Inter, -apple-system, sans-serif;
-    line-height: 1.7;
+}
+
+.reader-text.font-slab {
+    font-family: 'Roboto Slab', Georgia, serif;
 }
 
 .reader-text p {
     margin-bottom: 1em;
+}
+
+.reader-text.indent-on p {
     text-indent: 1.5em;
+}
+
+.reader-text.align-justify {
+    text-align: justify;
 }
 
 .reader-text a {
@@ -339,13 +366,8 @@ body {
 }
 
 /* === СТИЛИ TELEGRAPH / RICH TEXT === */
-.reader-text b, .reader-text strong {
-    font-weight: 700;
-}
-
-.reader-text i, .reader-text em {
-    font-style: italic;
-}
+.reader-text b, .reader-text strong { font-weight: 700; }
+.reader-text i, .reader-text em { font-style: italic; }
 
 .reader-text blockquote {
     margin: 1.5em 0;
@@ -356,12 +378,7 @@ body {
     font-style: italic;
     color: var(--text-secondary);
 }
-
-.reader-text blockquote p {
-    text-indent: 0;
-    margin-bottom: 0;
-}
-
+.reader-text blockquote p { text-indent: 0; margin-bottom: 0; }
 .reader-text code {
     background: var(--card-hover);
     padding: 2px 6px;
@@ -378,31 +395,15 @@ body {
     border-radius: 20px;
     box-shadow: 0 4px 15px rgba(255, 107, 129, 0.3);
 }
-
 .channel-content {
     background: var(--card-bg);
     border-radius: 18px;
     padding: 24px;
     text-align: center;
-    position: relative;
     overflow: hidden;
 }
-
-.channel-content h3 {
-    margin-bottom: 8px;
-    font-size: 18px;
-    font-weight: 700;
-    color: var(--text);
-}
-
-.channel-content p {
-    font-size: 14px;
-    color: var(--text-secondary);
-    margin-bottom: 20px;
-    line-height: 1.5;
-    text-indent: 0;
-}
-
+.channel-content h3 { margin-bottom: 8px; font-size: 18px; font-weight: 700; color: var(--text); }
+.channel-content p { font-size: 14px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5; text-indent: 0; }
 .channel-btn {
     display: inline-block;
     padding: 12px 28px;
@@ -416,11 +417,7 @@ body {
     border: none;
     box-shadow: 0 4px 12px rgba(255, 107, 129, 0.4);
 }
-
-.channel-btn:active {
-    transform: scale(0.95);
-    box-shadow: 0 2px 6px rgba(255, 107, 129, 0.3);
-}
+.channel-btn:active { transform: scale(0.95); box-shadow: 0 2px 6px rgba(255, 107, 129, 0.3); }
 
 /* === НИЖНЯЯ НАВИГАЦИЯ === */
 .reader-bottom-bar {
@@ -474,7 +471,7 @@ body {
     transform: translateY(100%);
     transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s;
     box-shadow: 0 -4px 30px rgba(0,0,0,0.15);
-    max-height: 70vh;
+    max-height: 75vh;
     overflow-y: auto;
 }
 
@@ -486,10 +483,7 @@ body {
     text-align: center;
 }
 
-.setting-group {
-    margin-bottom: 20px;
-}
-
+.setting-group { margin-bottom: 18px; }
 .setting-group label {
     display: block;
     font-size: 13px;
@@ -498,11 +492,7 @@ body {
     margin-bottom: 10px;
 }
 
-.setting-buttons {
-    display: flex;
-    gap: 8px;
-}
-
+.setting-buttons { display: flex; gap: 8px; }
 .setting-buttons button {
     flex: 1;
     padding: 10px;
@@ -510,12 +500,11 @@ body {
     border-radius: 12px;
     background: var(--input-bg);
     color: var(--text);
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
 }
-
 .setting-buttons button.active {
     border-color: var(--accent);
     background: var(--accent-light);
@@ -537,7 +526,6 @@ input[type="range"] {
     border-radius: 3px;
     outline: none;
 }
-
 input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 22px; height: 22px;
@@ -561,7 +549,6 @@ input[type="range"]::-webkit-slider-thumb {
     margin-top: 8px;
     transition: transform 0.15s;
 }
-
 .close-settings-btn:active { transform: scale(0.97); }
 
 /* === СПИННЕР === */
@@ -573,7 +560,6 @@ input[type="range"]::-webkit-slider-thumb {
     padding: 60px 20px;
     gap: 16px;
 }
-
 .spinner {
     width: 36px; height: 36px;
     border: 3px solid var(--divider);
@@ -581,13 +567,8 @@ input[type="range"]::-webkit-slider-thumb {
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
 }
-
 @keyframes spin { to { transform: rotate(360deg); } }
-
-.loading-spinner p {
-    font-size: 14px;
-    color: var(--text-secondary);
-}
+.loading-spinner p { font-size: 14px; color: var(--text-secondary); }
 
 /* === ПУСТОЕ СОСТОЯНИЕ === */
 .empty-state {
@@ -595,9 +576,241 @@ input[type="range"]::-webkit-slider-thumb {
     padding: 60px 20px;
     color: var(--text-secondary);
 }
-
 .empty-state .empty-icon { font-size: 48px; margin-bottom: 16px; }
 .empty-state h3 { font-size: 17px; margin-bottom: 8px; color: var(--text); }
 .empty-state p { font-size: 14px; line-height: 1.5; }
 
 .hidden { display: none !important; }
+
+/* === Admin Mode Switch === */
+.switch { position: relative; display: inline-block; width: 44px; height: 24px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--divider); transition: .4s; border-radius: 24px; }
+.slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+input:checked + .slider { background-color: var(--accent); }
+input:checked + .slider:before { transform: translateX(20px); }
+
+/* === Admin Edit Button === */
+.admin-edit-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    margin-left: 6px;
+    vertical-align: middle;
+    padding: 6px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+    user-select: none;
+    line-height: 1;
+    -webkit-tap-highlight-color: transparent;
+    color: var(--text);
+}
+.admin-edit-btn:active { background: var(--card-hover); }
+
+/* ==========================================================================
+   СОЦИАЛЬНЫЕ ФУНКЦИИ: Лайки + Комментарии
+   ========================================================================== */
+
+.social-section {
+    max-width: 90%;
+    margin: 0 auto;
+    padding: 0 16px 80px;
+}
+
+/* --- Лайк --- */
+.like-section {
+    display: flex;
+    justify-content: center;
+    padding: 24px 0 20px;
+    border-top: 1px solid var(--divider);
+    margin-top: 30px;
+}
+
+.like-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 28px;
+    border: 2px solid var(--divider);
+    border-radius: 40px;
+    background: var(--card-bg);
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    transition: all 0.25s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.like-btn:active { transform: scale(0.92); }
+
+.like-btn.liked {
+    border-color: #FF4D6D;
+    background: rgba(255, 77, 109, 0.12);
+    color: #FF4D6D;
+}
+
+.like-icon {
+    font-size: 22px;
+    transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}
+.like-btn.liked .like-icon { transform: scale(1.25); }
+
+.like-count { font-size: 15px; }
+
+@keyframes like-pop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.4); }
+    100% { transform: scale(1.25); }
+}
+.like-btn.just-liked .like-icon {
+    animation: like-pop 0.4s ease-out;
+}
+
+/* --- Комментарии --- */
+.comments-section {
+    border-top: 1px solid var(--divider);
+    padding-top: 20px;
+}
+
+.comments-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: var(--text);
+}
+
+.comments-count {
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.comment-form {
+    margin-bottom: 20px;
+}
+
+.comment-input {
+    width: 100%;
+    padding: 12px 14px;
+    border: 2px solid var(--divider);
+    border-radius: 14px;
+    background: var(--input-bg);
+    color: var(--text);
+    font-size: 14px;
+    font-family: Inter, -apple-system, sans-serif;
+    resize: vertical;
+    min-height: 44px;
+    max-height: 120px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.comment-input:focus { border-color: var(--accent); }
+.comment-input::placeholder { color: var(--text-secondary); }
+
+.comment-submit-btn {
+    margin-top: 10px;
+    padding: 10px 24px;
+    border: none;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.15s, opacity 0.2s;
+    float: right;
+}
+.comment-submit-btn:active { transform: scale(0.96); }
+.comment-submit-btn:disabled { opacity: 0.4; pointer-events: none; }
+
+.comments-list {
+    clear: both;
+}
+
+.comment-item {
+    padding: 14px 0;
+    border-bottom: 1px solid var(--divider);
+}
+.comment-item:last-child { border-bottom: none; }
+
+.comment-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+}
+
+.comment-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ff6b81, #feb47b);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.comment-meta {
+    flex: 1;
+    min-width: 0;
+}
+
+.comment-author {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.comment-date {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.comment-text {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--reader-text);
+    padding-left: 42px;
+    word-break: break-word;
+}
+
+.comment-delete-btn {
+    background: none;
+    border: none;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: var(--text-secondary);
+    transition: background 0.2s, color 0.2s;
+    flex-shrink: 0;
+}
+.comment-delete-btn:hover { background: rgba(255, 77, 109, 0.1); color: #FF4D6D; }
+
+.no-comments {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+/* === Прогресс-бар чтения (позиция в главе) === */
+.reading-progress-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #ff6b81, #feb47b);
+    z-index: 999;
+    transition: width 0.15s ease-out;
+    border-radius: 0 2px 2px 0;
+}

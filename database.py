@@ -33,10 +33,39 @@ async def init_db():
         await db.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT)')
         # Таблица для выбора провайдера ИИ (groq / gemma) для каждого чата
         await db.execute('CREATE TABLE IF NOT EXISTS chat_ai_provider (chat_id INTEGER PRIMARY KEY, provider TEXT DEFAULT "groq")')
+        
+        # Таблица для кастомных названий тайтлов/томов/глав в WebApp
+        await db.execute('CREATE TABLE IF NOT EXISTS custom_names (id TEXT PRIMARY KEY, name TEXT)')
+
+        # Таблица лайков глав (WebApp)
+        await db.execute('''CREATE TABLE IF NOT EXISTS chapter_likes (
+            chapter_key TEXT, user_id TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (chapter_key, user_id))''')
+
+        # Таблица комментариев глав (WebApp)
+        await db.execute('''CREATE TABLE IF NOT EXISTS chapter_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chapter_key TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            user_name TEXT DEFAULT '',
+            text TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
 
         # Инициализация режима Али по умолчанию (если пусто)
         await db.execute('INSERT OR IGNORE INTO alya_settings (bot_id, mode) VALUES (1, "normal")')
             
+        await db.commit()
+
+async def get_custom_name(obj_id: str) -> str:
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT name FROM custom_names WHERE id = ?', (obj_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+async def set_custom_name(obj_id: str, name: str):
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)', (obj_id, name))
         await db.commit()
 
 async def get_alya_mode() -> str:

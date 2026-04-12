@@ -151,6 +151,10 @@ class BritishDelete(StatesGroup):
     waiting_for_volume = State()
     waiting_for_chapter = State()
 
+class AdminRename(StatesGroup):
+    waiting_for_name = State()
+
+
 class BritishCallback(CallbackData, prefix="british"):
     action: str
     volume: int = 0
@@ -517,10 +521,30 @@ async def cmd_start(message: types.Message, state: FSMContext):
     deep_link = args[1] if len(args) > 1 else None
     
     if not is_group:
-        await message.answer(
-            "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
-            parse_mode="HTML",
-            reply_markup=REPLY_KB
+        if not deep_link or not deep_link.startswith("rename_"):
+            await message.answer(
+                "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
+                parse_mode="HTML",
+                reply_markup=REPLY_KB
+            )
+            
+    if deep_link and deep_link.startswith("rename_"):
+        admins = await get_admins()
+        if message.from_user.id not in admins:
+            return await message.answer("❌ У вас нет прав администратора.")
+            
+        obj_id = deep_link[len("rename_"):]
+        await state.update_data(rename_id=obj_id)
+        await state.set_state(AdminRename.waiting_for_name)
+        
+        # Попытаемся достать текущее или старое название для подсказки
+        from database import get_custom_name
+        current_name = await get_custom_name(obj_id)
+        cur_text = f"\nТекущее кастомное название: <b>{current_name}</b>" if current_name else "\nСейчас используется стандартное название."
+        
+        return await message.answer(
+            f"✏️ <b>Режим редактора</b>\n\nВы хотите переименовать элемент: <code>{obj_id}</code>{cur_text}\n\nОтправьте в чат <b>НОВОЕ</b> текстовое название, которое вы хотите увидеть в WebApp (или отправьте <code>/cancel</code> для отмены):",
+            parse_mode="HTML"
         )
     
     if deep_link == "arts":
@@ -710,6 +734,53 @@ def get_ranobe_langs_menu(prefix="ranobelang"):
     else:
         builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     return builder.as_markup()
+
+# ==============================================================================
+# БЛОК: ADMIN RENAME (РЕДАКТИРОВАНИЕ ТАЙТЛОВ ИЗ WEBAPP)
+# ==============================================================================
+
+@dp.message(StateFilter(AdminRename.waiting_for_name))
+async def process_rename_name(message: types.Message, state: FSMContext):
+    new_name = message.text.strip()
+    data = await state.get_data()
+    obj_id = data.get('rename_id')
+    
+    if not obj_id:
+        await state.clear()
+        return await message.answer("❌ Ошибка: ID объекта не найден.")
+        
+    try:
+        from database import set_custom_name
+        await set_custom_name(obj_id, new_name)
+        await state.clear()
+        
+        msg = await message.answer(f"✅ Успешно! Новое название:\n<b>{new_name}</b>\n\n🔄 <i>Синхронизирую изменения с Github Pages...</i>", parse_mode="HTML")
+        
+        # Синхронизация JSON
+        import aiosqlite
+        import json
+        import subprocess
+        
+        result = await build_reader_data()
+        
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+            
+        os.system("git config user.name 'MangaBot' && git config user.email 'bot@manga.local'")
+        os.system("git add webapp/chapters_data.json")
+        os.system("git commit -m \"sync webapp renamed item\"")
+        
+        result_push = subprocess.run(["git", "push"], capture_output=True, text=True)
+        if result_push.returncode == 0:
+            await msg.edit_text("✅ <b>Готово!</b> Название сохранено.\n\nВы можете открыть читалку и проверить результат.", parse_mode="HTML")
+        else:
+            err_text = result_push.stderr.strip() or result_push.stdout.strip()
+            await msg.edit_text(f"⚠️ База обновлена локально, но <code>git push</code> не прошел.\n\n<b>Ответ сервера:</b>\n<pre>{err_text}</pre>", parse_mode="HTML")
+            
+    except Exception as e:
+        import traceback
+        err_msg = traceback.format_exc()
+        await message.answer(f"❌ <b>Ошибка:</b> {e}\n<pre>{err_msg}</pre>", parse_mode="HTML")
 
 @dp.callback_query(F.data == "schedule")
 async def process_schedule(callback: types.CallbackQuery):
@@ -1682,6 +1753,96 @@ import json
 import os
 import re
 
+
+async def build_reader_data() -> dict:
+    import aiosqlite
+    from database import get_custom_name
+    from aiogram import Bot
+    
+    # Пытаемся получить имя бота, чтобы WebApp мог генерировать правильные deeplink-и
+    bot_username = "Alyamangapage_bot"
+    try:
+        me = await bot.get_me()
+        bot_username = me.username
+    except:
+        pass
+
+    result = {"series": [], "bot_username": bot_username}
+    
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
+            ak_vols = [row[0] for row in await cursor.fetchall()]
+        if ak_vols:
+            custom_title = await get_custom_name("series_akashic_records") or "Хроники Акаши"
+            akashic = {"id": "akashic_records", "title": custom_title, "volumes": []}
+            for vol in ak_vols:
+                custom_vol = await get_custom_name(f"vol_akashic_records_{vol}") or f"Том {vol}"
+                async with db.execute('SELECT chapter, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
+                    chapters = []
+                    for row in await c.fetchall():
+                        extracted = _clean_urls(row[1])
+                        url_val = extracted[0] if len(extracted) == 1 else ""
+                        custom_chap = await get_custom_name(f"chap_akashic_records_{vol}_{row[0]}") or f"Глава {row[0]}"
+                        chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
+                akashic["volumes"].append({"volume": vol, "custom_name": custom_vol, "chapters": chapters})
+            result["series"].append(akashic)
+            
+        async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
+            br_vols = [row[0] for row in await cursor.fetchall()]
+        if br_vols:
+            custom_title = await get_custom_name("series_british_belle") or "Поцелуй британской красавицы"
+            british = {"id": "british_belle", "title": custom_title, "volumes": []}
+            for vol in br_vols:
+                custom_vol = await get_custom_name(f"vol_british_belle_{vol}") or f"Том {vol}"
+                async with db.execute('SELECT chapter, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
+                    chapters = []
+                    for row in await c.fetchall():
+                        extracted = _clean_urls(row[1])
+                        url_val = extracted[0] if len(extracted) == 1 else ""
+                        custom_chap = await get_custom_name(f"chap_british_belle_{vol}_{row[0]}") or f"Глава {row[0]}"
+                        chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
+                british["volumes"].append({"volume": vol, "custom_name": custom_vol, "chapters": chapters})
+            result["series"].append(british)
+            
+        async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
+            langs_ro = [row[0] for row in await cursor.fetchall()]
+        for lang in langs_ro:
+            async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
+                chapters = []
+                for row in await c.fetchall():
+                    extracted = _clean_urls(row[1])
+                    url_val = extracted[0] if len(extracted) == 1 else ""
+                    custom_chap = await get_custom_name(f"chap_ranobe_{lang}_1_{row[0]}") or f"Глава {row[0]}"
+                    chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
+            if chapters:
+                lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
+                custom_title = await get_custom_name(f"series_ranobe_{lang}") or f"Ранобэ ({lname})"
+                custom_vol = await get_custom_name(f"vol_ranobe_{lang}_1") or "Том 1"
+                result["series"].append({
+                    "id": f"ranobe_{lang}", "title": custom_title, "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}]
+                })
+                
+        async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
+            langs_mg = [row[0] for row in await cursor.fetchall()]
+        for lang in langs_mg:
+            async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
+                chapters = []
+                for row in await c.fetchall():
+                    extracted = _clean_urls(row[1])
+                    url_val = extracted[0] if len(extracted) == 1 else ""
+                    custom_chap = await get_custom_name(f"chap_manga_{lang}_1_{row[0]}") or f"Глава {row[0]}"
+                    chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
+            if chapters:
+                lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
+                custom_title = await get_custom_name(f"series_manga_{lang}") or f"Манга ({lname})"
+                custom_vol = await get_custom_name(f"vol_manga_{lang}_1") or "Том 1"
+                result["series"].append({
+                    "id": f"manga_{lang}", "title": custom_title, "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}]
+                })
+                
+    return result
+
+
 def _clean_urls(url_text: str) -> list:
     # Ищем все ссылки
     links = re.findall(r'(https?://[^\s<"\'>]+)', url_text)
@@ -1701,67 +1862,7 @@ async def cmd_sync_webapp(message: types.Message):
     
     msg = await message.answer("🔄 <i>Собираем данные из БД для WebApp...</i>", parse_mode="HTML")
     try:
-        import aiosqlite
-        result = {"series": []}
-        
-        async with aiosqlite.connect('manga.db') as db:
-            async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
-                ak_vols = [row[0] for row in await cursor.fetchall()]
-            if ak_vols:
-                akashic = {"id": "akashic_records", "title": "Хроники Акаши", "volumes": []}
-                for vol in ak_vols:
-                    async with db.execute('SELECT chapter, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
-                        chapters = []
-                        for row in await c.fetchall():
-                            extracted = _clean_urls(row[1])
-                            url_val = extracted[0] if len(extracted) == 1 else ""
-                            chapters.append({"chapter": row[0], "url": url_val, "urls": extracted})
-                    akashic["volumes"].append({"volume": vol, "chapters": chapters})
-                result["series"].append(akashic)
-                
-            async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
-                br_vols = [row[0] for row in await cursor.fetchall()]
-            if br_vols:
-                british = {"id": "british_belle", "title": "Поцелуй британской красавицы", "volumes": []}
-                for vol in br_vols:
-                    async with db.execute('SELECT chapter, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
-                        chapters = []
-                        for row in await c.fetchall():
-                            extracted = _clean_urls(row[1])
-                            url_val = extracted[0] if len(extracted) == 1 else ""
-                            chapters.append({"chapter": row[0], "url": url_val, "urls": extracted})
-                    british["volumes"].append({"volume": vol, "chapters": chapters})
-                result["series"].append(british)
-                
-            async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
-                langs_ro = [row[0] for row in await cursor.fetchall()]
-            for lang in langs_ro:
-                async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
-                    chapters = []
-                    for row in await c.fetchall():
-                        extracted = _clean_urls(row[1])
-                        url_val = extracted[0] if len(extracted) == 1 else ""
-                        chapters.append({"chapter": row[0], "url": url_val, "urls": extracted})
-                if chapters:
-                    lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
-                    result["series"].append({
-                        "id": f"ranobe_{lang}", "title": f"Ранобэ ({lname})", "volumes": [{"volume": 1, "chapters": chapters}]
-                    })
-                    
-            async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
-                langs_mg = [row[0] for row in await cursor.fetchall()]
-            for lang in langs_mg:
-                async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
-                    chapters = []
-                    for row in await c.fetchall():
-                        extracted = _clean_urls(row[1])
-                        url_val = extracted[0] if len(extracted) == 1 else ""
-                        chapters.append({"chapter": row[0], "url": url_val, "urls": extracted})
-                if chapters:
-                    lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
-                    result["series"].append({
-                        "id": f"manga_{lang}", "title": f"Манга ({lname})", "volumes": [{"volume": 1, "chapters": chapters}]
-                    })
+        result = await build_reader_data()
         
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -2473,7 +2574,7 @@ class StatsMiddleware(BaseMiddleware):
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
 }
 
@@ -2555,6 +2656,121 @@ async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Respon
 async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Response:
     return aiohttp.web.Response(status=200, headers=CORS_HEADERS)
 
+# --- Лайки ---
+
+async def handle_likes_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Получить количество лайков и статус лайка пользователя."""
+    chapter_key = request.query.get('chapter_key', '')
+    user_id = request.query.get('user_id', '')
+    try:
+        async with aiosqlite.connect('manga.db') as db:
+            async with db.execute('SELECT COUNT(*) FROM chapter_likes WHERE chapter_key = ?', (chapter_key,)) as c:
+                count = (await c.fetchone())[0]
+            liked = False
+            if user_id:
+                async with db.execute('SELECT 1 FROM chapter_likes WHERE chapter_key = ? AND user_id = ?', (chapter_key, user_id)) as c:
+                    liked = bool(await c.fetchone())
+        return aiohttp.web.json_response({"count": count, "liked": liked}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_likes_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Поставить/убрать лайк (toggle)."""
+    try:
+        data = await request.json()
+        chapter_key = data.get('chapter_key', '')
+        user_id = data.get('user_id', '')
+        if not chapter_key or not user_id:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+
+        async with aiosqlite.connect('manga.db') as db:
+            async with db.execute('SELECT 1 FROM chapter_likes WHERE chapter_key = ? AND user_id = ?', (chapter_key, user_id)) as c:
+                exists = await c.fetchone()
+            if exists:
+                await db.execute('DELETE FROM chapter_likes WHERE chapter_key = ? AND user_id = ?', (chapter_key, user_id))
+                liked = False
+            else:
+                await db.execute('INSERT INTO chapter_likes (chapter_key, user_id) VALUES (?, ?)', (chapter_key, user_id))
+                liked = True
+            await db.commit()
+
+            async with db.execute('SELECT COUNT(*) FROM chapter_likes WHERE chapter_key = ?', (chapter_key,)) as c:
+                count = (await c.fetchone())[0]
+
+        return aiohttp.web.json_response({"count": count, "liked": liked}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+# --- Комментарии ---
+
+async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Получить комментарии к главе."""
+    chapter_key = request.query.get('chapter_key', '')
+    try:
+        async with aiosqlite.connect('manga.db') as db:
+            async with db.execute(
+                'SELECT id, user_id, user_name, text, created_at FROM chapter_comments WHERE chapter_key = ? ORDER BY created_at ASC',
+                (chapter_key,)
+            ) as c:
+                rows = await c.fetchall()
+        comments = [{"id": r[0], "user_id": r[1], "user_name": r[2], "text": r[3], "created_at": r[4]} for r in rows]
+        return aiohttp.web.json_response({"comments": comments}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Добавить комментарий."""
+    try:
+        data = await request.json()
+        chapter_key = data.get('chapter_key', '')
+        user_id = data.get('user_id', '')
+        user_name = data.get('user_name', 'Аноним')
+        text = data.get('text', '').strip()
+        if not chapter_key or not user_id or not text:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if len(text) > 500:
+            return aiohttp.web.json_response({"error": "too long"}, status=400, headers=CORS_HEADERS)
+
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute(
+                'INSERT INTO chapter_comments (chapter_key, user_id, user_name, text) VALUES (?, ?, ?, ?)',
+                (chapter_key, user_id, user_name, text)
+            )
+            await db.commit()
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Удалить комментарий (только свой или админ)."""
+    try:
+        data = await request.json()
+        comment_id = data.get('comment_id', 0)
+        user_id = data.get('user_id', '')
+
+        async with aiosqlite.connect('manga.db') as db:
+            # Проверяем владельца
+            async with db.execute('SELECT user_id FROM chapter_comments WHERE id = ?', (comment_id,)) as c:
+                row = await c.fetchone()
+            if not row:
+                return aiohttp.web.json_response({"error": "not found"}, status=404, headers=CORS_HEADERS)
+            if str(row[0]) != str(user_id):
+                # Проверяем, админ ли
+                admins = await get_admins()
+                try:
+                    if int(user_id) not in admins:
+                        return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+                except (ValueError, TypeError):
+                    return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+            await db.execute('DELETE FROM chapter_comments WHERE id = ?', (comment_id,))
+            await db.commit()
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
 
 # ==============================================================================
 # БЛОК: ЗАПУСК БОТА
@@ -2583,6 +2799,15 @@ async def main():
     app = aiohttp.web.Application()
     app.router.add_get("/api/reader", handle_reader_data)
     app.router.add_options("/api/reader", handle_cors_preflight)
+    # Лайки
+    app.router.add_get("/api/likes", handle_likes_get)
+    app.router.add_post("/api/likes", handle_likes_post)
+    app.router.add_options("/api/likes", handle_cors_preflight)
+    # Комментарии
+    app.router.add_get("/api/comments", handle_comments_get)
+    app.router.add_post("/api/comments", handle_comments_post)
+    app.router.add_options("/api/comments", handle_cors_preflight)
+    app.router.add_route("DELETE", "/api/comments", handle_comments_delete)
     
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
