@@ -1680,6 +1680,14 @@ async def cmd_admin(message: types.Message):
 
 import json
 import os
+import re
+
+def _clean_url(url_text: str) -> str:
+    # Ищем первую попавшуюся нормальную ссылку (http/https)
+    match = re.search(r'(https?://[^\s<"\'>]+)', url_text)
+    if match:
+        return match.group(1)
+    return url_text
 
 @dp.message(Command("sync_webapp"))
 async def cmd_sync_webapp(message: types.Message):
@@ -1688,51 +1696,51 @@ async def cmd_sync_webapp(message: types.Message):
     
     msg = await message.answer("🔄 <i>Собираем данные из БД для WebApp...</i>", parse_mode="HTML")
     try:
-        from database import get_db
-        db = await get_db()
+        import aiosqlite
         result = {"series": []}
         
-        async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
-            ak_vols = [row[0] for row in await cursor.fetchall()]
-        if ak_vols:
-            akashic = {"id": "akashic_records", "title": "Хроники Акаши", "volumes": []}
-            for vol in ak_vols:
-                async with db.execute('SELECT chapter_number, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter_number AS REAL)', (vol,)) as c:
-                    chapters = [{"chapter": row[0], "url": row[1]} for row in await c.fetchall()]
-                akashic["volumes"].append({"volume": vol, "chapters": chapters})
-            result["series"].append(akashic)
-            
-        async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
-            br_vols = [row[0] for row in await cursor.fetchall()]
-        if br_vols:
-            british = {"id": "british_belle", "title": "Поцелуй британской красавицы", "volumes": []}
-            for vol in br_vols:
-                async with db.execute('SELECT chapter_number, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter_number AS REAL)', (vol,)) as c:
-                    chapters = [{"chapter": row[0], "url": row[1]} for row in await c.fetchall()]
-                british["volumes"].append({"volume": vol, "chapters": chapters})
-            result["series"].append(british)
-            
-        async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
-            langs_ro = [row[0] for row in await cursor.fetchall()]
-        for lang in langs_ro:
-            async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
-                chapters = [{"chapter": row[0], "url": row[1]} for row in await c.fetchall()]
-            if chapters:
-                lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
-                result["series"].append({
-                    "id": f"ranobe_{lang}", "title": f"Ранобэ ({lname})", "volumes": [{"volume": 1, "chapters": chapters}]
-                })
+        async with aiosqlite.connect('manga.db') as db:
+            async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
+                ak_vols = [row[0] for row in await cursor.fetchall()]
+            if ak_vols:
+                akashic = {"id": "akashic_records", "title": "Хроники Акаши", "volumes": []}
+                for vol in ak_vols:
+                    async with db.execute('SELECT chapter_number, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter_number AS REAL)', (vol,)) as c:
+                        chapters = [{"chapter": row[0], "url": _clean_url(row[1])} for row in await c.fetchall()]
+                    akashic["volumes"].append({"volume": vol, "chapters": chapters})
+                result["series"].append(akashic)
                 
-        async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
-            langs_mg = [row[0] for row in await cursor.fetchall()]
-        for lang in langs_mg:
-            async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
-                chapters = [{"chapter": row[0], "url": row[1]} for row in await c.fetchall()]
-            if chapters:
-                lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
-                result["series"].append({
-                    "id": f"manga_{lang}", "title": f"Манга ({lname})", "volumes": [{"volume": 1, "chapters": chapters}]
-                })
+            async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
+                br_vols = [row[0] for row in await cursor.fetchall()]
+            if br_vols:
+                british = {"id": "british_belle", "title": "Поцелуй британской красавицы", "volumes": []}
+                for vol in br_vols:
+                    async with db.execute('SELECT chapter_number, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter_number AS REAL)', (vol,)) as c:
+                        chapters = [{"chapter": row[0], "url": _clean_url(row[1])} for row in await c.fetchall()]
+                    british["volumes"].append({"volume": vol, "chapters": chapters})
+                result["series"].append(british)
+                
+            async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
+                langs_ro = [row[0] for row in await cursor.fetchall()]
+            for lang in langs_ro:
+                async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
+                    chapters = [{"chapter": row[0], "url": _clean_url(row[1])} for row in await c.fetchall()]
+                if chapters:
+                    lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
+                    result["series"].append({
+                        "id": f"ranobe_{lang}", "title": f"Ранобэ ({lname})", "volumes": [{"volume": 1, "chapters": chapters}]
+                    })
+                    
+            async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
+                langs_mg = [row[0] for row in await cursor.fetchall()]
+            for lang in langs_mg:
+                async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
+                    chapters = [{"chapter": row[0], "url": _clean_url(row[1])} for row in await c.fetchall()]
+                if chapters:
+                    lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
+                    result["series"].append({
+                        "id": f"manga_{lang}", "title": f"Манга ({lname})", "volumes": [{"volume": 1, "chapters": chapters}]
+                    })
         
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -1746,7 +1754,9 @@ async def cmd_sync_webapp(message: types.Message):
             await msg.edit_text(f"⚠️ База данных сохранена локально, но произошла ошибка при `git push`. (Код {r})", parse_mode="HTML")
             
     except Exception as e:
-        await msg.edit_text(f"❌ <b>Ошибка:</b> {e}", parse_mode="HTML")
+        import traceback
+        err_msg = traceback.format_exc()
+        await msg.edit_text(f"❌ <b>Ошибка:</b> {e}\n<pre>{err_msg}</pre>", parse_mode="HTML")
 
 @dp.message(Command("alya_mode"))
 async def cmd_alya_mode(message: types.Message):
