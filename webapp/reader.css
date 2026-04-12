@@ -338,6 +338,90 @@ body {
     border-radius: 8px;
 }
 
+/* === СТИЛИ TELEGRAPH / RICH TEXT === */
+.reader-text b, .reader-text strong {
+    font-weight: 700;
+}
+
+.reader-text i, .reader-text em {
+    font-style: italic;
+}
+
+.reader-text blockquote {
+    margin: 1.5em 0;
+    padding: 14px 20px;
+    border-left: 4px solid var(--accent);
+    background: var(--card-hover);
+    border-radius: 0 12px 12px 0;
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+.reader-text blockquote p {
+    text-indent: 0;
+    margin-bottom: 0;
+}
+
+.reader-text code {
+    background: var(--card-hover);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 0.9em;
+}
+
+/* === КРАСИВАЯ ССЫЛКА НА КАНАЛ === */
+.channel-banner {
+    margin-top: 40px;
+    padding: 2px;
+    background: linear-gradient(135deg, #ff6b81, #ff9a9e);
+    border-radius: 20px;
+    box-shadow: 0 4px 15px rgba(255, 107, 129, 0.3);
+}
+
+.channel-content {
+    background: var(--card-bg);
+    border-radius: 18px;
+    padding: 24px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.channel-content h3 {
+    margin-bottom: 8px;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.channel-content p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    line-height: 1.5;
+    text-indent: 0;
+}
+
+.channel-btn {
+    display: inline-block;
+    padding: 12px 28px;
+    background: var(--accent);
+    color: white !important;
+    text-decoration: none;
+    border-radius: 30px;
+    font-weight: 600;
+    font-size: 15px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    border: none;
+    box-shadow: 0 4px 12px rgba(255, 107, 129, 0.4);
+}
+
+.channel-btn:active {
+    transform: scale(0.95);
+    box-shadow: 0 2px 6px rgba(255, 107, 129, 0.3);
+}
+
 /* === НИЖНЯЯ НАВИГАЦИЯ === */
 .reader-bottom-bar {
     display: flex;

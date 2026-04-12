@@ -235,6 +235,20 @@ function loadChapterContent(chapter) {
             </div>`;
     }
     
+    // Добавляем красивую ссылку на канал в конце (если это не iframe)
+    if (!container.innerHTML.includes('<iframe')) {
+        container.innerHTML += `
+        <div class="channel-banner">
+            <div class="channel-content">
+                <h3>🌸 Присоединяйся к нам!</h3>
+                <p>Все свежие переводы, новости и общение — в нашем Telegram-канале.</p>
+                <a href="https://t.me/alya_novel" target="_blank" class="channel-btn">
+                    Подписаться на канал
+                </a>
+            </div>
+        </div>`;
+    }
+    
     // Скроллим наверх
     document.getElementById('reader-content').scrollTop = 0;
 }
