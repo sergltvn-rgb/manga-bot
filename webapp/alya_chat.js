@@ -19,24 +19,45 @@ const SYSTEM_PROMPT = `Тебя зовут Аля. Ты цундере. Обща
 
 let messageHistory = [{ role: "system", content: SYSTEM_PROMPT }];
 
-// --- URL сервера бота (приходит автоматически из бота через ?server=) ---
+// ==========================================================================
+// КОНФИГУРАЦИЯ: бот передаёт ключ через ?key= и URL сервера через ?server=
+// Ключ сохраняется в localStorage — пользователь ничего не вводит вручную.
+// ==========================================================================
 const urlParams = new URLSearchParams(window.location.search);
+
+// Забираем параметры из URL (если есть)
+const keyFromUrl = urlParams.get('key');
 const serverFromUrl = urlParams.get('server');
-if (serverFromUrl) {
-    localStorage.setItem("alya_api_url", serverFromUrl);
-    // Чистим URL, чтобы не мозолил глаза
+
+if (keyFromUrl) localStorage.setItem("alya_groq_key", keyFromUrl);
+if (serverFromUrl) localStorage.setItem("alya_api_url", serverFromUrl);
+
+// Чистим URL, чтобы ключ не торчал в адресной строке
+if (keyFromUrl || serverFromUrl) {
     window.history.replaceState({}, document.title, window.location.pathname);
 }
-let API_BASE_URL = localStorage.getItem("alya_api_url") || "";
+
+// Groq API ключ (получен от бота)
+const GROQ_KEY = localStorage.getItem("alya_groq_key") || "";
+// URL прокси-сервера бота (для локальной модели, если сервер доступен)
+const SERVER_URL = localStorage.getItem("alya_api_url") || "";
 
 // Текущий провайдер
 let currentProvider = localStorage.getItem("alya_provider") || "groq";
 
+// Если Groq ключ есть — принудительно ставим groq как основной
+if (GROQ_KEY && !SERVER_URL) {
+    currentProvider = "groq";
+    localStorage.setItem("alya_provider", "groq");
+}
+
 function updateProviderUI() {
     if (providerLabel) {
-        providerLabel.textContent = currentProvider === "gemma"
-            ? "🖥 Локально (Gemma 4)"
-            : "☁️ Облако (Groq)";
+        if (currentProvider === "gemma") {
+            providerLabel.textContent = "🖥 Локально (Gemma 4)";
+        } else {
+            providerLabel.textContent = "☁️ Облако (Groq)";
+        }
     }
     if (providerToggle) {
         providerToggle.checked = currentProvider === "gemma";
@@ -53,12 +74,64 @@ function addMessage(text, isUser = false) {
     scrollToBottom();
 }
 
+// ==========================================================================
+// ОТПРАВКА ЧЕРЕЗ GROQ НАПРЯМУЮ (без прокси-сервера)
+// ==========================================================================
+async function sendViaGroq(messages) {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${GROQ_KEY}`
+        },
+        body: JSON.stringify({
+            model: "llama-3.3-70b-versatile",
+            messages: messages,
+            temperature: 0.65,
+            max_tokens: 300
+        })
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Groq ${response.status}: ${errText.substring(0, 100)}`);
+    }
+
+    const data = await response.json();
+    return data.choices[0].message.content;
+}
+
+// ==========================================================================
+// ОТПРАВКА ЧЕРЕЗ ПРОКСИ-СЕРВЕР БОТА (для локальной модели / если нет ключа)
+// ==========================================================================
+async function sendViaProxy(messages, provider) {
+    if (!SERVER_URL) throw new Error("URL сервера бота не настроен");
+
+    const response = await fetch(`${SERVER_URL}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages, provider })
+    });
+
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errText.substring(0, 100)}`);
+    }
+
+    const data = await response.json();
+    return data.choices[0].message.content;
+}
+
+// ==========================================================================
+// ОСНОВНАЯ ФУНКЦИЯ ОТПРАВКИ
+// ==========================================================================
 async function sendMessage() {
     const text = userInput.value.trim();
     if (!text) return;
 
-    if (!API_BASE_URL) {
-        addMessage("⚠️ Нажми ⚙️ и введи URL твоего ngrok-сервера (например: https://xxxx.ngrok-free.app)", false);
+    // Проверяем, есть ли хоть какой-то способ общения с ИИ
+    if (!GROQ_KEY && !SERVER_URL) {
+        addMessage("⚠️ Нет подключения к ИИ. Открой бота в Telegram заново — ключ передастся автоматически.", false);
         return;
     }
 
@@ -70,31 +143,27 @@ async function sendMessage() {
     scrollToBottom();
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/chat`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                messages: messageHistory,
-                provider: currentProvider
-            })
-        });
+        let reply;
 
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errText.substring(0, 100)}`);
+        if (currentProvider === "gemma" && SERVER_URL) {
+            // Локальная модель — только через прокси-сервер бота
+            reply = await sendViaProxy(messageHistory, "gemma");
+        } else if (GROQ_KEY) {
+            // Groq — напрямую через API
+            reply = await sendViaGroq(messageHistory);
+        } else if (SERVER_URL) {
+            // Fallback: через прокси
+            reply = await sendViaProxy(messageHistory, currentProvider);
+        } else {
+            throw new Error("Нет доступных провайдеров");
         }
-
-        const data = await response.json();
-        const reply = data.choices[0].message.content;
 
         messageHistory.push({ role: "assistant", content: reply });
         typingIndicator.classList.add('hidden');
-
-        const badge = currentProvider === "gemma" ? "🖥" : "☁️";
-        addMessage(`${reply}`, false);
+        addMessage(reply, false);
     } catch (e) {
         typingIndicator.classList.add('hidden');
-        addMessage(`❌ Ошибка: ${e.message}\nПроверь, запущен ли бот и ngrok.`, false);
+        addMessage(`❌ Ошибка: ${e.message}`, false);
     } finally {
         sendBtn.disabled = false;
         userInput.focus();
@@ -104,36 +173,40 @@ async function sendMessage() {
 // --- Переключатель провайдера ---
 if (providerToggle) {
     providerToggle.addEventListener('change', () => {
-        currentProvider = providerToggle.checked ? "gemma" : "groq";
+        const wantGemma = providerToggle.checked;
+
+        if (wantGemma && !SERVER_URL) {
+            addMessage("⚠️ Для локальной модели нужен прокси-сервер бота (ngrok). Пока доступен только Groq.", false);
+            providerToggle.checked = false;
+            return;
+        }
+
+        currentProvider = wantGemma ? "gemma" : "groq";
         localStorage.setItem("alya_provider", currentProvider);
         updateProviderUI();
         addMessage(`🔄 Переключено на ${currentProvider === "gemma" ? "🖥 Gemma 4 (Локально)" : "☁️ Groq (Облако)"}`, false);
     });
 }
 
-// --- Настройки (только URL сервера) ---
+// --- Настройки ---
 if (openSettings) {
     openSettings.onclick = () => {
-        if (apiUrlInput) apiUrlInput.value = API_BASE_URL;
+        if (apiUrlInput) apiUrlInput.value = SERVER_URL;
         settingsModal.classList.remove('hidden');
     };
 }
-
 if (closeSettings) {
     closeSettings.onclick = () => settingsModal.classList.add('hidden');
 }
-
 if (saveSettings) {
     saveSettings.onclick = () => {
         if (apiUrlInput) {
             let url = apiUrlInput.value.trim();
-            // Убираем слеш на конце
             if (url.endsWith('/')) url = url.slice(0, -1);
-            API_BASE_URL = url;
-            localStorage.setItem("alya_api_url", API_BASE_URL);
+            localStorage.setItem("alya_api_url", url);
         }
         settingsModal.classList.add('hidden');
-        addMessage("✅ Настройки сохранены! Теперь можешь писать.", false);
+        addMessage("✅ Настройки сохранены!", false);
     };
 }
 
@@ -144,7 +217,7 @@ tg.setHeaderColor('bg_color');
 // Инициализация UI
 updateProviderUI();
 
-// Если URL уже есть — показываем подсказку
-if (!API_BASE_URL) {
-    addMessage("⚙️ Нажми на шестерёнку сверху и введи URL сервера бота (ngrok).", false);
+// Стартовое сообщение
+if (!GROQ_KEY && !SERVER_URL) {
+    addMessage("⚙️ Подключение не настроено. Открой WebApp через кнопку в Telegram-боте — ключ передастся автоматически.", false);
 }
