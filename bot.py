@@ -12,7 +12,6 @@ import re
 import random
 import aiosqlite
 import aiohttp
-import aiohttp.web
 from datetime import datetime
 from typing import Union
 
@@ -27,7 +26,7 @@ from aiogram.types import (
     BotCommand, BotCommandScopeDefault
 )
 
-from config import BOT_TOKEN, GROQ_API_KEY, GEMMA_API_KEY, LOCAL_API_URL, NGROK_URL, ADMIN_IDS, WEBAPP_URL
+from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL
 from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
@@ -173,126 +172,39 @@ AI_PROVIDERS = {
         "name": "☁️ Groq (Облако)",
         "model": "llama-3.3-70b-versatile",
     },
-    "gemma": {
-        "name": "🖥 Gemma 4 (Локально)",
-        "model": "google/gemma-4-e4b",
-    },
 }
 
 async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider: str = "groq") -> str:
-    """Универсальная функция запроса к ИИ. Поддерживает groq и gemma (LM Studio v1 API)."""
+    """Функция запроса к ИИ через Groq Cloud API."""
+    if not GROQ_API_KEY:
+        return "<i>❌ Ошибка: Нет ключа Groq.</i>"
     
-    if provider == "gemma":
-        # --- LM Studio Native API v1 ---
-        if not GEMMA_API_KEY:
-            return "<i>❌ Ошибка: Нет ключа Gemma (LM Studio).</i>"
-        
-        # Попробуем v1 API, а потом OpenAI-совместимый как fallback
-        api_url_v1 = f"{LOCAL_API_URL}/chat"
-        api_url_openai = f"{LOCAL_API_URL.replace('/api/v1', '')}/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {GEMMA_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        
-        # Собираем контекст из истории
-        full_prompt = prompt
-        if history:
-            context_lines = []
-            for msg in history[-10:]:
-                role = "Пользователь" if msg["role"] == "user" else "Аля"
-                context_lines.append(f"{role}: {msg['content']}")
-            context_lines.append(f"Пользователь: {prompt}")
-            full_prompt = "\n".join(context_lines)
-        
-        # Payload для LM Studio v1 API
-        payload_v1 = {
-            "model": AI_PROVIDERS["gemma"]["model"],
-            "system_prompt": system_prompt,
-            "input": full_prompt,
-            "temperature": 0.65,
-        }
-        
-        # Payload для OpenAI-совместимого API (fallback)
-        messages = [{"role": "system", "content": system_prompt}]
-        if history:
-            messages.extend(history[-10:])
-        messages.append({"role": "user", "content": prompt})
-        payload_openai = {
-            "model": AI_PROVIDERS["gemma"]["model"],
-            "messages": messages,
-            "temperature": 0.65,
-            "max_tokens": 500,
-        }
-        
-        try:
-            session = await get_http_session()
-            
-            # Попытка 1: LM Studio v1 API (/api/v1/chat)
-            try:
-                async with session.post(api_url_v1, headers=headers, json=payload_v1, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        # v1 API: ответ в output[].content
-                        if "output" in data and isinstance(data["output"], list):
-                            for item in data["output"]:
-                                if item.get("type") == "message" and "content" in item:
-                                    return item["content"]
-                        # Fallback: может вернуть в другом формате
-                        if "choices" in data:
-                            return data["choices"][0]["message"]["content"]
-                        logging.warning(f"Gemma v1 unknown format: {str(data)[:200]}")
-                    else:
-                        error_text = await resp.text()
-                        logging.warning(f"Gemma v1 API {resp.status}: {error_text[:200]}, trying OpenAI compat...")
-                        raise Exception(f"v1 failed: {resp.status}")
-            except Exception as e1:
-                logging.info(f"v1 API failed ({e1}), trying OpenAI-compatible endpoint...")
-                
-                # Попытка 2: OpenAI-совместимый API (/v1/chat/completions)
-                async with session.post(api_url_openai, headers=headers, json=payload_openai, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data["choices"][0]["message"]["content"]
-                    error_text = await resp.text()
-                    logging.error(f"Gemma OpenAI compat Error {resp.status}: {error_text[:200]}")
-                    return f"<i>Ошибка Gemma: {resp.status}</i>"
-                        
-        except Exception as e:
-            logging.error(f"Gemma Connection Error: {e}")
-            return "<i>Ошибка: Не удалось подключиться к LM Studio. Убедись, что сервер запущен.</i>"
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     
-    else:
-        # --- Groq Cloud API (по умолчанию) ---
-        if not GROQ_API_KEY:
-            return "<i>❌ Ошибка: Нет ключа Groq.</i>"
-        
-        url = "https://api.groq.com/openai/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        
-        messages = [{"role": "system", "content": system_prompt}]
-        if history:
-            messages.extend(history)
-        messages.append({"role": "user", "content": prompt})
-        
-        payload = {
-            "model": AI_PROVIDERS["groq"]["model"],
-            "messages": messages,
-            "temperature": 0.65,
-            "max_tokens": 300
-        }
-        try:
-            session = await get_http_session()
-            async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data['choices'][0]['message']['content']
-                return f"<i>Ошибка ИИ: {resp.status}</i>"
-        except Exception as e:
-            logging.error(f"Groq Error: {e}")
-            return "<i>Ошибка соединения с ИИ.</i>"
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": prompt})
+    
+    payload = {
+        "model": AI_PROVIDERS["groq"]["model"],
+        "messages": messages,
+        "temperature": 0.65,
+        "max_tokens": 300
+    }
+    try:
+        session = await get_http_session()
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data['choices'][0]['message']['content']
+            return f"<i>Ошибка ИИ: {resp.status}</i>"
+    except Exception as e:
+        logging.error(f"Groq Error: {e}")
+        return "<i>Ошибка соединения с ИИ.</i>"
 
-# Обратная совместимость: старое имя функции
+# Обратная совместимость
 async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str:
     return await ask_ai(prompt, system_prompt, history, provider="groq")
 
@@ -2493,85 +2405,8 @@ class StatsMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 # ==============================================================================
-# БЛОК: API СЕРВЕР ДЛЯ WEBAPP (ПРОКСИРОВАНИЕ ЗАПРОСОВ)
+# БЛОК: ЗАПУСК БОТА
 # ==============================================================================
-
-async def handle_webapp_chat(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    """API эндпоинт для WebApp. Принимает сообщение, отправляет в ИИ, возвращает ответ."""
-    # CORS заголовки
-    cors_headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-    }
-    
-    if request.method == "OPTIONS":
-        return aiohttp.web.Response(status=200, headers=cors_headers)
-    
-    try:
-        data = await request.json()
-    except Exception:
-        return aiohttp.web.json_response({"error": "Invalid JSON"}, status=400, headers=cors_headers)
-    
-    messages = data.get("messages", [])
-    provider = data.get("provider", "groq")
-    
-    if not messages:
-        return aiohttp.web.json_response({"error": "No messages"}, status=400, headers=cors_headers)
-    
-    # Извлекаем system prompt и историю
-    system_prompt = "Тебя зовут Аля. Ты цундере-девушка. Отвечай кратко, 1-2 предложения."
-    history = []
-    user_prompt = ""
-    
-    for msg in messages:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        if role == "system":
-            system_prompt = content
-        elif role == "user":
-            user_prompt = content
-            history.append({"role": "user", "content": content})
-        elif role == "assistant":
-            history.append({"role": "assistant", "content": content})
-    
-    if not user_prompt:
-        return aiohttp.web.json_response({"error": "No user message"}, status=400, headers=cors_headers)
-    
-    # Убираем последнее сообщение из history (оно и есть prompt)
-    if history and history[-1]["role"] == "user":
-        history = history[:-1]
-    
-    # Вызываем нашу универсальную функцию
-    reply = await ask_ai(user_prompt, system_prompt, history=history or None, provider=provider)
-    
-    # Очищаем HTML теги из ответа (WebApp использует plain text)
-    import re as _re
-    reply_clean = _re.sub(r'<[^>]+>', '', reply)
-    
-    return aiohttp.web.json_response({
-        "choices": [{
-            "message": {
-                "role": "assistant",
-                "content": reply_clean
-            }
-        }],
-        "provider": provider
-    }, headers=cors_headers)
-
-
-async def handle_webapp_providers(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    """Возвращает список доступных провайдеров."""
-    cors_headers = {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
-    }
-    providers = {}
-    for key, info in AI_PROVIDERS.items():
-        providers[key] = {"name": info["name"], "model": info["model"]}
-    return aiohttp.web.json_response({"providers": providers}, headers=cors_headers)
-
 
 async def main():
     dp.include_router(rp_router)
@@ -2591,31 +2426,15 @@ async def main():
         BotCommand(command="marriages", description="Топ пар")
     ]
     await bot.set_my_commands(commands, BotCommandScopeDefault())
-    # ================================
-    
-    # === Запуск API веб-сервера для WebApp ===
-    app = aiohttp.web.Application()
-    app.router.add_post("/api/chat", handle_webapp_chat)
-    app.router.add_options("/api/chat", handle_webapp_chat)  # CORS preflight
-    app.router.add_get("/api/providers", handle_webapp_providers)
-    
-    runner = aiohttp.web.AppRunner(app)
-    await runner.setup()
-    site = aiohttp.web.TCPSite(runner, "0.0.0.0", 8080)
-    await site.start()
-    logging.info("API сервер для WebApp запущен на порту 8080")
-    # =========================================
     
     logging.info("Бот запущен. База данных готова.")
     await bot.delete_webhook(drop_pending_updates=True)
     try:
         await dp.start_polling(bot)
     finally:
-        # Корректно закрываем aiohttp-сессию при остановке
         global _http_session
         if _http_session and not _http_session.closed:
             await _http_session.close()
-        await runner.cleanup()
 
 if __name__ == "__main__":
     try: asyncio.run(main())
