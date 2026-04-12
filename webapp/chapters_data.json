@@ -1,19 +1,177 @@
 {
-    "series": [
+  "series": [
+    {
+      "id": "akashic_records",
+      "title": "Хроники Акаши",
+      "volumes": [
         {
-            "id": "akashic",
-            "title": "Иногда Аля кокетничает со мной по-русски",
-            "volumes": [
-                {
-                    "volume": 1,
-                    "chapters": [
-                        {"chapter": "Пролог", "url": ""},
-                        {"chapter": "1", "url": ""},
-                        {"chapter": "2", "url": ""},
-                        {"chapter": "3", "url": ""}
-                    ]
-                }
-            ]
+          "volume": 12,
+          "chapters": [
+            {
+              "chapter": "1",
+              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-prolog-04-10",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-prolog-04-10"
+              ]
+            },
+            {
+              "chapter": "2",
+              "url": "",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-1-glava-1-chast-04-10",
+                "https://telegra.ph/Hroniki-Akashi--12-tom-1-glava-3-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "3",
+              "url": "",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-2-glava-1-chast-04-10",
+                "https://telegra.ph/Hroniki-Akashi--12-tom-2-glava-2-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "4",
+              "url": "",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-3-glava-1-chast-04-10",
+                "https://telegra.ph/Hroniki-Akashi--12-tom-3-glava-2-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "5",
+              "url": "",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-4-glava-04-10",
+                "https://telegra.ph/Hroniki-Akashi--12-tom-4-glava-2-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "6",
+              "url": "",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-5-glava-1-chast-04-10",
+                "https://telegra.ph/Hroniki-Akashi--12-tom-5-glava-2-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "7",
+              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-6-glava-1-chast-04-10",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-6-glava-1-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "8",
+              "url": "",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-7-glava-1-chast-04-10",
+                "https://telegra.ph/Hroniki-Akashi--12-tom-7-glava-2-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "9",
+              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-8-glava-1-chast-04-10",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-8-glava-1-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "10",
+              "url": "",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-9-glava-1-chast-04-10",
+                "https://telegra.ph/Hroniki-Akashi--12-tom-9-glava-2-chast-04-10"
+              ]
+            },
+            {
+              "chapter": "11",
+              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-ehpilog-04-10",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-ehpilog-04-10"
+              ]
+            },
+            {
+              "chapter": "12",
+              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-posleslovie-04-10",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--12-tom-posleslovie-04-10"
+              ]
+            }
+          ]
         }
-    ]
+      ]
+    },
+    {
+      "id": "ranobe_alya",
+      "title": "Ранобэ (alya)",
+      "volumes": [
+        {
+          "volume": 1,
+          "chapters": [
+            {
+              "chapter": "1",
+              "url": "https://teletype.in/@slitvin/The_warrior_Alya_part_1",
+              "urls": [
+                "https://teletype.in/@slitvin/The_warrior_Alya_part_1"
+              ]
+            },
+            {
+              "chapter": "2",
+              "url": "https://teletype.in/@slitvin/The_warrior_Alya_part_2",
+              "urls": [
+                "https://teletype.in/@slitvin/The_warrior_Alya_part_2"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "manga_ru",
+      "title": "Манга (Русский)",
+      "volumes": [
+        {
+          "volume": 1,
+          "chapters": [
+            {
+              "chapter": "75",
+              "url": "https://teletype.in/@slitvin/Zk5q_UBkJ37",
+              "urls": [
+                "https://teletype.in/@slitvin/Zk5q_UBkJ37"
+              ]
+            },
+            {
+              "chapter": "76",
+              "url": "https://teletype.in/@slitvin/iOzOzGNO2t3",
+              "urls": [
+                "https://teletype.in/@slitvin/iOzOzGNO2t3"
+              ]
+            },
+            {
+              "chapter": "77",
+              "url": "https://telegra.ph/Alya-inogda-koketnichaet-so-mnoj-po-russki--Manga--77-glava-03-12-2",
+              "urls": [
+                "https://telegra.ph/Alya-inogda-koketnichaet-so-mnoj-po-russki--Manga--77-glava-03-12-2"
+              ]
+            },
+            {
+              "chapter": "78",
+              "url": "https://telegra.ph/Alya-inogda-koketnichaet-so-mnoj-po-russki--Manga--78-glava-03-20",
+              "urls": [
+                "https://telegra.ph/Alya-inogda-koketnichaet-so-mnoj-po-russki--Manga--78-glava-03-20"
+              ]
+            },
+            {
+              "chapter": "79",
+              "url": "https://teletype.in/@slitvin/SMMHdUWSXL1",
+              "urls": [
+                "https://teletype.in/@slitvin/SMMHdUWSXL1"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }
