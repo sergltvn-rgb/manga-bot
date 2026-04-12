@@ -1171,14 +1171,16 @@ async def send_chapter(callback: types.CallbackQuery):
         link = await get_chapter_link(lang, chapter_num)
 
     if link:
-        is_url = link.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
-        if is_url and not link.startswith(("http://", "https://", "tg://")):
-            link = "https://" + link
+        clean_links = _clean_urls(link)
+        link_for_btn = clean_links[0] if clean_links else link
+        is_url = link_for_btn.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
+        if is_url and not link_for_btn.startswith(("http://", "https://", "tg://")):
+            link_for_btn = "https://" + link_for_btn
         await callback.message.delete()
         
         builder = InlineKeyboardBuilder()
         if is_url:
-            builder.button(text=f"🔗 Читать главу {chapter_num}", url=link)
+            builder.button(text=f"🔗 Читать главу {chapter_num}", url=link_for_btn)
         builder.button(text="📚 К главам", callback_data=f"readlang_{lang}")
         
         admins = await get_admins()
@@ -1247,12 +1249,14 @@ async def akashic_show_chapters(callback: types.CallbackQuery, callback_data: Ak
 async def akashic_read_chapter(callback: types.CallbackQuery, callback_data: AkashicCallback):
     url = await get_akashic_chapter_link(callback_data.volume, callback_data.chapter)
     if url:
-        is_url = url.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
-        if is_url and not url.startswith(("http://", "https://", "tg://")):
-            url = "https://" + url
+        clean_links = _clean_urls(url)
+        url_for_btn = clean_links[0] if clean_links else url
+        is_url = url_for_btn.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
+        if is_url and not url_for_btn.startswith(("http://", "https://", "tg://")):
+            url_for_btn = "https://" + url_for_btn
         builder = InlineKeyboardBuilder()
         if is_url:
-            builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
+            builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url_for_btn)
         builder.button(text="📚 К главам", callback_data=AkashicCallback(action="chaps", volume=callback_data.volume).pack())
         
         admins = await get_admins()
@@ -1314,12 +1318,14 @@ async def british_show_chapters(callback: types.CallbackQuery, callback_data: Br
 async def british_read_chapter(callback: types.CallbackQuery, callback_data: BritishCallback):
     url = await get_british_chapter_link(callback_data.volume, callback_data.chapter)
     if url:
-        is_url = url.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
-        if is_url and not url.startswith(("http://", "https://", "tg://")):
-            url = "https://" + url
+        clean_links = _clean_urls(url)
+        url_for_btn = clean_links[0] if clean_links else url
+        is_url = url_for_btn.startswith(("http://", "https://", "tg://", "t.me/", "telegra.ph/"))
+        if is_url and not url_for_btn.startswith(("http://", "https://", "tg://")):
+            url_for_btn = "https://" + url_for_btn
         builder = InlineKeyboardBuilder()
         if is_url:
-            builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url)
+            builder.button(text=f"🔗 Читать главу {callback_data.chapter}", url=url_for_btn)
         builder.button(text="📚 К главам", callback_data=BritishCallback(action="chaps", volume=callback_data.volume).pack())
         
         admins = await get_admins()
