@@ -52,6 +52,16 @@ async def init_db():
             text TEXT NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
 
+        # Таблица прогресса чтения (WebApp)
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_bookmarks (
+            user_id TEXT NOT NULL,
+            series_id TEXT NOT NULL,
+            volume_id TEXT NOT NULL,
+            chapter_key TEXT NOT NULL,
+            scroll_pos REAL DEFAULT 0,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, series_id))''')
+
         # Инициализация режима Али по умолчанию (если пусто)
         await db.execute('INSERT OR IGNORE INTO alya_settings (bot_id, mode) VALUES (1, "normal")')
             

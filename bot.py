@@ -2777,6 +2777,55 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+# --- Прогресс чтения (Закладки) ---
+
+async def handle_progress_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Сохранить позицию прокрутки и текущую главу."""
+    try:
+        data = await request.json()
+        user_id = data.get('user_id', '')
+        series_id = data.get('series_id', '')
+        volume_id = data.get('volume_id', '')
+        chapter_key = data.get('chapter_key', '')
+        scroll_pos = data.get('scroll_pos', 0)
+
+        if not user_id or not series_id:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('''
+                INSERT INTO user_bookmarks (user_id, series_id, volume_id, chapter_key, scroll_pos, updated_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, series_id) DO UPDATE SET
+                    volume_id = excluded.volume_id,
+                    chapter_key = excluded.chapter_key,
+                    scroll_pos = excluded.scroll_pos,
+                    updated_at = excluded.updated_at
+            ''', (str(user_id), str(series_id), str(volume_id), str(chapter_key), float(scroll_pos)))
+            await db.commit()
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_progress_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Получить все закладки пользователя."""
+    user_id = request.query.get('user_id', '')
+    if not user_id:
+        return aiohttp.web.json_response({"bookmarks": []}, headers=CORS_HEADERS)
+    
+    try:
+        async with aiosqlite.connect('manga.db') as db:
+            async with db.execute(
+                'SELECT series_id, volume_id, chapter_key, scroll_pos, updated_at FROM user_bookmarks WHERE user_id = ? ORDER BY updated_at DESC',
+                (str(user_id),)
+            ) as c:
+                rows = await c.fetchall()
+        
+        bookmarks = [{"series_id": r[0], "volume_id": r[1], "chapter_key": r[2], "scroll_pos": r[3], "updated_at": r[4]} for r in rows]
+        return aiohttp.web.json_response({"bookmarks": bookmarks}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 
 # ==============================================================================
@@ -2818,6 +2867,10 @@ async def main():
     # Переименование/сброс имён (режим редактора)
     app.router.add_route("DELETE", "/api/rename", handle_rename_delete)
     app.router.add_options("/api/rename", handle_cors_preflight)
+    # Прогресс чтения
+    app.router.add_get("/api/progress", handle_progress_get)
+    app.router.add_post("/api/progress", handle_progress_post)
+    app.router.add_options("/api/progress", handle_cors_preflight)
     
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()

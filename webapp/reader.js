@@ -84,21 +84,51 @@ function saveScrollPosition() {
     if (!el) return;
     const pct = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
     localStorage.setItem(key, JSON.stringify({ pct, ts: Date.now() }));
-    // Также сохраняем «последнюю открытую» для серии
     saveLastRead();
+    
+    // Синхронизация с сервером
+    if (API_URL && userId && currentSeries && currentVolume && currentChapters[currentChapterIdx]) {
+        fetch(API_URL + '/api/progress', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                user_id: userId,
+                series_id: currentSeries.id,
+                volume_id: currentVolume.volume,
+                chapter_key: currentChapters[currentChapterIdx].chapter,
+                scroll_pos: pct
+            })
+        }).catch(e => console.warn('Progress sync error:', e));
+    }
 }
 
 function restoreScrollPosition() {
-    const key = getScrollKey();
-    if (!key) return;
-    const saved = JSON.parse(localStorage.getItem(key) || 'null');
-    if (!saved) return;
+    // 1. Пробуем серверную
+    const chIdx = currentChapters[currentChapterIdx];
+    if (!chIdx) return;
+    
+    let pctToRestore = null;
+    const serverBm = serverBookmarks.find(b => b.series_id === currentSeries.id);
+    if (serverBm && String(serverBm.volume_id) === String(currentVolume.volume) && String(serverBm.chapter_key) === String(chIdx.chapter)) {
+        pctToRestore = serverBm.scroll_pos;
+    }
+    
+    // 2. Иначе локальную
+    if (pctToRestore === null) {
+        const key = getScrollKey();
+        if (key) {
+            const saved = JSON.parse(localStorage.getItem(key) || 'null');
+            if (saved) pctToRestore = saved.pct;
+        }
+    }
+    
+    if (pctToRestore === null) return;
     const el = document.getElementById('reader-content');
     if (!el) return;
-    // Ждём чтобы контент отрендерился
+    
     setTimeout(() => {
         const maxScroll = el.scrollHeight - el.clientHeight;
-        el.scrollTop = saved.pct * maxScroll;
+        el.scrollTop = pctToRestore * maxScroll;
     }, 300);
 }
 
@@ -120,7 +150,19 @@ function saveLastRead() {
 
 function getLastRead(seriesId) {
     const all = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
-    return all[seriesId] || null;
+    const local = all[seriesId];
+    
+    const serverBm = serverBookmarks.find(b => String(b.series_id) === String(seriesId));
+    if (serverBm) {
+        return {
+            seriesId: seriesId,
+            volume: serverBm.volume_id,
+            chapter: serverBm.chapter_key,
+            isServer: true
+        };
+    }
+    
+    return local || null;
 }
 
 // === Прогресс-бар чтения ===
@@ -148,7 +190,21 @@ function updateProgressBar() {
 // ЗАГРУЗКА ДАННЫХ
 // ==========================================================================
 
+let serverBookmarks = []; // Хранит загруженные закладки
+
 async function loadData() {
+    if (API_URL && userId) {
+        try {
+            const bResp = await fetch(API_URL + '/api/progress?user_id=' + userId);
+            if (bResp.ok) {
+                const bData = await bResp.json();
+                serverBookmarks = bData.bookmarks || [];
+            }
+        } catch (e) {
+            console.warn('Bookmarks load warning:', e);
+        }
+    }
+
     if (API_URL) {
         try {
             const resp = await fetch(API_URL + '/api/reader', { signal: AbortSignal.timeout(8000) });
@@ -156,6 +212,7 @@ async function loadData() {
                 allData = await resp.json();
                 if (allData.series && allData.series.length > 0) {
                     renderSeriesList();
+                    renderContinueReading();
                     return;
                 }
             }
@@ -169,6 +226,7 @@ async function loadData() {
         if (resp.ok) {
             allData = await resp.json();
             renderSeriesList();
+            renderContinueReading();
             return;
         }
     } catch (e) {
@@ -853,6 +911,197 @@ document.addEventListener('DOMContentLoaded', () => {
 window.addEventListener('beforeunload', () => {
     saveScrollPosition();
 });
+
+// ==========================================================================
+// ЛАЙКИ И КОММЕНТАРИИ (SOCIAL) & ПРОДОЛЖИТЬ ЧТЕНИЕ
+// ==========================================================================
+
+function renderContinueReading() {
+    const container = document.getElementById('continue-reading-container');
+    if (!container) return;
+    
+    let latestBm = null;
+    if (serverBookmarks.length > 0) {
+        latestBm = serverBookmarks[0]; 
+    } else {
+        const allLocal = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
+        let latestLocal = null;
+        let maxTs = 0;
+        for (let sId in allLocal) {
+            if (allLocal[sId].ts > maxTs) {
+                maxTs = allLocal[sId].ts;
+                latestLocal = allLocal[sId];
+            }
+        }
+        if (latestLocal) Object.assign(latestLocal, { series_id: latestLocal.seriesId, volume_id: latestLocal.volume, chapter_key: latestLocal.chapter });
+        latestBm = latestLocal;
+    }
+    
+    if (!latestBm || !allData.series) {
+        container.style.display = 'none';
+        return;
+    }
+    
+    const series = allData.series.find(s => String(s.id) === String(latestBm.series_id));
+    if (!series) return;
+    
+    const vol = series.volumes.find(v => String(v.volume) === String(latestBm.volume_id));
+    let chTitle = "Глава " + latestBm.chapter_key;
+    if (vol) {
+        const chAttr = vol.chapters.find(c => String(c.chapter) === String(latestBm.chapter_key));
+        if (chAttr && chAttr.custom_name) chTitle = chAttr.custom_name;
+    }
+    const volTitle = vol && vol.custom_name ? vol.custom_name : "Том " + latestBm.volume_id;
+    
+    container.style.display = 'block';
+    container.innerHTML = `
+        <div class="continue-reading-card" onclick="selectSeries('${series.id}')">
+            <div class="continue-reading-icon">🔖</div>
+            <div class="continue-reading-info">
+                <div class="continue-reading-label">Продолжить чтение</div>
+                <h3 class="continue-reading-title">${series.title}</h3>
+                <p class="continue-reading-chapter">${volTitle}, ${chTitle}</p>
+            </div>
+            <div class="continue-reading-arrow">→</div>
+        </div>
+    `;
+}
+
+function getChapterKey() {
+    if (!currentSeries || !currentVolume) return '';
+    return `${currentSeries.id}_v${currentVolume.volume}_ch${currentChapters[currentChapterIdx]?.chapter}`;
+}
+
+async function loadLikes() {
+    const ck = getChapterKey();
+    if (!ck || !API_URL) return;
+    try {
+        const res = await fetch(`${API_URL}/api/likes?chapter_key=${ck}&user_id=${userId}`);
+        const data = await res.json();
+        const countEl = document.getElementById('like-count');
+        if (countEl) countEl.textContent = data.count || 0;
+        const btn = document.getElementById('like-btn');
+        if (btn) {
+            if (data.user_liked) {
+                btn.classList.add('liked');
+                document.getElementById('like-icon').textContent = '❤️';
+            } else {
+                btn.classList.remove('liked');
+                document.getElementById('like-icon').textContent = '🤍';
+            }
+        }
+    } catch (e) {
+        console.warn('Likes error:', e);
+    }
+}
+
+async function toggleLike() {
+    const ck = getChapterKey();
+    if (!ck || !API_URL || !userId) return;
+    const btn = document.getElementById('like-btn');
+    const isLiked = btn.classList.contains('liked');
+    
+    // Optimistic UI
+    btn.classList.toggle('liked');
+    document.getElementById('like-icon').textContent = !isLiked ? '❤️' : '🤍';
+    const cEl = document.getElementById('like-count');
+    if (cEl) cEl.textContent = parseInt(cEl.textContent) + (!isLiked ? 1 : -1);
+    
+    try {
+        await fetch(`${API_URL}/api/likes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chapter_key: ck, user_id: userId })
+        });
+        loadLikes();
+    } catch (e) {
+        console.warn('Like toggle error:', e);
+    }
+}
+
+async function loadComments() {
+    const ck = getChapterKey();
+    if (!ck || !API_URL) return;
+    try {
+        const res = await fetch(`${API_URL}/api/comments?chapter_key=${ck}`);
+        const data = await res.json();
+        renderComments(data.comments || []);
+    } catch (e) {
+        console.warn('Comments error:', e);
+    }
+}
+
+function renderComments(comments) {
+    const list = document.getElementById('comments-list');
+    const badge = document.getElementById('comments-count-badge');
+    if (badge) badge.textContent = comments.length > 0 ? comments.length : '';
+    if (!list) return;
+    
+    if (comments.length === 0) {
+        list.innerHTML = `<div class="no-comments">Комментариев пока нет. Будьте первыми!</div>`;
+        return;
+    }
+    
+    list.innerHTML = comments.map(c => `
+        <div class="comment-item" style="margin-bottom: 12px; padding: 12px; background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                <div class="comment-author" style="color:var(--text); font-weight:bold;">${escapeHtml(c.user_name || 'Аноним')}</div>
+                <div style="display:flex; align-items:center; gap: 8px;">
+                    <div class="comment-date" style="color:var(--text-secondary); font-size:12px;">${new Date(c.created_at).toLocaleDateString()}</div>
+                    ${(String(c.user_id) === String(userId) || isAdminMode) ? `<button class="comment-delete-btn" onclick="deleteComment(${c.id})">🗑️</button>` : ''}
+                </div>
+            </div>
+            <div class="comment-text" style="color:var(--text)!important; line-height:1.4;">${escapeHtml(c.text)}</div>
+        </div>
+    `).join('');
+}
+
+async function postComment() {
+    const input = document.getElementById('comment-input');
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text || !userId || !API_URL) return;
+    
+    try {
+        const res = await fetch(`${API_URL}/api/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chapter_key: getChapterKey(),
+                user_id: userId,
+                user_name: userName,
+                text: text
+            })
+        });
+        if (res.ok) {
+            input.value = '';
+            loadComments();
+        } else {
+             alert('Ошибка при отправке комментария.');
+        }
+    } catch (e) {
+        console.warn('Post comment error:', e);
+    }
+}
+
+async function deleteComment(id) {
+    if (!confirm('Удалить комментарий?')) return;
+    try {
+        const res = await fetch(`${API_URL}/api/comments`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment_id: id, user_id: userId })
+        });
+        if (res.ok) {
+            loadComments();
+        } else {
+            alert('Ошибка удаления.');
+        }
+    } catch (e) {
+        console.warn('Delete comment error', e);
+    }
+}
+
 
 // ==========================================================================
 // ИНИЦИАЛИЗАЦИЯ
