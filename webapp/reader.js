@@ -35,6 +35,28 @@ function renameItem(objId) {
     tg.close();
 }
 
+async function resetCustomName(objId) {
+    if (!API_URL) return alert('Сброс доступен только через прямое подключение (не GitHub Pages).');
+    if (!confirm(`Сбросить кастомное имя "${objId}" на дефолт?`)) return;
+    try {
+        const resp = await fetch(`${API_URL}/api/rename`, {
+            method: 'DELETE',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ obj_id: objId, user_id: userId })
+        });
+        const result = await resp.json();
+        if (result.ok) {
+            // Перезагружаем данные чтобы увидеть обновлённые имена
+            await loadData();
+            alert('✅ Имя сброшено на дефолт.');
+        } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная'));
+        }
+    } catch (e) {
+        alert('Ошибка сети: ' + e.message);
+    }
+}
+
 // === Настройки (из localStorage) ===
 const defaults = { fontSize: 17, theme: 'light', textWidth: 90, font: 'serif', lineHeight: 1.8, textAlign: 'left', indent: true };
 let settings = JSON.parse(localStorage.getItem('reader_settings') || 'null') || { ...defaults };
@@ -193,17 +215,21 @@ function renderSeriesList() {
             continueBadge = `<span class="continue-badge">▶ Продолжить · Гл. ${lastRead.chapter}</span>`;
         }
 
-        const editBtn = isAdminMode ? `<button class="admin-edit-btn" onclick="renameItem('series_${s.id.replace('series_', '')}'); event.stopPropagation();">✏️</button>` : '';
+        const editBtns = isAdminMode ? `
+            <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('series_${s.id}'); event.stopPropagation();">&#9998;</button>
+            <button class="admin-reset-btn" title="Сброс имени" onclick="resetCustomName('series_${s.id}'); event.stopPropagation();">&#8635;</button>
+        ` : '';
+        const customBadge = isAdminMode ? `<span class="custom-name-badge">серия</span>` : '';
         
         return `
         <div class="series-card" onclick="selectSeries('${s.id}')">
             <div class="series-icon">${icons[i % icons.length]}</div>
             <div class="series-info">
-                <h3>${s.title}${editBtn}</h3>
-                <p>${s.volumes.length} том(ов) · ${totalCh} глав${progress > 0 ? ` · ${progress}%` : ''}</p>
+                <h3>${s.title}${customBadge}${editBtns}</h3>
+                <p>${s.volumes.length} том(ов) &middot; ${totalCh} глав${progress > 0 ? ` &middot; ${progress}%` : ''}</p>
                 ${continueBadge}
             </div>
-            <span class="series-arrow">›</span>
+            <span class="series-arrow">&rsaquo;</span>
         </div>`;
     }).join('');
 }
@@ -244,10 +270,14 @@ function renderVolumeTabs() {
     tabs.style.display = 'flex';
     tabs.innerHTML = currentSeries.volumes.map(v => {
         const volName = v.custom_name || `Том ${v.volume}`;
-        const editBtn = isAdminMode ? `<button class="admin-edit-btn" onclick="renameItem('vol_${currentSeries.id}_${v.volume}'); event.stopPropagation();">✏️</button>` : '';
+        const hasCustom = !!v.custom_name;
+        const editBtns = isAdminMode ? `
+            <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('vol_${currentSeries.id}_${v.volume}'); event.stopPropagation();">&#9998;</button>
+            ${hasCustom ? `<button class="admin-reset-btn" title="Сброс" onclick="resetCustomName('vol_${currentSeries.id}_${v.volume}'); event.stopPropagation();">&#8635;</button>` : ''}
+        ` : '';
         return `
         <button class="vol-tab" data-vol="${v.volume}" onclick="selectVolume(${v.volume})">
-            ${volName}${editBtn}
+            ${hasCustom && isAdminMode ? '<span class="custom-name-badge">кастом</span>' : ''}${volName}${editBtns}
         </button>`;
     }).join('');
 }
@@ -284,14 +314,19 @@ function renderChaptersList() {
     container.innerHTML = currentChapters.map((ch, idx) => {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
         const chapName = ch.custom_name || `Глава ${ch.chapter}`;
-        const editBtn = isAdminMode ? `<button class="admin-edit-btn" onclick="renameItem('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">✏️</button>` : '';
+        const hasCustom = !!ch.custom_name;
+        const editBtns = isAdminMode ? `
+            <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#9998;</button>
+            ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
+        ` : '';
+        const customBadge = (isAdminMode && hasCustom) ? '<span class="custom-name-badge">кастом</span>' : '';
         const isCurrent = lastChapter && String(ch.chapter) === String(lastChapter);
         
         return `
         <div class="chapter-item ${readClass}${isCurrent ? ' current-chapter' : ''}" onclick="openChapter(${idx})">
             <div class="chapter-num">${idx + 1}</div>
-            <div class="chapter-name">${chapName}${editBtn}</div>
-            ${isCurrent ? '<span style="font-size:12px;color:var(--accent);font-weight:600;">◀</span>' : ''}
+            <div class="chapter-name">${chapName}${customBadge}${editBtns}</div>
+            ${isCurrent ? '<span style="font-size:12px;color:var(--accent);font-weight:600;">◄</span>' : ''}
             <span class="chapter-read-mark">✓</span>
         </div>`;
     }).join('');

@@ -502,11 +502,11 @@ async def process_project_info_menu(callback: types.CallbackQuery):
     builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     try:
-        await callback.message.edit_text("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
+        await callback.message.edit_text("✨ <b>Информационный центр проекта</b>\n────────────────\n<i>Здесь вы можете найти всю необходимую информацию, график релизов и многое другое.</i>\n\n👇 <b>Выберите раздел:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
     except Exception:
         try: await callback.message.delete()
         except Exception: pass
-        await callback.message.answer("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
+        await callback.message.answer("✨ <b>Информационный центр проекта</b>\n────────────────\n<i>Здесь вы можете найти всю необходимую информацию, график релизов и многое другое.</i>\n\n👇 <b>Выберите раздел:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
 
 def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
     return InlineKeyboardBuilder().row(types.InlineKeyboardButton(text=text, callback_data=callback_data)).as_markup()
@@ -570,7 +570,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
             builder.row(types.InlineKeyboardButton(text="🔗 Все команды (Telegraph)", url=link))
         builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
         builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
-        return await message.answer("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
+        return await message.answer("✨ <b>Информационный центр проекта</b>\n────────────────\n<i>Здесь вы можете найти всю необходимую информацию, график релизов и многое другое.</i>\n\n👇 <b>Выберите раздел:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
     
     # Обычный /start (без deep link)
     if is_group:
@@ -646,7 +646,7 @@ async def handle_reply_project(message: types.Message, state: FSMContext):
         builder.row(types.InlineKeyboardButton(text="🔗 Все команды (Telegraph)", url=link))
     builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
     builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
-    await message.answer("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
+    await message.answer("✨ <b>Информационный центр проекта</b>\n────────────────\n<i>Здесь вы можете найти всю необходимую информацию, график релизов и многое другое.</i>\n\n👇 <b>Выберите раздел:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.message(F.text == "📋 Меню", StateFilter("*"))
 async def handle_menu_button(message: types.Message, state: FSMContext):
@@ -853,18 +853,28 @@ async def cmd_profile(message: types.Message):
     hugs, kisses, bites, slaps, pats, m_count, s_count = await get_user_stats(user_id)
     total_rp = hugs + kisses + bites + slaps + pats
     
+    # Расчет уровня
+    level = int((m_count + s_count * 2) ** 0.5) + 1
+    if level < 5: rank = "Новичок 🍼"
+    elif level < 15: rank = "Освоившийся 🥉"
+    elif level < 30: rank = "Активный 🥈"
+    elif level < 50: rank = "Знаменитость 🥇"
+    elif level < 100: rank = "Легенда 👑"
+    else: rank = "Божество 🌟"
+    
     profile_text = (
-        f"👤 <b>Профиль — {name}</b>\n\n"
-        f"👩‍❤️‍👨 <b>Статус:</b> {partner_text}\n\n"
-        f"📊 <b>Статистика чата:</b>\n"
-        f"✉️ Сообщений: <b>{m_count}</b>\n"
-        f"🌟 Стикеров: <b>{s_count}</b>\n\n"
-        f"🎭 <b>РП-действия</b> (всего {total_rp}):\n"
-        f"❤️ Нежность (поцелуй/лизнул): {kisses}\n"
-        f"🤗 Забота (обнял/воскресил): {hugs}\n"
-        f"🥰 Утешение (погладил/пожал): {pats}\n"
-        f"🧛‍♀️ Вампиризм (кусь): {bites}\n"
-        f"😠 Агрессия (удар/пнул/убил): {slaps}\n"
+        f"👤 <b>Ваш профиль:</b> {name}\n"
+        f"┣ 📊 <b>Уровень:</b> {level} ({rank})\n"
+        f"┗ 👩‍❤️‍👨 <b>Статус:</b> {partner_text}\n\n"
+        f"💬 <b>Активность в чатах:</b>\n"
+        f"┣ ✉️ Сообщения: <b>{m_count}</b>\n"
+        f"┗ 🌟 Стикеры: <b>{s_count}</b>\n\n"
+        f"🎭 <b>Ролеплей</b> (всего: {total_rp}):\n"
+        f"┣ ❤️ Нежность (поцелуи): <b>{kisses}</b>\n"
+        f"┣ 🤗 Забота (объятия): <b>{hugs}</b>\n"
+        f"┣ 🥰 Утешение (поглаживания): <b>{pats}</b>\n"
+        f"┣ 🧛‍♀️ Вампиризм (кусь): <b>{bites}</b>\n"
+        f"┗ 😠 Агрессия (удары): <b>{slaps}</b>"
     )
     
     builder = InlineKeyboardBuilder()
@@ -1855,13 +1865,49 @@ def _clean_urls(url_text: str) -> list:
     # Иначе возвращаем все найденные
     return links
 
+@dp.message(Command("toggle_sync"))
+async def cmd_toggle_sync(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('CREATE TABLE IF NOT EXISTS sync_settings (id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)')
+        async with db.execute('SELECT locked FROM sync_settings WHERE id = 1') as cursor:
+            row = await cursor.fetchone()
+        
+        if not row:
+            locked = 1
+            await db.execute('INSERT INTO sync_settings (id, locked) VALUES (1, 1)')
+        else:
+            locked = 0 if row[0] else 1
+            await db.execute('UPDATE sync_settings SET locked = ? WHERE id = 1', (locked,))
+        await db.commit()
+        
+        if locked:
+            await message.answer("🔒 <b>Синхронизация заблокирована!</b>\nТеперь команда /sync_webapp не будет работать и ваши данные в WebApp в полной безопасности от перезаписи. Чтобы разблокировать, введите команду снова.", parse_mode="HTML")
+        else:
+            await message.answer("🔓 <b>Синхронизация разблокирована.</b>\nКоманда /sync_webapp снова активна.", parse_mode="HTML")
+
+
 @dp.message(Command("sync_webapp"))
 async def cmd_sync_webapp(message: types.Message):
     admins = await get_admins()
     if message.from_user.id not in admins: return
     
+    # Проверка на блокировку синхронизации
+    async with aiosqlite.connect('manga.db') as db:
+        try:
+            async with db.execute('SELECT locked FROM sync_settings WHERE id = 1') as cursor:
+                row = await cursor.fetchone()
+                if row and row[0]:
+                    return await message.answer("🔒 Синхронизация сейчас заблокирована. Разблокируйте её командой /toggle_sync перед использованием.", parse_mode="HTML")
+        except Exception:
+            pass # Таблица еще не создана
+    
     msg = await message.answer("🔄 <i>Собираем данные из БД для WebApp...</i>", parse_mode="HTML")
     try:
+        # build_reader_data() сам читает custom_names из БД — источник истины один,
+        # никакие кастомные имена не теряются даже при добавлении новых глав
         result = await build_reader_data()
         
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
@@ -2579,78 +2625,39 @@ CORS_HEADERS = {
 }
 
 async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    """Возвращает ВСЕ данные для читалки одним запросом: тома и главы."""
+    """Возвращает данные для читалки. Единственный источник истины — build_reader_data(),
+    который корректно применяет custom_names из БД ко всем элементам."""
     try:
-        async with aiosqlite.connect('manga.db') as db:
-            result = {"series": []}
-            
-            # === Akashic Ranobe ===
-            async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
-                akashic_vols = [row[0] for row in await cursor.fetchall()]
-            
-            if akashic_vols:
-                akashic = {"id": "akashic", "title": "Иногда Аля кокетничает со мной по-русски", "volumes": []}
-                for vol in akashic_vols:
-                    async with db.execute('SELECT chapter, url FROM akashic_ranobe WHERE volume = ? ORDER BY chapter', (vol,)) as cursor:
-                        chapters = [{"chapter": row[0], "url": row[1]} for row in await cursor.fetchall()]
-                    # Сортируем главы по числам
-                    try:
-                        chapters.sort(key=lambda c: float(c["chapter"]))
-                    except (ValueError, TypeError):
-                        pass
-                    akashic["volumes"].append({"volume": vol, "chapters": chapters})
-                result["series"].append(akashic)
-            
-            # === British Ranobe ===
-            async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
-                british_vols = [row[0] for row in await cursor.fetchall()]
-            
-            if british_vols:
-                british = {"id": "british", "title": "Британец (Дополнительные истории)", "volumes": []}
-                for vol in british_vols:
-                    async with db.execute('SELECT chapter, url FROM british_ranobe WHERE volume = ? ORDER BY chapter', (vol,)) as cursor:
-                        chapters = [{"chapter": row[0], "url": row[1]} for row in await cursor.fetchall()]
-                    try:
-                        chapters.sort(key=lambda c: float(re.search(r'\d+', c["chapter"]).group()) if re.search(r'\d+', c["chapter"]) else float('inf'))
-                    except (ValueError, TypeError):
-                        pass
-                    british["volumes"].append({"volume": vol, "chapters": chapters})
-                result["series"].append(british)
-            
-            # === Обычное ранобэ (ranobe_urls) ===
-            async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
-                langs = [row[0] for row in await cursor.fetchall()]
-            
-            for lang in langs:
-                async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as cursor:
-                    chapters = [{"chapter": row[0], "url": row[1]} for row in await cursor.fetchall()]
-                if chapters:
-                    lang_name = "Русский" if lang == "ru" else "English" if lang == "en" else lang
-                    result["series"].append({
-                        "id": f"ranobe_{lang}",
-                        "title": f"Ранобэ ({lang_name})",
-                        "volumes": [{"volume": 1, "chapters": chapters}]
-                    })
-            
-            # === Манга (chapters_urls) ===
-            async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
-                langs = [row[0] for row in await cursor.fetchall()]
-            
-            for lang in langs:
-                async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as cursor:
-                    chapters = [{"chapter": row[0], "url": row[1]} for row in await cursor.fetchall()]
-                if chapters:
-                    lang_name = "Русский" if lang == "ru" else "English" if lang == "en" else lang
-                    result["series"].append({
-                        "id": f"manga_{lang}",
-                        "title": f"Манга ({lang_name})",
-                        "volumes": [{"volume": 1, "chapters": chapters}]
-                    })
-            
+        result = await build_reader_data()
         return aiohttp.web.json_response(result, headers=CORS_HEADERS)
     except Exception as e:
         logging.error(f"Reader API Error: {e}")
         return aiohttp.web.json_response({"error": str(e), "series": []}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Сброс кастомного имени элемента обратно в дефолт. Только для AdminMode."""
+    try:
+        data = await request.json()
+        obj_id = data.get('obj_id', '').strip()
+        user_id = data.get('user_id', '')
+        if not obj_id:
+            return aiohttp.web.json_response({"error": "missing obj_id"}, status=400, headers=CORS_HEADERS)
+        # Проверяем что запрашивающий — админ
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('DELETE FROM custom_names WHERE id = ?', (obj_id,))
+            await db.commit()
+
+        return aiohttp.web.json_response({"ok": True, "obj_id": obj_id}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 
 async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -2808,6 +2815,9 @@ async def main():
     app.router.add_post("/api/comments", handle_comments_post)
     app.router.add_options("/api/comments", handle_cors_preflight)
     app.router.add_route("DELETE", "/api/comments", handle_comments_delete)
+    # Переименование/сброс имён (режим редактора)
+    app.router.add_route("DELETE", "/api/rename", handle_rename_delete)
+    app.router.add_options("/api/rename", handle_cors_preflight)
     
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
