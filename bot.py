@@ -12,6 +12,7 @@ import re
 import random
 import aiosqlite
 import aiohttp
+import aiohttp.web
 from datetime import datetime
 from typing import Union
 
@@ -26,7 +27,7 @@ from aiogram.types import (
     BotCommand, BotCommandScopeDefault
 )
 
-from config import BOT_TOKEN, GROQ_API_KEY, GEMMA_API_KEY, LOCAL_API_URL, ADMIN_IDS, WEBAPP_URL
+from config import BOT_TOKEN, GROQ_API_KEY, GEMMA_API_KEY, LOCAL_API_URL, NGROK_URL, ADMIN_IDS, WEBAPP_URL
 from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
@@ -574,7 +575,7 @@ async def process_section_ai(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL}?api_key={GROQ_API_KEY}")))
+    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL}?server={NGROK_URL}" if NGROK_URL else WEBAPP_URL)))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     try:
         await callback.message.edit_text("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -640,7 +641,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
         builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL}?api_key={GROQ_API_KEY}")))
+        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL}?server={NGROK_URL}" if NGROK_URL else WEBAPP_URL)))
         builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
         return await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
     elif deep_link == "project":
@@ -708,7 +709,7 @@ async def handle_reply_ai(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL}?api_key={GROQ_API_KEY}")))
+    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL}?server={NGROK_URL}" if NGROK_URL else WEBAPP_URL)))
     builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
     await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -2459,6 +2460,87 @@ class StatsMiddleware(BaseMiddleware):
                 
         return await handler(event, data)
 
+# ==============================================================================
+# БЛОК: API СЕРВЕР ДЛЯ WEBAPP (ПРОКСИРОВАНИЕ ЗАПРОСОВ)
+# ==============================================================================
+
+async def handle_webapp_chat(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """API эндпоинт для WebApp. Принимает сообщение, отправляет в ИИ, возвращает ответ."""
+    # CORS заголовки
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+    
+    if request.method == "OPTIONS":
+        return aiohttp.web.Response(status=200, headers=cors_headers)
+    
+    try:
+        data = await request.json()
+    except Exception:
+        return aiohttp.web.json_response({"error": "Invalid JSON"}, status=400, headers=cors_headers)
+    
+    messages = data.get("messages", [])
+    provider = data.get("provider", "groq")
+    
+    if not messages:
+        return aiohttp.web.json_response({"error": "No messages"}, status=400, headers=cors_headers)
+    
+    # Извлекаем system prompt и историю
+    system_prompt = "Тебя зовут Аля. Ты цундере-девушка. Отвечай кратко, 1-2 предложения."
+    history = []
+    user_prompt = ""
+    
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "system":
+            system_prompt = content
+        elif role == "user":
+            user_prompt = content
+            history.append({"role": "user", "content": content})
+        elif role == "assistant":
+            history.append({"role": "assistant", "content": content})
+    
+    if not user_prompt:
+        return aiohttp.web.json_response({"error": "No user message"}, status=400, headers=cors_headers)
+    
+    # Убираем последнее сообщение из history (оно и есть prompt)
+    if history and history[-1]["role"] == "user":
+        history = history[:-1]
+    
+    # Вызываем нашу универсальную функцию
+    reply = await ask_ai(user_prompt, system_prompt, history=history or None, provider=provider)
+    
+    # Очищаем HTML теги из ответа (WebApp использует plain text)
+    import re as _re
+    reply_clean = _re.sub(r'<[^>]+>', '', reply)
+    
+    return aiohttp.web.json_response({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": reply_clean
+            }
+        }],
+        "provider": provider
+    }, headers=cors_headers)
+
+
+async def handle_webapp_providers(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Возвращает список доступных провайдеров."""
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+    providers = {}
+    for key, info in AI_PROVIDERS.items():
+        providers[key] = {"name": info["name"], "model": info["model"]}
+    return aiohttp.web.json_response({"providers": providers}, headers=cors_headers)
+
+
 async def main():
     dp.include_router(rp_router)
     
@@ -2479,6 +2561,19 @@ async def main():
     await bot.set_my_commands(commands, BotCommandScopeDefault())
     # ================================
     
+    # === Запуск API веб-сервера для WebApp ===
+    app = aiohttp.web.Application()
+    app.router.add_post("/api/chat", handle_webapp_chat)
+    app.router.add_options("/api/chat", handle_webapp_chat)  # CORS preflight
+    app.router.add_get("/api/providers", handle_webapp_providers)
+    
+    runner = aiohttp.web.AppRunner(app)
+    await runner.setup()
+    site = aiohttp.web.TCPSite(runner, "0.0.0.0", 8080)
+    await site.start()
+    logging.info("API сервер для WebApp запущен на порту 8080")
+    # =========================================
+    
     logging.info("Бот запущен. База данных готова.")
     await bot.delete_webhook(drop_pending_updates=True)
     try:
@@ -2488,6 +2583,7 @@ async def main():
         global _http_session
         if _http_session and not _http_session.closed:
             await _http_session.close()
+        await runner.cleanup()
 
 if __name__ == "__main__":
     try: asyncio.run(main())
