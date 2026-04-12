@@ -1767,12 +1767,21 @@ async def cmd_sync_webapp(message: types.Message):
             json.dump(result, f, ensure_ascii=False, indent=2)
             
         await msg.edit_text("🔄 <i>Публикуем данные в Github Pages. Ожидайте...</i>", parse_mode="HTML")
-        r = os.system("git add webapp/chapters_data.json && git commit -m \"sync webapp db\" && git push")
+        
+        # Настраиваем git от имени бота (если не настроено, предотвращает ошибку 128)
+        os.system("git config user.name 'MangaBot' && git config user.email 'bot@manga.local'")
+        
+        # Делаем коммит, игнорируя ошибку пустого коммита (если данные не поменялись)
+        os.system("git add webapp/chapters_data.json")
+        os.system("git commit -m \"sync webapp db\"")
+        
+        # Выполняем пуш
+        r = os.system("git push")
         
         if r == 0:
             await msg.edit_text("✅ <b>Успешно!</b> Главы синхронизированы с WebApp. (Они появятся в приложении в течение 1-2 минут)", parse_mode="HTML")
         else:
-            await msg.edit_text(f"⚠️ База данных сохранена локально, но произошла ошибка при `git push`. (Код {r})", parse_mode="HTML")
+            await msg.edit_text(f"⚠️ База обновлена локально. <code>git push</code> вернул код {r}. Возможно, нет новых данных или сервер требует настройки прав доступа Git.", parse_mode="HTML")
             
     except Exception as e:
         import traceback
