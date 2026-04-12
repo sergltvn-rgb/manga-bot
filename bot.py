@@ -26,7 +26,7 @@ from aiogram.types import (
     BotCommand, BotCommandScopeDefault
 )
 
-from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL
+from config import BOT_TOKEN, GROQ_API_KEY, GEMMA_API_KEY, LOCAL_API_URL, ADMIN_IDS, WEBAPP_URL
 from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
@@ -36,7 +36,8 @@ from database import (
     get_commands_link, set_commands_link, delete_commands_link,
     add_to_blacklist, remove_from_blacklist, is_blacklisted, get_blacklist,
     get_akashic_volumes, get_akashic_chapters, get_akashic_chapter_link,
-    get_british_volumes, get_british_chapters, get_british_chapter_link
+    get_british_volumes, get_british_chapters, get_british_chapter_link,
+    get_chat_ai_provider, set_chat_ai_provider
 )
 
 COOLDOWN_TIME = 30 
@@ -164,32 +165,163 @@ from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply
 # ==============================================================================
 # БЛОК 4: ИСКУССТВЕННЫЙ ИНТЕЛЛЕКТ (СИСТЕМА МУЛЬТИ-ПЕРСОНАЖЕЙ)
 # ==============================================================================
-async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str:
-    if not GROQ_API_KEY: return "<i>❌ Ошибка: Нет ключа Groq.</i>"
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    
-    messages = [{"role": "system", "content": system_prompt}]
-    if history:
-        messages.extend(history)
-    messages.append({"role": "user", "content": prompt})
 
-    payload = {
+# --- Провайдеры ИИ ---
+AI_PROVIDERS = {
+    "groq": {
+        "name": "☁️ Groq (Облако)",
         "model": "llama-3.3-70b-versatile",
-        "messages": messages,
-        "temperature": 0.65, 
-        "max_tokens": 300    
-    }
-    try:
-        session = await get_http_session()
-        async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                return data['choices'][0]['message']['content']
-            return f"<i>Ошибка ИИ: {resp.status}</i>"
-    except Exception as e:
-        logging.error(f"Groq Error: {e}")
-        return "<i>Ошибка соединения с ИИ.</i>"
+    },
+    "gemma": {
+        "name": "🖥 Gemma 4 (Локально)",
+        "model": "google/gemma-4-e4b:2",
+    },
+}
+
+async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider: str = "groq") -> str:
+    """Универсальная функция запроса к ИИ. Поддерживает groq и gemma (LM Studio v1 API)."""
+    
+    if provider == "gemma":
+        # --- LM Studio Native API v1 ---
+        if not GEMMA_API_KEY:
+            return "<i>❌ Ошибка: Нет ключа Gemma (LM Studio).</i>"
+        
+        api_url = f"{LOCAL_API_URL}/chat"
+        headers = {
+            "Authorization": f"Bearer {GEMMA_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        
+        # LM Studio v1 API использует поле "input" и "system_prompt"
+        # Собираем контекст из истории, если есть
+        full_prompt = prompt
+        if history:
+            context_lines = []
+            for msg in history[-10:]:  # Берем последние 10 сообщений
+                role = "Пользователь" if msg["role"] == "user" else "Аля"
+                context_lines.append(f"{role}: {msg['content']}")
+            context_lines.append(f"Пользователь: {prompt}")
+            full_prompt = "\n".join(context_lines)
+        
+        payload = {
+            "model": AI_PROVIDERS["gemma"]["model"],
+            "system_prompt": system_prompt,
+            "input": full_prompt,
+            "temperature": 0.65,
+        }
+        
+        try:
+            session = await get_http_session()
+            async with session.post(api_url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # LM Studio v1 API возвращает поле "message"
+                    if "message" in data:
+                        return data["message"]
+                    # Fallback: если формат OpenAI-совместимый
+                    if "choices" in data:
+                        return data["choices"][0]["message"]["content"]
+                    return "<i>Ответ получен, но в неизвестном формате.</i>"
+                error_text = await resp.text()
+                logging.error(f"Gemma Error {resp.status}: {error_text[:200]}")
+                return f"<i>Ошибка Gemma: {resp.status}</i>"
+        except Exception as e:
+            logging.error(f"Gemma Connection Error: {e}")
+            return "<i>Ошибка: Не удалось подключиться к LM Studio. Убедись, что сервер запущен.</i>"
+    
+    else:
+        # --- Groq Cloud API (по умолчанию) ---
+        if not GROQ_API_KEY:
+            return "<i>❌ Ошибка: Нет ключа Groq.</i>"
+        
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+        
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": prompt})
+        
+        payload = {
+            "model": AI_PROVIDERS["groq"]["model"],
+            "messages": messages,
+            "temperature": 0.65,
+            "max_tokens": 300
+        }
+        try:
+            session = await get_http_session()
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data['choices'][0]['message']['content']
+                return f"<i>Ошибка ИИ: {resp.status}</i>"
+        except Exception as e:
+            logging.error(f"Groq Error: {e}")
+            return "<i>Ошибка соединения с ИИ.</i>"
+
+# Обратная совместимость: старое имя функции
+async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str:
+    return await ask_ai(prompt, system_prompt, history, provider="groq")
+
+# --- Команда /model для переключения провайдера ---
+@dp.message(Command("model"), StateFilter("*"))
+async def cmd_set_model(message: types.Message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    # Проверка прав: в группах — только админы чата, в ЛС — любой
+    if message.chat.type in ["group", "supergroup"]:
+        member = await bot.get_chat_member(chat_id, user_id)
+        if member.status not in ["administrator", "creator"]:
+            admins = await get_admins()
+            if user_id not in admins:
+                return await message.answer("⛔ Переключать модель могут только админы чата.")
+    
+    current = await get_chat_ai_provider(chat_id)
+    
+    builder = InlineKeyboardBuilder()
+    for key, info in AI_PROVIDERS.items():
+        mark = " ✅" if key == current else ""
+        builder.row(types.InlineKeyboardButton(
+            text=f"{info['name']}{mark}",
+            callback_data=f"setmodel_{key}"
+        ))
+    
+    await message.answer(
+        f"🧠 <b>Текущая модель ИИ:</b> {AI_PROVIDERS[current]['name']}\n\n"
+        f"Выберите, какой ИИ будет отвечать в этом чате:",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
+
+@dp.callback_query(F.data.startswith("setmodel_"))
+async def callback_set_model(callback: types.CallbackQuery):
+    provider = callback.data.split("_")[1]
+    if provider not in AI_PROVIDERS:
+        return await callback.answer("❌ Неизвестный провайдер.", show_alert=True)
+    
+    chat_id = callback.message.chat.id
+    user_id = callback.from_user.id
+    
+    # Проверка прав в группах
+    if callback.message.chat.type in ["group", "supergroup"]:
+        member = await bot.get_chat_member(chat_id, user_id)
+        if member.status not in ["administrator", "creator"]:
+            admins = await get_admins()
+            if user_id not in admins:
+                return await callback.answer("⛔ Только админы чата.", show_alert=True)
+    
+    await set_chat_ai_provider(chat_id, provider)
+    
+    info = AI_PROVIDERS[provider]
+    await callback.message.edit_text(
+        f"✅ Модель ИИ переключена на <b>{info['name']}</b>\n"
+        f"📦 Модель: <code>{info['model']}</code>",
+        parse_mode="HTML"
+    )
+    await callback.answer(f"Переключено на {info['name']}")
+
+
 
 def get_ai_setup(char_id: str, alya_mode: str = "normal"):
     if char_id == "alya":
@@ -269,8 +401,12 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
     alya_mode = await get_alya_mode()
     char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
 
-    wait_msg = await message.answer(f"<i>{char_name} печатает...</i>", parse_mode="HTML")
-    response = await ask_groq(message.text, system_prompt, history=chat_history)
+    # Определяем провайдера для этого чата
+    provider = await get_chat_ai_provider(message.chat.id)
+    provider_badge = AI_PROVIDERS.get(provider, {}).get('name', provider)
+
+    wait_msg = await message.answer(f"<i>{char_name} печатает... ({provider_badge})</i>", parse_mode="HTML")
+    response = await ask_ai(message.text, system_prompt, history=chat_history, provider=provider)
     
     chat_history.append({"role": "user", "content": message.text})
     chat_history.append({"role": "assistant", "content": response})
@@ -343,13 +479,16 @@ async def process_group_ai_chat(message: types.Message):
     alya_mode = await get_alya_mode()
     char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
     
+    # Определяем провайдера для этого чата
+    provider = await get_chat_ai_provider(chat_id)
+    
     history = []
     if is_reply_to_bot and message.reply_to_message.text:
         bot_text = re.sub(r'^[🌸🎧].*?:\n', '', message.reply_to_message.text)
         history.append({"role": "assistant", "content": bot_text})
 
     wait_msg = await message.reply(f"<i>{char_name} печатает...</i>", parse_mode="HTML")
-    response = await ask_groq(message.text, system_prompt, history=history)
+    response = await ask_ai(message.text, system_prompt, history=history, provider=provider)
     await wait_msg.delete()
     
     await message.reply(f"{emoji} <b>{char_name}:</b>\n{response}", parse_mode="HTML")
@@ -625,7 +764,8 @@ async def get_help_text(user_id: int) -> str:
         "/выбери [А] или [Б]\n"
         "/аля выбери [А] или [Б] — ИИ-выбор\n\n"
         "<b>🤖 ИИ-чат:</b>\n"
-        "Напиши <i>\"аля [текст]\"</i> или <i>\"масачика [текст]\"</i> в любом чате"
+        "Напиши <i>\"аля [текст]\"</i> или <i>\"масачика [текст]\"</i> в любом чате\n"
+        "/model — Переключить модель ИИ (Облако / Локально)"
         f"{link_line}"
     )
     

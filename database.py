@@ -31,6 +31,8 @@ async def init_db():
         await db.execute('CREATE TABLE IF NOT EXISTS alya_settings (bot_id INTEGER PRIMARY KEY, mode TEXT DEFAULT "normal")')
         await db.execute('CREATE TABLE IF NOT EXISTS ai_blacklist (user_id INTEGER PRIMARY KEY)')
         await db.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT)')
+        # Таблица для выбора провайдера ИИ (groq / gemma) для каждого чата
+        await db.execute('CREATE TABLE IF NOT EXISTS chat_ai_provider (chat_id INTEGER PRIMARY KEY, provider TEXT DEFAULT "groq")')
 
         # Инициализация режима Али по умолчанию (если пусто)
         await db.execute('INSERT OR IGNORE INTO alya_settings (bot_id, mode) VALUES (1, "normal")')
@@ -50,6 +52,19 @@ async def toggle_alya_mode() -> str:
         await db.execute('UPDATE alya_settings SET mode = ? WHERE bot_id = 1', (new_mode,))
         await db.commit()
     return new_mode
+
+async def get_chat_ai_provider(chat_id: int) -> str:
+    """Возвращает провайдера ИИ для чата: 'groq' или 'gemma'."""
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT provider FROM chat_ai_provider WHERE chat_id = ?', (chat_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else "groq"
+
+async def set_chat_ai_provider(chat_id: int, provider: str):
+    """Устанавливает провайдера ИИ для чата."""
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('INSERT OR REPLACE INTO chat_ai_provider (chat_id, provider) VALUES (?, ?)', (chat_id, provider))
+        await db.commit()
 
 async def get_all_arts() -> list:
     async with aiosqlite.connect('manga.db') as db:

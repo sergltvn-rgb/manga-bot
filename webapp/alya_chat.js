@@ -15,6 +15,10 @@ const tokenInput = document.getElementById('tokenInput');
 const urlInput = document.getElementById('urlInput');
 const modelInput = document.getElementById('modelInput');
 
+// Переключатель провайдера
+const providerToggle = document.getElementById('providerToggle');
+const providerLabel = document.getElementById('providerLabel');
+
 const userName = tg.initDataUnsafe?.user?.first_name || "Пользователь";
 const SYSTEM_PROMPT = `Тебя зовут Аля. Ты цундере. Общайся с ${userName}. Будь краткой. Пиши 1-2 предложения.`;
 
@@ -24,10 +28,27 @@ let messageHistory = [{ role: "system", content: SYSTEM_PROMPT }];
 let config = {
     token: localStorage.getItem("alya_token") || "",
     url: localStorage.getItem("alya_url") || "https://api.groq.com/openai/v1/chat/completions",
-    model: localStorage.getItem("alya_model") || "llama-3.3-70b-versatile"
+    model: localStorage.getItem("alya_model") || "llama-3.3-70b-versatile",
+    provider: localStorage.getItem("alya_provider") || "groq" // groq или gemma
 };
 
-// Если ключ пришел в URL — сохраняем его приоритетно
+// --- Провайдеры ---
+const PROVIDERS = {
+    groq: {
+        name: "☁️ Облако (Groq)",
+        url: "https://api.groq.com/openai/v1/chat/completions",
+        model: "llama-3.3-70b-versatile",
+        tokenKey: "GROQ_API_KEY",
+    },
+    gemma: {
+        name: "🖥 Локально (Gemma 4)",
+        url: "http://127.0.0.1:1234/v1/chat/completions",
+        model: "google/gemma-4-e4b:2",
+        tokenKey: "GEMMA_API_KEY",
+    }
+};
+
+// Если ключ пришел в URL — сохраняем его приоритетно (для Groq)
 const urlParams = new URLSearchParams(window.location.search);
 const apiKeyFromUrl = urlParams.get('api_key');
 if (apiKeyFromUrl) {
@@ -35,6 +56,22 @@ if (apiKeyFromUrl) {
     localStorage.setItem("alya_token", apiKeyFromUrl);
     // Очистка URL
     window.history.replaceState({}, document.title, window.location.pathname);
+}
+
+// Gemma ключ из URL (если передан)
+const gemmaKeyFromUrl = urlParams.get('gemma_key');
+if (gemmaKeyFromUrl) {
+    localStorage.setItem("alya_gemma_token", gemmaKeyFromUrl);
+}
+
+function updateProviderUI() {
+    const p = PROVIDERS[config.provider];
+    if (providerLabel) {
+        providerLabel.textContent = p.name;
+    }
+    if (providerToggle) {
+        providerToggle.checked = config.provider === "gemma";
+    }
 }
 
 function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
@@ -51,7 +88,20 @@ async function sendMessage() {
     const text = userInput.value.trim();
     if (!text) return;
 
-    if (!config.token) {
+    // Определяем текущий токен и URL на основе провайдера
+    let currentUrl, currentModel, currentToken;
+    
+    if (config.provider === "gemma") {
+        currentUrl = PROVIDERS.gemma.url;
+        currentModel = PROVIDERS.gemma.model;
+        currentToken = localStorage.getItem("alya_gemma_token") || config.token;
+    } else {
+        currentUrl = PROVIDERS.groq.url;
+        currentModel = PROVIDERS.groq.model;
+        currentToken = config.token;
+    }
+
+    if (!currentToken) {
         addMessage("⚠️ Ошибка: Нажми на ⚙️ сверху и введи свой API токен!", false);
         return;
     }
@@ -64,19 +114,10 @@ async function sendMessage() {
     scrollToBottom();
 
     try {
-        // Авто-подмена URL если это LM Studio
-        let currentUrl = config.url;
-        let currentModel = config.model;
-
-        if (config.token.startsWith("sk-lm-") && config.url.includes("groq")) {
-            currentUrl = "http://127.0.0.1:1234/v1/chat/completions";
-            currentModel = "local-model";
-        }
-
         const response = await fetch(currentUrl, {
             method: "POST",
             headers: {
-                "Authorization": `Bearer ${config.token}`,
+                "Authorization": `Bearer ${currentToken}`,
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({ 
@@ -95,11 +136,22 @@ async function sendMessage() {
         addMessage(reply, false);
     } catch (e) {
         typingIndicator.classList.add('hidden');
-        addMessage("Ошибка API: " + e.message + "\nПроверьте настройки ⚙️ и запущен ли сервер.", false);
+        const providerName = PROVIDERS[config.provider].name;
+        addMessage(`Ошибка (${providerName}): ${e.message}\nПроверьте настройки ⚙️ и запущен ли сервер.`, false);
     } finally {
         sendBtn.disabled = false;
         userInput.focus();
     }
+}
+
+// --- Переключатель провайдера ---
+if (providerToggle) {
+    providerToggle.addEventListener('change', () => {
+        config.provider = providerToggle.checked ? "gemma" : "groq";
+        localStorage.setItem("alya_provider", config.provider);
+        updateProviderUI();
+        addMessage(`🔄 Переключено на ${PROVIDERS[config.provider].name}`, false);
+    });
 }
 
 // Управление настройками
@@ -107,6 +159,12 @@ openSettings.onclick = () => {
     tokenInput.value = config.token;
     urlInput.value = config.url;
     modelInput.value = config.model;
+    
+    const gemmaTokenInput = document.getElementById('gemmaTokenInput');
+    if (gemmaTokenInput) {
+        gemmaTokenInput.value = localStorage.getItem("alya_gemma_token") || "";
+    }
+    
     settingsModal.classList.remove('hidden');
 };
 
@@ -121,6 +179,11 @@ saveSettings.onclick = () => {
     localStorage.setItem("alya_url", config.url);
     localStorage.setItem("alya_model", config.model);
     
+    const gemmaTokenInput = document.getElementById('gemmaTokenInput');
+    if (gemmaTokenInput) {
+        localStorage.setItem("alya_gemma_token", gemmaTokenInput.value.trim());
+    }
+    
     settingsModal.classList.add('hidden');
     addMessage("✅ Настройки сохранены!", false);
 };
@@ -128,3 +191,6 @@ saveSettings.onclick = () => {
 sendBtn.onclick = sendMessage;
 userInput.onkeypress = (e) => { if(e.key === 'Enter') sendMessage(); };
 tg.setHeaderColor('bg_color');
+
+// Инициализация UI
+updateProviderUI();
