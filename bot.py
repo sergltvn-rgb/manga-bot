@@ -209,65 +209,7 @@ async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider
 async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str:
     return await ask_ai(prompt, system_prompt, history, provider="groq")
 
-# --- Команда /model для переключения провайдера ---
-@dp.message(Command("model"), StateFilter("*"))
-async def cmd_set_model(message: types.Message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    # Проверка прав: в группах — только админы чата, в ЛС — любой
-    if message.chat.type in ["group", "supergroup"]:
-        member = await bot.get_chat_member(chat_id, user_id)
-        if member.status not in ["administrator", "creator"]:
-            admins = await get_admins()
-            if user_id not in admins:
-                return await message.answer("⛔ Переключать модель могут только админы чата.")
-    
-    current = await get_chat_ai_provider(chat_id)
-    
-    builder = InlineKeyboardBuilder()
-    for key, info in AI_PROVIDERS.items():
-        mark = " ✅" if key == current else ""
-        builder.row(types.InlineKeyboardButton(
-            text=f"{info['name']}{mark}",
-            callback_data=f"setmodel_{key}"
-        ))
-    
-    await message.answer(
-        f"🧠 <b>Текущая модель ИИ:</b> {AI_PROVIDERS[current]['name']}\n\n"
-        f"Выберите, какой ИИ будет отвечать в этом чате:",
-        parse_mode="HTML",
-        reply_markup=builder.as_markup()
-    )
-
-@dp.callback_query(F.data.startswith("setmodel_"))
-async def callback_set_model(callback: types.CallbackQuery):
-    provider = callback.data.split("_")[1]
-    if provider not in AI_PROVIDERS:
-        return await callback.answer("❌ Неизвестный провайдер.", show_alert=True)
-    
-    chat_id = callback.message.chat.id
-    user_id = callback.from_user.id
-    
-    # Проверка прав в группах
-    if callback.message.chat.type in ["group", "supergroup"]:
-        member = await bot.get_chat_member(chat_id, user_id)
-        if member.status not in ["administrator", "creator"]:
-            admins = await get_admins()
-            if user_id not in admins:
-                return await callback.answer("⛔ Только админы чата.", show_alert=True)
-    
-    await set_chat_ai_provider(chat_id, provider)
-    
-    info = AI_PROVIDERS[provider]
-    await callback.message.edit_text(
-        f"✅ Модель ИИ переключена на <b>{info['name']}</b>\n"
-        f"📦 Модель: <code>{info['model']}</code>",
-        parse_mode="HTML"
-    )
-    await callback.answer(f"Переключено на {info['name']}")
-
-
+# --- Команда /model удалена по запросу ---
 
 def get_ai_setup(char_id: str, alya_mode: str = "normal"):
     if char_id == "alya":
@@ -473,10 +415,10 @@ async def process_section_read(callback: types.CallbackQuery):
     reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html"
     
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="📖 Читать мангу", callback_data="read_langs"))
-    builder.row(types.InlineKeyboardButton(text="📚 Читать ранобэ", callback_data="read_ranobe_langs"))
-    builder.row(types.InlineKeyboardButton(text="🌸 Читалка (WebApp)", web_app=WebAppInfo(url=reader_url)))
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
+    builder.row(types.InlineKeyboardButton(text="📗 Читать мангу", callback_data="read_langs"))
+    builder.row(types.InlineKeyboardButton(text="📘 Читать ранобэ", callback_data="read_ranobe_langs"))
+    builder.row(types.InlineKeyboardButton(text="✨ Читалка (WebApp)", web_app=WebAppInfo(url=reader_url)))
+    builder.row(types.InlineKeyboardButton(text="↩️ Назад", callback_data="main_menu"))
     try:
         await callback.message.edit_text("📖 <b>Чтение:</b>\nВыберите, что хотите читать:", parse_mode="HTML", reply_markup=builder.as_markup())
     except Exception:
@@ -585,14 +527,14 @@ async def cmd_start(message: types.Message, state: FSMContext):
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
         builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
-        builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+        builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
         return await message.answer("🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup())
     elif deep_link == "ai":
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
         builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
         builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL}?key={GROQ_API_KEY}")))
-        builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+        builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
         return await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
     elif deep_link == "project":
         builder = InlineKeyboardBuilder()
@@ -603,7 +545,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         if link:
             builder.row(types.InlineKeyboardButton(text="🔗 Все команды (Telegraph)", url=link))
         builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
-        builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+        builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
         return await message.answer("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
     
     # Обычный /start (без deep link)
@@ -634,10 +576,12 @@ async def _redirect_to_dm(message: types.Message, section: str, label: str):
 @dp.message(F.text == "📖 Читать", StateFilter("*"))
 async def handle_reply_read(message: types.Message, state: FSMContext):
     await state.clear()
+    reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html"
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="📖 Читать мангу", callback_data="read_langs"))
-    builder.row(types.InlineKeyboardButton(text="📚 Читать ранобэ", callback_data="read_ranobe_langs"))
-    builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+    builder.row(types.InlineKeyboardButton(text="📗 Читать мангу", callback_data="read_langs"))
+    builder.row(types.InlineKeyboardButton(text="📘 Читать ранобэ", callback_data="read_ranobe_langs"))
+    builder.row(types.InlineKeyboardButton(text="✨ Читалка (WebApp)", web_app=WebAppInfo(url=reader_url)))
+    builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
     await message.answer("📖 <b>Чтение:</b>\nВыберите, что хотите читать:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.message(F.text == "🎨 Арты", StateFilter("*"))
@@ -648,7 +592,7 @@ async def handle_reply_arts(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
     builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
-    builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+    builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
     await message.answer("🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.message(F.text == "🤖 ИИ чаты", StateFilter("*"))
@@ -659,8 +603,9 @@ async def handle_reply_ai(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL}?key={GROQ_API_KEY}")))
-    builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/alya_chat.html?key={GROQ_API_KEY}"
+    builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
+    builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
     await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.message(F.text == "ℹ️ Проект", StateFilter("*"))
@@ -676,7 +621,7 @@ async def handle_reply_project(message: types.Message, state: FSMContext):
     if link:
         builder.row(types.InlineKeyboardButton(text="🔗 Все команды (Telegraph)", url=link))
     builder.row(types.InlineKeyboardButton(text="🆘 Тех. поддержка / Идеи", callback_data="tech_support_menu"))
-    builder.row(types.InlineKeyboardButton(text="📋 Полное меню", callback_data="main_menu"))
+    builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
     await message.answer("ℹ️ <b>Информация о проекте:</b>\n\nВыберите раздел:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.message(F.text == "📋 Меню", StateFilter("*"))
@@ -715,8 +660,7 @@ async def get_help_text(user_id: int) -> str:
         "/выбери [А] или [Б]\n"
         "/аля выбери [А] или [Б] — ИИ-выбор\n\n"
         "<b>🤖 ИИ-чат:</b>\n"
-        "Напиши <i>\"аля [текст]\"</i> или <i>\"масачика [текст]\"</i> в любом чате\n"
-        "/model — Переключить модель ИИ (Облако / Локально)"
+        "Напиши <i>\"аля [текст]\"</i> или <i>\"масачика [текст]\"</i> в любом чате"
         f"{link_line}"
     )
     
@@ -1725,13 +1669,84 @@ async def cmd_admin(message: types.Message):
         "/add_british | /delete_british - Британская красавица\n"
         "/add_art | /arts_list | /delete_art - Арты\n"
         "/add_admin | /delete_admin - Админы\n"
+        "/sync_webapp - 🚀 Синхронизация БД с WebApp (Github Pages)\n"
         "/blacklist_ai | /unblacklist_ai - ЧС для ИИ\n"
-        "/toggle_ai - Вкл/выкл ИИ (в текущей группе)\n"
-        "/alya_mode - Переключить режим Али (нормальный/гопник)\n"
-        "/set_commands_link | /delete_commands_link - Telegraph ссылка на список команд\n"
+        "/toggle_ai - Вкл/выкл ИИ\n"
+        "/alya_mode - Режим Али\n"
+        "/set_commands_link - Telegraph ссылка\n"
         "/cancel - Отмена"
     )
     await message.answer(text, parse_mode="HTML")
+
+import json
+import os
+
+@dp.message(Command("sync_webapp"))
+async def cmd_sync_webapp(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    
+    msg = await message.answer("🔄 <i>Собираем данные из БД для WebApp...</i>", parse_mode="HTML")
+    try:
+        from database import get_db
+        db = await get_db()
+        result = {"series": []}
+        
+        async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
+            ak_vols = [row[0] for row in await cursor.fetchall()]
+        if ak_vols:
+            akashic = {"id": "akashic_records", "title": "Хроники Акаши", "volumes": []}
+            for vol in ak_vols:
+                async with db.execute('SELECT chapter_number, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter_number AS REAL)', (vol,)) as c:
+                    chapters = [{"chapter": row[0], "url": row[1]} for row in await c.fetchall()]
+                akashic["volumes"].append({"volume": vol, "chapters": chapters})
+            result["series"].append(akashic)
+            
+        async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
+            br_vols = [row[0] for row in await cursor.fetchall()]
+        if br_vols:
+            british = {"id": "british_belle", "title": "Поцелуй британской красавицы", "volumes": []}
+            for vol in br_vols:
+                async with db.execute('SELECT chapter_number, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter_number AS REAL)', (vol,)) as c:
+                    chapters = [{"chapter": row[0], "url": row[1]} for row in await c.fetchall()]
+                british["volumes"].append({"volume": vol, "chapters": chapters})
+            result["series"].append(british)
+            
+        async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
+            langs_ro = [row[0] for row in await cursor.fetchall()]
+        for lang in langs_ro:
+            async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
+                chapters = [{"chapter": row[0], "url": row[1]} for row in await c.fetchall()]
+            if chapters:
+                lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
+                result["series"].append({
+                    "id": f"ranobe_{lang}", "title": f"Ранобэ ({lname})", "volumes": [{"volume": 1, "chapters": chapters}]
+                })
+                
+        async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
+            langs_mg = [row[0] for row in await cursor.fetchall()]
+        for lang in langs_mg:
+            async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
+                chapters = [{"chapter": row[0], "url": row[1]} for row in await c.fetchall()]
+            if chapters:
+                lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
+                result["series"].append({
+                    "id": f"manga_{lang}", "title": f"Манга ({lname})", "volumes": [{"volume": 1, "chapters": chapters}]
+                })
+        
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+            
+        await msg.edit_text("🔄 <i>Публикуем данные в Github Pages. Ожидайте...</i>", parse_mode="HTML")
+        r = os.system("git add webapp/chapters_data.json && git commit -m \"sync webapp db\" && git push")
+        
+        if r == 0:
+            await msg.edit_text("✅ <b>Успешно!</b> Главы синхронизированы с WebApp. (Они появятся в приложении в течение 1-2 минут)", parse_mode="HTML")
+        else:
+            await msg.edit_text(f"⚠️ База данных сохранена локально, но произошла ошибка при `git push`. (Код {r})", parse_mode="HTML")
+            
+    except Exception as e:
+        await msg.edit_text(f"❌ <b>Ошибка:</b> {e}", parse_mode="HTML")
 
 @dp.message(Command("alya_mode"))
 async def cmd_alya_mode(message: types.Message):
