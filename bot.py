@@ -1682,12 +1682,17 @@ import json
 import os
 import re
 
-def _clean_url(url_text: str) -> str:
-    # Ищем первую попавшуюся нормальную ссылку (http/https)
-    match = re.search(r'(https?://[^\s<"\'>]+)', url_text)
-    if match:
-        return match.group(1)
-    return url_text
+def _clean_urls(url_text: str) -> list:
+    # Ищем все ссылки
+    links = re.findall(r'(https?://[^\s<"\'>]+)', url_text)
+    if not links:
+        return []
+    # Если есть telegraph ссылки, берём их все (на случай разбивки на части)
+    telegraph_links = [l for l in links if 'telegra.ph' in l]
+    if telegraph_links:
+        return telegraph_links
+    # Иначе возвращаем все найденные
+    return links
 
 @dp.message(Command("sync_webapp"))
 async def cmd_sync_webapp(message: types.Message):
@@ -1705,8 +1710,12 @@ async def cmd_sync_webapp(message: types.Message):
             if ak_vols:
                 akashic = {"id": "akashic_records", "title": "Хроники Акаши", "volumes": []}
                 for vol in ak_vols:
-                    async with db.execute('SELECT chapter_number, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter_number AS REAL)', (vol,)) as c:
-                        chapters = [{"chapter": row[0], "url": _clean_url(row[1])} for row in await c.fetchall()]
+                    async with db.execute('SELECT chapter, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
+                        chapters = []
+                        for row in await c.fetchall():
+                            extracted = _clean_urls(row[1])
+                            url_val = extracted[0] if len(extracted) == 1 else ""
+                            chapters.append({"chapter": row[0], "url": url_val, "urls": extracted})
                     akashic["volumes"].append({"volume": vol, "chapters": chapters})
                 result["series"].append(akashic)
                 
@@ -1715,8 +1724,12 @@ async def cmd_sync_webapp(message: types.Message):
             if br_vols:
                 british = {"id": "british_belle", "title": "Поцелуй британской красавицы", "volumes": []}
                 for vol in br_vols:
-                    async with db.execute('SELECT chapter_number, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter_number AS REAL)', (vol,)) as c:
-                        chapters = [{"chapter": row[0], "url": _clean_url(row[1])} for row in await c.fetchall()]
+                    async with db.execute('SELECT chapter, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
+                        chapters = []
+                        for row in await c.fetchall():
+                            extracted = _clean_urls(row[1])
+                            url_val = extracted[0] if len(extracted) == 1 else ""
+                            chapters.append({"chapter": row[0], "url": url_val, "urls": extracted})
                     british["volumes"].append({"volume": vol, "chapters": chapters})
                 result["series"].append(british)
                 
@@ -1724,7 +1737,11 @@ async def cmd_sync_webapp(message: types.Message):
                 langs_ro = [row[0] for row in await cursor.fetchall()]
             for lang in langs_ro:
                 async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
-                    chapters = [{"chapter": row[0], "url": _clean_url(row[1])} for row in await c.fetchall()]
+                    chapters = []
+                    for row in await c.fetchall():
+                        extracted = _clean_urls(row[1])
+                        url_val = extracted[0] if len(extracted) == 1 else ""
+                        chapters.append({"chapter": row[0], "url": url_val, "urls": extracted})
                 if chapters:
                     lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
                     result["series"].append({
@@ -1735,7 +1752,11 @@ async def cmd_sync_webapp(message: types.Message):
                 langs_mg = [row[0] for row in await cursor.fetchall()]
             for lang in langs_mg:
                 async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
-                    chapters = [{"chapter": row[0], "url": _clean_url(row[1])} for row in await c.fetchall()]
+                    chapters = []
+                    for row in await c.fetchall():
+                        extracted = _clean_urls(row[1])
+                        url_val = extracted[0] if len(extracted) == 1 else ""
+                        chapters.append({"chapter": row[0], "url": url_val, "urls": extracted})
                 if chapters:
                     lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
                     result["series"].append({

@@ -197,46 +197,56 @@ function openChapter(idx) {
 function loadChapterContent(chapter) {
     const container = document.getElementById('reader-text');
     
-    if (chapter.url) {
-        // Проверяем — это Telegraph ссылка?
-        const telegraphMatch = chapter.url.match(/telegra\.ph\/(.+)/);
-        
-        if (telegraphMatch) {
-            // Загружаем контент через Telegraph API
-            container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
-            
-            fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`)
-                .then(r => r.json())
-                .then(data => {
-                    if (data.ok && data.result && data.result.content) {
-                        container.innerHTML = renderTelegraphContent(data.result.content);
-                    } else {
-                        // Если Telegraph API не работает — показываем в iframe
-                        container.innerHTML = `<iframe src="${chapter.url}" frameborder="0" style="width:100%;min-height:80vh;border:none;border-radius:8px;"></iframe>`;
-                    }
-                })
-                .catch(() => {
-                    container.innerHTML = `<iframe src="${chapter.url}" frameborder="0" style="width:100%;min-height:80vh;border:none;border-radius:8px;"></iframe>`;
-                });
-        } else {
-            // Обычная ссылка — открываем в iframe
-            container.innerHTML = `<iframe src="${chapter.url}" frameborder="0" style="width:100%;min-height:80vh;border:none;border-radius:8px;"></iframe>`;
-        }
-    } else if (chapter.text) {
-        // Встроенный текст
-        const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
-        container.innerHTML = paragraphs;
-    } else {
-        container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📄</div>
-                <h3>Контент недоступен</h3>
-                <p>Эта глава ещё не добавлена.</p>
-            </div>`;
+    // Собираем все доступные ссылки в массив
+    let urlsToLoad = [];
+    if (chapter.urls && chapter.urls.length > 0) {
+        urlsToLoad = chapter.urls;
+    } else if (chapter.url) {
+        urlsToLoad = [chapter.url];
     }
     
-    // Добавляем красивую ссылку на канал в конце (если это не iframe)
-    if (!container.innerHTML.includes('<iframe')) {
+    if (urlsToLoad.length > 0) {
+        container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
+        
+        const loadPromises = urlsToLoad.map(async (u) => {
+            const telegraphMatch = u.match(/telegra\.ph\/(.+)/);
+            if (telegraphMatch) {
+                try {
+                    const resp = await fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`);
+                    const data = await resp.json();
+                    if (data.ok && data.result && data.result.content) {
+                        return renderTelegraphContent(data.result.content);
+                    }
+                } catch (e) {
+                    console.warn("Telegraph API err", e);
+                }
+            }
+            // Фолбек для не-Telegraph или ошибок
+            return `<iframe src="${u}" frameborder="0" style="width:100%;min-height:80vh;border:none;border-radius:8px;margin-bottom:20px;"></iframe>`;
+        });
+        
+        Promise.all(loadPromises).then(results => {
+            // Соединяем куски. Если их несколько - добавляем разделитель
+            container.innerHTML = results.join('<div class="chapter-divider" style="text-align:center; margin: 40px 0;">❖ ❖ ❖</div>');
+            
+            // Баннер
+            if (!container.innerHTML.includes('<iframe')) {
+                container.innerHTML += `
+                <div class="channel-banner">
+                    <div class="channel-content">
+                        <h3>🌸 Присоединяйся к нам!</h3>
+                        <p>Все свежие переводы, новости и общение — в нашем Telegram-канале.</p>
+                        <a href="https://t.me/alya_novel" target="_blank" class="channel-btn">
+                            Подписаться на канал
+                        </a>
+                    </div>
+                </div>`;
+            }
+        });
+    } else if (chapter.text) {
+        const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
+        container.innerHTML = paragraphs;
+        
         container.innerHTML += `
         <div class="channel-banner">
             <div class="channel-content">
@@ -247,6 +257,13 @@ function loadChapterContent(chapter) {
                 </a>
             </div>
         </div>`;
+    } else {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📄</div>
+                <h3>Контент недоступен</h3>
+                <p>Эта глава ещё не добавлена.</p>
+            </div>`;
     }
     
     // Скроллим наверх
