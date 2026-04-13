@@ -1,6 +1,7 @@
 // ==========================================================================
-// Аля ИИ — WebApp (Groq Cloud)
-// Простой чат: получает API ключ от бота, вызывает Groq напрямую.
+// Аля ИИ — WebApp (Серверный прокси)
+// Безопасный чат: все запросы к Groq идут через серверный эндпоинт /api/ai_chat.
+// API-ключ никогда не покидает сервер.
 // ==========================================================================
 
 const tg = window.Telegram.WebApp;
@@ -17,17 +18,11 @@ const SYSTEM_PROMPT = `Тебя зовут Аля (Алиса Михайлова
 
 let messageHistory = [{ role: "system", content: SYSTEM_PROMPT }];
 
-// === Получаем ключ Groq от бота (через ?key= в URL) ===
+// === Определяем URL API-сервера ===
+// Если WebApp открыт через Telegram, используем origin сервера бота.
+// Fallback: относительный путь (если бот и WebApp на одном хосте).
 const urlParams = new URLSearchParams(window.location.search);
-const keyFromUrl = urlParams.get('key');
-
-if (keyFromUrl) {
-    localStorage.setItem("alya_groq_key", keyFromUrl);
-    window.history.replaceState({}, document.title, window.location.pathname);
-}
-
-// Fallback: ключ сохраняется в localStorage при первом получении через URL
-const GROQ_KEY = localStorage.getItem("alya_groq_key") || "";
+const API_URL = urlParams.get('api') || window.location.origin || '';
 
 // === Утилиты ===
 function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
@@ -40,40 +35,29 @@ function addMessage(text, isUser = false) {
     scrollToBottom();
 }
 
-// === Запрос к Groq API ===
-async function callGroq(messages) {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+// === Запрос к серверному прокси /api/ai_chat ===
+async function callAI(messages) {
+    const response = await fetch(`${API_URL}/api/ai_chat`, {
         method: "POST",
         headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${GROQ_KEY}`
+            "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-            model: "llama-3.3-70b-versatile",
-            messages: messages,
-            temperature: 0.65,
-            max_tokens: 300
-        })
+        body: JSON.stringify({ messages })
     });
 
     if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Ошибка ${response.status}: ${errText.substring(0, 100)}`);
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Ошибка ${response.status}`);
     }
 
     const data = await response.json();
-    return data.choices[0].message.content;
+    return data.reply;
 }
 
 // === Отправка сообщения ===
 async function sendMessage() {
     const text = userInput.value.trim();
     if (!text) return;
-
-    if (!GROQ_KEY) {
-        addMessage("⚠️ Нет ключа API. Открой этот чат через кнопку в Telegram-боте — ключ передастся автоматически.", false);
-        return;
-    }
 
     userInput.value = '';
     sendBtn.disabled = true;
@@ -83,8 +67,12 @@ async function sendMessage() {
     scrollToBottom();
 
     try {
-        const reply = await callGroq(messageHistory);
+        const reply = await callAI(messageHistory);
         messageHistory.push({ role: "assistant", content: reply });
+        // Ограничиваем историю — system + последние 16 сообщений
+        if (messageHistory.length > 17) {
+            messageHistory = [messageHistory[0], ...messageHistory.slice(-16)];
+        }
         typingIndicator.classList.add('hidden');
         addMessage(reply, false);
     } catch (e) {
@@ -100,8 +88,3 @@ async function sendMessage() {
 sendBtn.onclick = sendMessage;
 userInput.onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
 tg.setHeaderColor('bg_color');
-
-// === Стартовое сообщение ===
-if (!GROQ_KEY) {
-    addMessage("⚙️ Открой этот чат через кнопку «🌐 Веб-чат с Алей» в Telegram-боте.", false);
-}

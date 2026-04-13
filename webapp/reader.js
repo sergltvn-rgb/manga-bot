@@ -68,8 +68,10 @@ if (settings.indent === undefined) settings.indent = true;
 let readChapters = JSON.parse(localStorage.getItem('reader_progress') || '{}');
 
 // === Получение API URL из параметров URL ===
+// Приоритет: 1) ?api=... из URL 2) window.location.origin (если бот и WebApp на одном хосте)
+// На GitHub Pages (без ?api=) остаётся '' — функции, зависящие от API, корректно отключаются
 const urlParams = new URLSearchParams(window.location.search);
-const API_URL = urlParams.get('api') || '';
+const API_URL = urlParams.get('api') || (window.location.hostname !== 'localhost' && !window.location.hostname.includes('github.io') ? window.location.origin : '');
 
 // === Сохранение позиции чтения ===
 function getScrollKey() {

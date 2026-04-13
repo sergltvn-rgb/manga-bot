@@ -78,3 +78,48 @@ async def delete_after(message: types.Message, delay: int):
 async def temp_reply(message: types.Message, text: str, delay: int = 5, **kwargs):
     msg = await message.answer(text, **kwargs)
     asyncio.create_task(delete_after(msg, delay))
+
+
+async def run_git_sync(commit_message: str = "sync webapp db") -> tuple[bool, str]:
+    """Асинхронная git-синхронизация: config → add → commit → push.
+    Не блокирует Event Loop (использует asyncio.create_subprocess_shell).
+    Возвращает (success: bool, output: str)."""
+    commands = [
+        "git config user.name 'MangaBot' && git config user.email 'bot@manga.local'",
+        "git add webapp/chapters_data.json",
+        f'git commit -m "{commit_message}"',
+    ]
+    for cmd in commands:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+
+    # Push — именно его результат важен
+    proc = await asyncio.create_subprocess_shell(
+        "git push",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    output = (stderr.decode(errors="replace").strip()
+              or stdout.decode(errors="replace").strip())
+    return proc.returncode == 0, output
+
+
+async def safe_edit_or_reply(
+    target: Union[types.Message, types.CallbackQuery],
+    text: str,
+    **kwargs,
+) -> types.Message:
+    """Безопасно редактирует сообщение. Если edit_text падает
+    (удалено, не изменилось и т.п.) — отправляет новое сообщение."""
+    msg = target.message if isinstance(target, types.CallbackQuery) else target
+    try:
+        return await msg.edit_text(text, **kwargs)
+    except Exception:
+        try: await msg.delete()
+        except Exception: pass
+        return await msg.answer(text, **kwargs)
