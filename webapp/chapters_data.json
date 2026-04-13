@@ -3,6 +3,7 @@
     {
       "id": "akashic_records",
       "title": "Хроники Акаши | 12 том",
+      "cover_url": "",
       "volumes": [
         {
           "volume": 12,
@@ -11,16 +12,18 @@
             {
               "chapter": "1",
               "custom_name": "Пролог",
-              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-prolog-04-10",
+              "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/dNvV2wgl1mH",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-prolog-04-10"
               ]
             },
             {
               "chapter": "2",
-              "custom_name": "Глава 1",
+              "custom_name": "/cancel",
               "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/VDD6P9b4gK5",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-1-glava-1-chast-04-10",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-1-glava-3-chast-04-10"
               ]
@@ -30,6 +33,7 @@
               "custom_name": "Глава 2",
               "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/nCuu5-Ycbiu",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-2-glava-1-chast-04-10",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-2-glava-2-chast-04-10"
               ]
@@ -39,6 +43,7 @@
               "custom_name": "Глава 3",
               "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/3Rqiekhz11J",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-3-glava-1-chast-04-10",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-3-glava-2-chast-04-10"
               ]
@@ -48,6 +53,7 @@
               "custom_name": "Глава 4",
               "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/CLJ_EiSsZHr",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-4-glava-04-10",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-4-glava-2-chast-04-10"
               ]
@@ -57,6 +63,7 @@
               "custom_name": "Глава 5",
               "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/K8NB2H8YNFJ",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-5-glava-1-chast-04-10",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-5-glava-2-chast-04-10"
               ]
@@ -64,8 +71,9 @@
             {
               "chapter": "7",
               "custom_name": "Глава 6",
-              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-6-glava-1-chast-04-10",
+              "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/F1Lel-qeGlG",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-6-glava-1-chast-04-10"
               ]
             },
@@ -74,6 +82,7 @@
               "custom_name": "Глава 7",
               "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/YEsv7k19LnC",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-7-glava-1-chast-04-10",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-7-glava-2-chast-04-10"
               ]
@@ -81,8 +90,9 @@
             {
               "chapter": "9",
               "custom_name": "Глава 8",
-              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-8-glava-1-chast-04-10",
+              "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/d3sFjudlz5x",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-8-glava-1-chast-04-10"
               ]
             },
@@ -91,6 +101,7 @@
               "custom_name": "Глава 9",
               "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/sGOlt3w_ZvD",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-9-glava-1-chast-04-10",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-9-glava-2-chast-04-10"
               ]
@@ -98,16 +109,18 @@
             {
               "chapter": "11",
               "custom_name": "Эпилог",
-              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-ehpilog-04-10",
+              "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/KdaWDLFCAIr",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-ehpilog-04-10"
               ]
             },
             {
               "chapter": "12",
               "custom_name": "Послесловие",
-              "url": "https://telegra.ph/Hroniki-Akashi--12-tom-posleslovie-04-10",
+              "url": "",
               "urls": [
+                "https://teletype.in/@slitvin/gaMq_RhLLK-",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-posleslovie-04-10"
               ]
             }
@@ -118,6 +131,7 @@
     {
       "id": "ranobe_alya",
       "title": "Воительница Аля",
+      "cover_url": "",
       "volumes": [
         {
           "volume": 1,
@@ -146,6 +160,7 @@
     {
       "id": "manga_ru",
       "title": "Аля иногда... Манга",
+      "cover_url": "",
       "volumes": [
         {
           "volume": 1,
@@ -178,9 +193,10 @@
             {
               "chapter": "78",
               "custom_name": "Глава 78",
-              "url": "https://telegra.ph/Alya-inogda-koketnichaet-so-mnoj-po-russki--Manga--78-glava-03-20",
+              "url": "",
               "urls": [
-                "https://telegra.ph/Alya-inogda-koketnichaet-so-mnoj-po-russki--Manga--78-glava-03-20"
+                "https://telegra.ph/Alya-inogda-koketnichaet-so-mnoj-po-russki--Manga--78-glava-03-20",
+                "https://teletype.in/@slitvin/Z_yi-gH1VWx"
               ]
             },
             {
