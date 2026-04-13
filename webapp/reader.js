@@ -20,6 +20,11 @@ let currentChapterIdx = 0;
 let currentChapters = [];
 let isAdminMode = false;
 
+// === Typo Report State ===
+let typoSelectedText = '';
+let typoContextText = '';
+let typoSelectionRange = null;
+
 function toggleAdminMode(enabled) {
     isAdminMode = enabled;
     if (document.getElementById('screen-series').classList.contains('active')) renderSeriesList();
@@ -269,7 +274,6 @@ function renderSeriesList() {
         return;
     }
 
-    const icons = ['📖', '📕', '📗', '📘', '📙'];
     container.innerHTML = allData.series.map((s, i) => {
         const totalCh = s.volumes.reduce((sum, v) => sum + v.chapters.length, 0);
         const readCount = s.volumes.reduce((sum, v) => {
@@ -290,9 +294,14 @@ function renderSeriesList() {
         ` : '';
         const customBadge = isAdminMode ? `<span class="custom-name-badge">серия</span>` : '';
         
+        // Cover image support (Batch 3)
+        const coverEl = s.cover_url 
+            ? `<img src="${s.cover_url}" class="series-cover-img" alt="${s.title}" loading="lazy">`
+            : `<div class="series-icon">${['📖', '📕', '📗', '📘', '📙'][i % 5]}</div>`;
+        
         return `
         <div class="series-card" onclick="selectSeries('${s.id}')">
-            <div class="series-icon">${icons[i % icons.length]}</div>
+            ${coverEl}
             <div class="series-info">
                 <h3>${s.title}${customBadge}${editBtns}</h3>
                 <p>${s.volumes.length} том(ов) &middot; ${totalCh} глав${progress > 0 ? ` &middot; ${progress}%` : ''}</p>
@@ -384,6 +393,7 @@ function renderChaptersList() {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
         const chapName = ch.custom_name || `Глава ${ch.chapter}`;
         const hasCustom = !!ch.custom_name;
+        const linkBtn = isAdminMode ? `<button class="admin-link-btn" title="Редактировать ссылку" onclick="openEditUrlModal(${idx}); event.stopPropagation();">&#128279;</button>` : '';
         const editBtns = isAdminMode ? `
             <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#9998;</button>
             ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
@@ -392,13 +402,24 @@ function renderChaptersList() {
         const isCurrent = lastChapter && String(ch.chapter) === String(lastChapter);
         
         return `
-        <div class="chapter-item ${readClass}${isCurrent ? ' current-chapter' : ''}" onclick="openChapter(${idx})">
+        <div class="chapter-item ${readClass}${isCurrent ? ' current-chapter' : ''}" data-chapter-idx="${idx}" ${isAdminMode ? 'draggable="true"' : ''} onclick="openChapter(${idx})">
+            ${isAdminMode ? '<div class="drag-handle" title="Перетащить">⠿</div>' : ''}
             <div class="chapter-num">${idx + 1}</div>
-            <div class="chapter-name">${chapName}${customBadge}${editBtns}</div>
+            <div class="chapter-name">${chapName}${customBadge}${linkBtn}${editBtns}</div>
             ${isCurrent ? '<span style="font-size:12px;color:var(--accent);font-weight:600;">◄</span>' : ''}
             <span class="chapter-read-mark">✓</span>
         </div>`;
     }).join('');
+
+    // Bulk upload button (admin only)
+    if (isAdminMode && API_URL) {
+        container.innerHTML += `<button class="admin-bulk-btn" onclick="openBulkModal()">📦 Массовое добавление глав</button>`;
+    }
+
+    // Init drag-n-drop for admin
+    if (isAdminMode) {
+        initChapterDnD();
+    }
 }
 
 // ==========================================================================
@@ -461,6 +482,10 @@ function loadChapterContent(chapter) {
         
         Promise.all(loadPromises).then(results => {
             container.innerHTML = results.join('');
+            
+            // Инициализируем Lightbox и ToC после загрузки контента
+            initLightbox();
+            buildToC();
             
             if (!container.innerHTML.includes('<iframe')) {
                 container.innerHTML += `
@@ -605,8 +630,23 @@ function updateLikeUI(count, liked) {
 }
 
 // ==========================================================================
-// КОММЕНТАРИИ
+// КОММЕНТАРИИ (Вложенные)
 // ==========================================================================
+
+let replyingToId = null;
+
+function setReply(id, name) {
+    replyingToId = id;
+    document.getElementById('reply-indicator').style.display = 'flex';
+    document.getElementById('reply-to-name').textContent = name;
+    document.getElementById('comment-input').focus();
+}
+
+function cancelReply() {
+    replyingToId = null;
+    document.getElementById('reply-indicator').style.display = 'none';
+    document.getElementById('reply-to-name').textContent = '';
+}
 
 async function loadComments() {
     if (!API_URL) return;
@@ -631,25 +671,52 @@ function renderComments(comments) {
         return;
     }
     
-    list.innerHTML = comments.map(c => {
+    // Строим дерево
+    const commentMap = {};
+    const topLevel = [];
+    comments.forEach(c => {
+        c.children = [];
+        commentMap[c.id] = c;
+    });
+    
+    comments.forEach(c => {
+        if (c.parent_id && commentMap[c.parent_id]) {
+            commentMap[c.parent_id].children.push(c);
+        } else {
+            topLevel.push(c);
+        }
+    });
+
+    function renderNode(c, isChild = false) {
         const initial = (c.user_name || 'А')[0].toUpperCase();
         const date = formatDate(c.created_at);
         const isOwn = String(c.user_id) === userId;
         const deleteBtn = isOwn ? `<button class="comment-delete-btn" onclick="deleteComment(${c.id})">🗑</button>` : '';
+        const replyBtn = !isChild ? `<button class="comment-reply-btn" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')">↩ Ответить</button>` : '';
         
-        return `
-        <div class="comment-item" id="comment-${c.id}">
+        let html = `
+        <div class="comment-item ${isChild ? 'comment-reply' : ''}" id="comment-${c.id}">
             <div class="comment-header">
                 <div class="comment-avatar">${initial}</div>
                 <div class="comment-meta">
                     <div class="comment-author">${escapeHtml(c.user_name)}</div>
                     <div class="comment-date">${date}</div>
                 </div>
+                ${replyBtn}
                 ${deleteBtn}
             </div>
             <div class="comment-text">${escapeHtml(c.text)}</div>
-        </div>`;
-    }).join('');
+        `;
+        
+        if (c.children && c.children.length > 0) {
+            html += `<div class="comment-children">` + c.children.map(child => renderNode(child, true)).join('') + `</div>`;
+        }
+        
+        html += `</div>`;
+        return html;
+    }
+    
+    list.innerHTML = topLevel.map(c => renderNode(c, false)).join('');
 }
 
 async function postComment() {
@@ -670,10 +737,12 @@ async function postComment() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chapter_key: key,
-                text: text
+                text: text,
+                parent_id: replyingToId
             })
         });
         input.value = '';
+        cancelReply();
         await loadComments();
     } catch (e) {
         console.warn('Post comment error:', e);
@@ -699,7 +768,9 @@ async function deleteComment(commentId) {
 function formatDate(dateStr) {
     if (!dateStr) return '';
     try {
-        const d = new Date(dateStr + (dateStr.includes('T') ? '' : 'T00:00:00'));
+        // SQLite ╨▓╨╛╨╖╨▓╤А╨░╤Й╨░╨╡╤В ╨▓╤А╨╡╨╝╤П ╨▓ UTC "YYYY-MM-DD HH:MM:SS". ╨Я╤А╨╡╨▓╤А╨░╤Й╨░╨╡╨╝ ╨╡╨│╨╛ ╨▓ ╨▓╨░╨╗╨╕╨┤╨╜╤Л╨╣ ISO 8601 UTC.
+        const safeDateStr = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
+        const d = new Date(safeDateStr);
         const now = new Date();
         const diff = now - d;
         const mins = Math.floor(diff / 60000);
@@ -738,6 +809,26 @@ function showScreen(name) {
     });
     
     document.getElementById(`screen-${name}`).classList.add('active');
+
+    // Update bottom nav
+    const navTabs = document.querySelectorAll('.nav-tab');
+    if (navTabs.length > 0) {
+        navTabs.forEach(t => t.classList.remove('active'));
+        // Special case: chapters or reader might not have their own tab, fall back
+        const activeTab = document.getElementById(`tab-${name}`);
+        if (activeTab) activeTab.classList.add('active');
+
+        // Hide bottom nav in reader
+        const bottomNav = document.getElementById('main-bottom-nav');
+        if (bottomNav) {
+            bottomNav.style.display = name === 'reader' ? 'none' : 'flex';
+        }
+    }
+
+    if (name === 'library') {
+        renderLibraryTab();
+        updateLibraryStats();
+    }
 }
 
 // ==========================================================================
@@ -977,7 +1068,788 @@ function renderContinueReading() {
 }
 
 
+// ==========================================================================
+// IMAGE LIGHTBOX
+// ==========================================================================
 
+let lightboxImages = [];
+let lightboxIdx = 0;
+let lightboxZoomed = false;
+
+function initLightbox() {
+    const container = document.getElementById('reader-text');
+    if (!container) return;
+    const imgs = container.querySelectorAll('img');
+    lightboxImages = Array.from(imgs);
+    
+    imgs.forEach((img, i) => {
+        img.style.cursor = 'zoom-in';
+        img.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openLightbox(i);
+        };
+    });
+}
+
+function openLightbox(idx) {
+    if (lightboxImages.length === 0) return;
+    lightboxIdx = idx;
+    lightboxZoomed = false;
+    const overlay = document.getElementById('lightbox-overlay');
+    const img = document.getElementById('lightbox-img');
+    img.src = lightboxImages[idx].src;
+    img.classList.remove('zoomed');
+    img.style.transform = '';
+    overlay.classList.remove('hidden');
+    updateLightboxNav();
+    document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+    document.getElementById('lightbox-overlay').classList.add('hidden');
+    document.body.style.overflow = '';
+    lightboxZoomed = false;
+}
+
+function lightboxNavigate(delta) {
+    const newIdx = lightboxIdx + delta;
+    if (newIdx >= 0 && newIdx < lightboxImages.length) {
+        lightboxIdx = newIdx;
+        const img = document.getElementById('lightbox-img');
+        img.src = lightboxImages[lightboxIdx].src;
+        img.classList.remove('zoomed');
+        img.style.transform = '';
+        lightboxZoomed = false;
+        updateLightboxNav();
+    }
+}
+
+function updateLightboxNav() {
+    document.getElementById('lightbox-prev').disabled = lightboxIdx === 0;
+    document.getElementById('lightbox-next').disabled = lightboxIdx >= lightboxImages.length - 1;
+    document.getElementById('lightbox-counter').textContent = `${lightboxIdx + 1} / ${lightboxImages.length}`;
+    if (lightboxImages.length <= 1) {
+        document.getElementById('lightbox-prev').style.display = 'none';
+        document.getElementById('lightbox-next').style.display = 'none';
+        document.getElementById('lightbox-counter').style.display = 'none';
+    } else {
+        document.getElementById('lightbox-prev').style.display = '';
+        document.getElementById('lightbox-next').style.display = '';
+        document.getElementById('lightbox-counter').style.display = '';
+    }
+}
+
+// Toggle zoom on click
+document.addEventListener('DOMContentLoaded', () => {
+    const lbImg = document.getElementById('lightbox-img');
+    if (lbImg) {
+        lbImg.addEventListener('click', () => {
+            lightboxZoomed = !lightboxZoomed;
+            lbImg.classList.toggle('zoomed', lightboxZoomed);
+            lbImg.style.transform = lightboxZoomed ? 'scale(2)' : '';
+        });
+    }
+    // Close on Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeLightbox();
+        if (e.key === 'ArrowLeft') lightboxNavigate(-1);
+        if (e.key === 'ArrowRight') lightboxNavigate(1);
+    });
+});
+
+// ==========================================================================
+// TABLE OF CONTENTS (ToC)
+// ==========================================================================
+
+let tocItems = [];
+let tocObserver = null;
+
+function buildToC() {
+    const container = document.getElementById('reader-text');
+    const tocList = document.getElementById('toc-list');
+    const tocBtn = document.getElementById('toc-toggle-btn');
+    if (!container || !tocList || !tocBtn) return;
+    
+    const headings = container.querySelectorAll('h2, h3, h4');
+    tocItems = Array.from(headings);
+    
+    if (tocItems.length === 0) {
+        tocBtn.style.display = 'none';
+        return;
+    }
+    
+    tocBtn.style.display = 'flex';
+    // Assign IDs to headings
+    tocItems.forEach((h, i) => {
+        if (!h.id) h.id = `toc-heading-${i}`;
+    });
+    
+    tocList.innerHTML = tocItems.map((h, i) => {
+        const level = h.tagName.toLowerCase();
+        const cssClass = level === 'h3' ? 'toc-h3' : level === 'h4' ? 'toc-h4' : '';
+        return `<div class="toc-item ${cssClass}" data-toc-idx="${i}" onclick="scrollToHeading(${i})">${h.textContent}</div>`;
+    }).join('');
+    
+    // IntersectionObserver for active heading
+    if (tocObserver) tocObserver.disconnect();
+    tocObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const idx = tocItems.indexOf(entry.target);
+                if (idx !== -1) highlightToCItem(idx);
+            }
+        });
+    }, { root: document.getElementById('reader-content'), rootMargin: '-10% 0px -70% 0px', threshold: 0.1 });
+    
+    tocItems.forEach(h => tocObserver.observe(h));
+}
+
+function highlightToCItem(idx) {
+    document.querySelectorAll('.toc-item').forEach((item, i) => {
+        item.classList.toggle('active', i === idx);
+    });
+}
+
+function scrollToHeading(idx) {
+    if (!tocItems[idx]) return;
+    tocItems[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    toggleToC(); // Close sidebar
+}
+
+function toggleToC() {
+    document.getElementById('toc-overlay').classList.toggle('hidden');
+    document.getElementById('toc-panel').classList.toggle('hidden');
+}
+
+// ==========================================================================
+// AUTOSCROLL
+// ==========================================================================
+
+let autoscrollActive = false;
+let autoscrollEnabled = false; // Setting toggle
+let autoscrollSpeed = 3;
+let autoscrollRAF = null;
+
+function toggleAutoscrollSetting(enabled) {
+    autoscrollEnabled = enabled;
+    const fab = document.getElementById('autoscroll-fab');
+    const speedGroup = document.getElementById('autoscroll-speed-group');
+    if (fab) fab.classList.toggle('hidden', !enabled);
+    if (speedGroup) speedGroup.style.display = enabled ? 'block' : 'none';
+    if (!enabled) stopAutoscroll();
+}
+
+function setAutoscrollSpeed(val) {
+    autoscrollSpeed = parseInt(val);
+}
+
+function toggleAutoscroll() {
+    if (autoscrollActive) {
+        stopAutoscroll();
+    } else {
+        startAutoscroll();
+    }
+}
+
+function startAutoscroll() {
+    autoscrollActive = true;
+    const fab = document.getElementById('autoscroll-fab');
+    if (fab) {
+        fab.classList.add('scrolling');
+        fab.textContent = '⏸';
+    }
+    const el = document.getElementById('reader-content');
+    if (!el) return;
+    
+    let lastTime = null;
+    function step(ts) {
+        if (!autoscrollActive) return;
+        if (lastTime !== null) {
+            const dt = ts - lastTime;
+            const px = (autoscrollSpeed * 0.3) * (dt / 16.67); // ~0.3px per speed unit per frame
+            el.scrollTop += px;
+            // Stop at bottom
+            if (el.scrollTop >= el.scrollHeight - el.clientHeight) {
+                stopAutoscroll();
+                return;
+            }
+        }
+        lastTime = ts;
+        autoscrollRAF = requestAnimationFrame(step);
+    }
+    autoscrollRAF = requestAnimationFrame(step);
+}
+
+function stopAutoscroll() {
+    autoscrollActive = false;
+    if (autoscrollRAF) cancelAnimationFrame(autoscrollRAF);
+    autoscrollRAF = null;
+    const fab = document.getElementById('autoscroll-fab');
+    if (fab) {
+        fab.classList.remove('scrolling');
+        fab.textContent = '▶';
+    }
+}
+
+// Pause autoscroll on touch
+document.addEventListener('DOMContentLoaded', () => {
+    const rc = document.getElementById('reader-content');
+    if (rc) {
+        rc.addEventListener('touchstart', () => {
+            if (autoscrollActive) stopAutoscroll();
+        }, { passive: true });
+    }
+});
+
+// ==========================================================================
+// EDIT URL MODAL (Admin)
+// ==========================================================================
+
+let editUrlChapterIdx = null;
+
+function openEditUrlModal(chIdx) {
+    if (!currentChapters[chIdx]) return;
+    editUrlChapterIdx = chIdx;
+    const ch = currentChapters[chIdx];
+    const chapName = ch.custom_name || `Глава ${ch.chapter}`;
+    document.getElementById('edit-url-chapter-name').textContent = chapName;
+    const currentUrl = (ch.urls && ch.urls[0]) || ch.url || '';
+    document.getElementById('edit-url-input').value = currentUrl;
+    document.getElementById('edit-url-overlay').classList.remove('hidden');
+    document.getElementById('edit-url-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('edit-url-input').focus(), 350);
+}
+
+function closeEditUrlModal() {
+    document.getElementById('edit-url-overlay').classList.add('hidden');
+    document.getElementById('edit-url-modal').classList.add('hidden');
+    editUrlChapterIdx = null;
+}
+
+async function saveEditUrl() {
+    if (editUrlChapterIdx === null || !API_URL) return;
+    const ch = currentChapters[editUrlChapterIdx];
+    const newUrl = document.getElementById('edit-url-input').value.trim();
+    if (!newUrl) return alert('Введите ссылку');
+    
+    const saveBtn = document.getElementById('edit-url-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Сохранение...';
+    
+    try {
+        const resp = await apiFetch(API_URL + '/api/chapters', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                series_id: currentSeries.id,
+                volume: currentVolume.volume,
+                chapter: ch.chapter,
+                url: newUrl
+            })
+        });
+        const result = await resp.json();
+        if (result.ok) {
+            // Update local data
+            if (ch.urls) ch.urls = [newUrl];
+            else ch.url = newUrl;
+            closeEditUrlModal();
+            alert('✅ Ссылка обновлена!');
+        } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная'));
+        }
+    } catch (e) {
+        alert('Ошибка сети: ' + e.message);
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '💾 Сохранить';
+    }
+}
+
+// ==========================================================================
+// BULK UPLOAD MODAL (Admin)
+// ==========================================================================
+
+function openBulkModal() {
+    document.getElementById('bulk-upload-input').value = '';
+    document.getElementById('bulk-upload-overlay').classList.remove('hidden');
+    document.getElementById('bulk-upload-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('bulk-upload-input').focus(), 350);
+}
+
+function closeBulkModal() {
+    document.getElementById('bulk-upload-overlay').classList.add('hidden');
+    document.getElementById('bulk-upload-modal').classList.add('hidden');
+}
+
+async function executeBulkUpload() {
+    if (!API_URL || !currentSeries || !currentVolume) return;
+    const raw = document.getElementById('bulk-upload-input').value.trim();
+    if (!raw) return alert('Вставьте ссылки');
+    
+    const urls = raw.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+    if (urls.length === 0) return alert('Нет валидных ссылок');
+    
+    const lastChNum = currentChapters.length > 0 
+        ? Math.max(...currentChapters.map(c => parseInt(c.chapter) || 0)) 
+        : 0;
+    
+    const saveBtn = document.getElementById('bulk-upload-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = `Добавление ${urls.length} глав...`;
+    
+    try {
+        const resp = await apiFetch(API_URL + '/api/chapters/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                series_id: currentSeries.id,
+                volume: currentVolume.volume,
+                start_chapter: lastChNum + 1,
+                urls: urls
+            })
+        });
+        const result = await resp.json();
+        if (result.ok) {
+            closeBulkModal();
+            alert(`✅ Добавлено ${result.added} глав!`);
+            await loadData(); // Reload
+        } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная'));
+        }
+    } catch (e) {
+        alert('Ошибка сети: ' + e.message);
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '📤 Добавить';
+    }
+}
+
+// ==========================================================================
+// LIBRARY & STATS
+// ==========================================================================
+
+let readingStats = JSON.parse(localStorage.getItem('reader_stats') || '{"timeSpentSeconds":0}');
+
+// Track reading time when in 'reader' screen
+setInterval(() => {
+    if (document.getElementById('screen-reader').classList.contains('active') && !document.hidden) {
+        readingStats.timeSpentSeconds += 5;
+        if (readingStats.timeSpentSeconds % 60 === 0) { // save every minute
+            localStorage.setItem('reader_stats', JSON.stringify(readingStats));
+            updateLibraryStats();
+        }
+    }
+}, 5000);
+
+function updateLibraryStats() {
+    const timeEl = document.getElementById('stat-time');
+    const chEl = document.getElementById('stat-chapters');
+    if (!timeEl || !chEl) return;
+    
+    // Total Chapters Read
+    const totalChaptersRead = Object.keys(readChapters).length;
+    chEl.textContent = totalChaptersRead;
+
+    // Time Formatting
+    const totalMinutes = Math.floor(readingStats.timeSpentSeconds / 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    
+    if (hours > 0) {
+        timeEl.textContent = `${hours} ч ${mins} м`;
+    } else {
+        timeEl.textContent = `${mins} м`;
+    }
+}
+
+function renderLibraryTab() {
+    const list = document.getElementById('library-list');
+    if (!list) return;
+
+    if (!allData || !allData.series || allData.series.length === 0) {
+        list.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📂</div>
+                <h3>Нет данных</h3>
+                <p>Библиотека пуста. Добавьте свои первые ранобэ.</p>
+            </div>
+        `;
+        return;
+    }
+
+    // Get last read data
+    const allLocal = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
+    
+    // Combine local with server bookmarks if missing
+    serverBookmarks.forEach(bm => {
+        if (!allLocal[bm.series_id]) {
+            allLocal[bm.series_id] = {
+                seriesId: bm.series_id,
+                volume: bm.volume_id,
+                chapter: bm.chapter_key,
+                ts: new Date(bm.updated_at).getTime() || 0,
+                isServer: true
+            };
+        }
+    });
+
+    const activeSeriesKeys = Object.keys(allLocal).sort((a, b) => (allLocal[b].ts || 0) - (allLocal[a].ts || 0));
+
+    if (activeSeriesKeys.length === 0) {
+        list.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📝</div>
+                <h3>Вы ещё ничего не читали</h3>
+                <p>Откройте Главную, чтобы выбрать историю.</p>
+            </div>
+        `;
+        return;
+    }
+
+    const itemsHtml = activeSeriesKeys.slice(0, 10).map(key => {
+        const bm = allLocal[key];
+        const s = allData.series.find(x => String(x.id) === String(bm.seriesId || key));
+        if (!s) return '';
+        
+        let chTitle = "Глава " + bm.chapter;
+        const v = s.volumes.find(v => String(v.volume) === String(bm.volume));
+        if (v) {
+            const ch = v.chapters.find(c => String(c.chapter) === String(bm.chapter));
+            if (ch && ch.custom_name) chTitle = ch.custom_name;
+            else if (ch) chTitle = `Глава ${ch.chapter}`;
+        }
+
+        // Progress calc
+        const totalCh = s.volumes.reduce((sum, v) => sum + v.chapters.length, 0);
+        const readCount = s.volumes.reduce((sum, v) => {
+            return sum + v.chapters.filter(c => isRead(s.id, v.volume, c.chapter)).length;
+        }, 0);
+        const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
+        const coverImg = s.cover_url ? `<img src="${s.cover_url}" class="library-cover" alt="">` : `<div class="series-icon">📖</div>`;
+
+        return `
+        <div class="series-card" style="margin-bottom:12px;" onclick="selectSeries('${s.id}')">
+            ${coverImg}
+            <div class="series-info">
+                <h3>${s.title}</h3>
+                <p style="font-size: 13px; color: var(--text-sec); margin-top:2px;">Остановлено: Том ${bm.volume}, ${chTitle}</p>
+                <div class="library-progress-bar">
+                    <div class="library-progress-fill" style="width: ${progress}%"></div>
+                </div>
+                <div style="font-size: 11px; margin-top:4px; text-align:right; color: var(--text-sec);">${progress}% прочитано</div>
+            </div>
+            <span class="series-arrow">&rsaquo;</span>
+        </div>`;
+    }).join('');
+    
+    list.innerHTML = itemsHtml;
+}
+
+// ==========================================================================
+// DRAG-N-DROP CHAPTER SORT (Admin, Batch 3)
+// ==========================================================================
+
+let dragSrcIdx = null;
+
+function initChapterDnD() {
+    const container = document.getElementById('chapters-list');
+    if (!container) return;
+    
+    const items = container.querySelectorAll('.chapter-item[draggable="true"]');
+    items.forEach(item => {
+        item.addEventListener('dragstart', handleDragStart);
+        item.addEventListener('dragover', handleDragOver);
+        item.addEventListener('drop', handleDrop);
+        item.addEventListener('dragend', handleDragEnd);
+        item.addEventListener('dragenter', handleDragEnter);
+        item.addEventListener('dragleave', handleDragLeave);
+    });
+    
+    // Mobile touch DnD polyfill
+    items.forEach(item => {
+        const handle = item.querySelector('.drag-handle');
+        if (handle) {
+            handle.addEventListener('touchstart', touchDragStart, { passive: false });
+        }
+    });
+}
+
+function handleDragStart(e) {
+    dragSrcIdx = parseInt(this.dataset.chapterIdx);
+    this.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', dragSrcIdx);
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+function handleDragEnter(e) {
+    this.classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+    this.classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    this.classList.remove('drag-over');
+    const destIdx = parseInt(this.dataset.chapterIdx);
+    if (dragSrcIdx !== null && dragSrcIdx !== destIdx) {
+        reorderChapters(dragSrcIdx, destIdx);
+    }
+}
+
+function handleDragEnd(e) {
+    document.querySelectorAll('.chapter-item').forEach(item => {
+        item.classList.remove('dragging', 'drag-over');
+    });
+    dragSrcIdx = null;
+}
+
+// Touch drag support
+let touchDragItem = null;
+let touchDragClone = null;
+let touchStartY = 0;
+
+function touchDragStart(e) {
+    e.preventDefault();
+    const item = e.target.closest('.chapter-item');
+    if (!item) return;
+    
+    touchDragItem = item;
+    dragSrcIdx = parseInt(item.dataset.chapterIdx);
+    touchStartY = e.touches[0].clientY;
+    
+    item.classList.add('dragging');
+    
+    document.addEventListener('touchmove', touchDragMove, { passive: false });
+    document.addEventListener('touchend', touchDragEnd);
+}
+
+function touchDragMove(e) {
+    e.preventDefault();
+    const touch = e.touches[0];
+    const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
+    const target = elements.find(el => el.classList.contains('chapter-item') && el !== touchDragItem);
+    
+    document.querySelectorAll('.chapter-item').forEach(item => item.classList.remove('drag-over'));
+    if (target) target.classList.add('drag-over');
+}
+
+function touchDragEnd(e) {
+    document.removeEventListener('touchmove', touchDragMove);
+    document.removeEventListener('touchend', touchDragEnd);
+    
+    const touch = e.changedTouches[0];
+    const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
+    const target = elements.find(el => el.classList.contains('chapter-item') && el !== touchDragItem);
+    
+    if (target && dragSrcIdx !== null) {
+        const destIdx = parseInt(target.dataset.chapterIdx);
+        if (dragSrcIdx !== destIdx) {
+            reorderChapters(dragSrcIdx, destIdx);
+        }
+    }
+    
+    document.querySelectorAll('.chapter-item').forEach(item => {
+        item.classList.remove('dragging', 'drag-over');
+    });
+    touchDragItem = null;
+    dragSrcIdx = null;
+}
+
+async function reorderChapters(fromIdx, toIdx) {
+    // Reorder locally
+    const [moved] = currentChapters.splice(fromIdx, 1);
+    currentChapters.splice(toIdx, 0, moved);
+    
+    // Re-render
+    renderChaptersList();
+    
+    // Sync with server if available
+    if (!API_URL) return;
+    
+    const order = currentChapters.map(c => c.chapter);
+    try {
+        await apiFetch(API_URL + '/api/sort', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                series_id: currentSeries.id,
+                volume: currentVolume.volume,
+                order: order
+            })
+        });
+    } catch (e) {
+        console.warn('Sort sync error:', e);
+    }
+}
+
+// ==========================================================================
+// COVER IMAGES (Batch 3)
+// ==========================================================================
+
+function getSeriesCover(series) {
+    if (series.cover_url) {
+        return `<img src="${series.cover_url}" class="series-cover-img" alt="${series.title}" loading="lazy">`;
+    }
+    const icons = ['📖', '📕', '📗', '📘', '📙'];
+    const idx = allData.series.indexOf(series) % icons.length;
+    return `<div class="series-icon">${icons[idx]}</div>`;
+}
+
+
+// ==========================================================================
+// РЕПОРТ ОПЕЧАТОК (TYPO REPORTER)
+// ==========================================================================
+
+function initTypoReporter() {
+    const readerContent = document.getElementById('reader-content');
+    if (!readerContent) return;
+
+    // Создаем тултип "Исправить"
+    const tooltip = document.createElement('div');
+    tooltip.id = 'typo-tooltip';
+    tooltip.className = 'typo-tooltip';
+    tooltip.innerHTML = '<span>🚨 Нашли опечатку?</span>';
+    tooltip.onclick = (e) => {
+        e.stopPropagation();
+        showTypoModal();
+    };
+    document.body.appendChild(tooltip);
+
+    // Слушаем выделение
+    document.addEventListener('selectionchange', handleSelection);
+    document.addEventListener('mouseup', handleSelection);
+}
+
+function handleSelection() {
+    const readerScreen = document.getElementById('screen-reader');
+    if (!readerScreen || !readerScreen.classList.contains('active')) return;
+
+    const selection = window.getSelection();
+    const tooltip = document.getElementById('typo-tooltip');
+
+    if (!selection.rangeCount || selection.isCollapsed || selection.toString().trim().length < 2) {
+        if (tooltip) tooltip.classList.remove('visible');
+        return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const selectedText = selection.toString().trim();
+    
+    // Проверяем, что выделение внутри reader-content
+    const readerContent = document.getElementById('reader-content');
+    if (!readerContent.contains(range.commonAncestorContainer)) {
+        if (tooltip) tooltip.classList.remove('visible');
+        return;
+    }
+
+    // Ограничиваем длину выделения
+    if (selectedText.length > 100) {
+        if (tooltip) tooltip.classList.remove('visible');
+        return;
+    }
+
+    typoSelectedText = selectedText;
+    typoSelectionRange = range.cloneRange();
+    
+    // Получаем контекст (текст вокруг)
+    const container = range.commonAncestorContainer.parentElement;
+    const fullText = container.innerText;
+    const startIdx = Math.max(0, fullText.indexOf(selectedText) - 50);
+    const endIdx = Math.min(fullText.length, fullText.indexOf(selectedText) + selectedText.length + 50);
+    typoContextText = fullText.substring(startIdx, endIdx);
+
+    // Позиционируем тултип
+    const rect = range.getBoundingClientRect();
+    if (tooltip) {
+        tooltip.style.left = `${rect.left + rect.width / 2}px`;
+        tooltip.style.top = `${rect.top + window.scrollY}px`;
+        tooltip.classList.add('visible');
+    }
+}
+
+function showTypoModal() {
+    const modal = document.getElementById('typo-modal');
+    const overlay = document.getElementById('typo-modal-overlay');
+    const contextEl = document.getElementById('typo-modal-context');
+    const tooltip = document.getElementById('typo-tooltip');
+    
+    if (tooltip) tooltip.classList.remove('visible');
+
+    // Подсвечиваем опечатку в контексте для модалки
+    const escapedSelected = typoSelectedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const highlightedContext = typoContextText.replace(
+        new RegExp(escapedSelected, 'g'), 
+        `<span class="typo-modal-selected">${typoSelectedText}</span>`
+    );
+    
+    contextEl.innerHTML = `"...${highlightedContext}..."`;
+    document.getElementById('typo-comment').value = '';
+
+    modal.classList.remove('hidden');
+    overlay.classList.remove('hidden');
+    
+    // Снимаем выделение в тексте
+    window.getSelection().removeAllRanges();
+}
+
+function closeTypoModal() {
+    document.getElementById('typo-modal').classList.add('hidden');
+    document.getElementById('typo-modal-overlay').classList.add('hidden');
+}
+
+async function submitTypoReport() {
+    if (!API_URL) {
+        alert('Репорты доступны только в онлайн-режиме.');
+        return;
+    }
+
+    const comment = document.getElementById('typo-comment').value.trim();
+    const btn = document.getElementById('typo-submit-btn');
+    const originalText = btn.innerText;
+
+    const chapter = currentChapters[currentChapterIdx];
+    if (!chapter) return;
+    
+    const chapter_key = `${currentSeries.id}_v${currentVolume.volume}_ch${chapter.chapter}`;
+
+    try {
+        btn.disabled = true;
+        btn.innerText = '⌛ Отправка...';
+
+        const resp = await apiFetch(`${API_URL}/api/typo`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                chapter_key,
+                selected_text: typoSelectedText,
+                context_text: typoContextText,
+                comment: comment
+            })
+        });
+
+        const result = await resp.json();
+        if (result.ok) {
+            tg.HapticFeedback.notificationOccurred('success');
+            alert('✅ Спасибо! Репорт об опечатке отправлен.');
+            closeTypoModal();
+        } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная'));
+        }
+    } catch (e) {
+        alert('Ошибка сети: ' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.innerText = originalText;
+    }
+}
 
 // ==========================================================================
 // ИНИЦИАЛИЗАЦИЯ
@@ -985,3 +1857,5 @@ function renderContinueReading() {
 
 restoreSettings();
 loadData();
+initTypoReporter();
+

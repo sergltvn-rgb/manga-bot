@@ -7,7 +7,8 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="reader.css?v=3">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="reader.css?v=6">
 </head>
 <body>
     <!-- === ЭКРАН 1: Выбор серии === -->
@@ -52,7 +53,17 @@
             <div class="header-title">
                 <h1 id="reader-title">Глава 1</h1>
             </div>
+            <button class="toc-toggle-btn" id="toc-toggle-btn" onclick="toggleToC()" title="Оглавление" style="display:none;">☰</button>
             <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+        </div>
+        <!-- ToC Sidebar -->
+        <div id="toc-overlay" class="toc-overlay hidden" onclick="toggleToC()"></div>
+        <div id="toc-panel" class="toc-panel hidden">
+            <div class="toc-header">
+                <h3>📑 Оглавление</h3>
+                <button class="toc-close-btn" onclick="toggleToC()">✕</button>
+            </div>
+            <div id="toc-list" class="toc-list"></div>
         </div>
         <div class="reader-content" id="reader-content">
             <div class="reader-text" id="reader-text">
@@ -77,6 +88,10 @@
                     <h3 class="comments-title">💬 Комментарии <span class="comments-count" id="comments-count-badge"></span></h3>
                     
                     <div class="comment-form" id="comment-form">
+                        <div id="reply-indicator" class="reply-indicator" style="display:none;">
+                            <span>Ответ: <strong id="reply-to-name"></strong></span>
+                            <button class="cancel-reply-btn" onclick="cancelReply()">✕</button>
+                        </div>
                         <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="2"></textarea>
                         <button class="comment-submit-btn" onclick="postComment()">Отправить</button>
                     </div>
@@ -90,6 +105,57 @@
             <span class="chapter-indicator" id="chapter-indicator">1 / 10</span>
             <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">След. →</button>
         </div>
+        <!-- Autoscroll FAB -->
+        <button class="autoscroll-fab hidden" id="autoscroll-fab" onclick="toggleAutoscroll()" title="Автопрокрутка">▶</button>
+    </div>
+
+    <!-- === ЭКРАН 4: Моя библиотека === -->
+    <div id="screen-library" class="screen">
+        <div class="reader-header">
+            <div class="header-title">
+                <span class="header-icon">📚</span>
+                <h1>Моя библиотека</h1>
+            </div>
+            <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+        </div>
+        <div class="content-area">
+            <!-- Reading Stats -->
+            <div class="reading-stats-card">
+                <div class="stat-item">
+                    <span class="stat-icon">⏱️</span>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-time">0 ч 0 м</div>
+                        <div class="stat-label">Время за чтением</div>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">📖</span>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-chapters">0</div>
+                        <div class="stat-label">Прочитано глав</div>
+                    </div>
+                </div>
+            </div>
+            
+            <h3 class="library-section-title">В процессе чтения</h3>
+            <div id="library-list">
+                <div class="loading-spinner">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- === ТАБ БАР (Нижняя навигация) === -->
+    <div class="bottom-nav-bar" id="main-bottom-nav">
+        <button class="nav-tab active" id="tab-series" onclick="showScreen('series')">
+            <span class="tab-icon">🏠</span>
+            <span class="tab-label">Главная</span>
+        </button>
+        <button class="nav-tab" id="tab-library" onclick="showScreen('library')">
+            <span class="tab-icon">📚</span>
+            <span class="tab-label">Библиотека</span>
+        </button>
     </div>
 
     <!-- === Панель настроек === -->
@@ -156,6 +222,18 @@
             </label>
         </div>
 
+        <div class="setting-group" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+            <label style="margin-bottom:0;">▶ Автопрокрутка</label>
+            <label class="switch">
+                <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
+                <span class="slider round"></span>
+            </label>
+        </div>
+        <div class="setting-group autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
+            <label>🐢 Скорость автопрокрутки 🐇</label>
+            <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
+        </div>
+
         <div class="setting-group" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--divider);">
             <label style="display: flex; justify-content: space-between; align-items: center;">
                 <span>🔧 Режим редактора</span>
@@ -170,6 +248,59 @@
         <button class="close-settings-btn" onclick="toggleSettings()">Готово</button>
     </div>
 
-    <script src="reader.js?v=3"></script>
+    <!-- === Image Lightbox === -->
+    <div id="lightbox-overlay" class="lightbox-overlay hidden">
+        <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+        <button class="lightbox-nav lightbox-prev" id="lightbox-prev" onclick="lightboxNavigate(-1)">‹</button>
+        <div class="lightbox-image-wrapper" id="lightbox-image-wrapper">
+            <img id="lightbox-img" class="lightbox-img" src="" alt="">
+        </div>
+        <button class="lightbox-nav lightbox-next" id="lightbox-next" onclick="lightboxNavigate(1)">›</button>
+        <div class="lightbox-counter" id="lightbox-counter"></div>
+    </div>
+
+    <!-- === Edit URL Modal (Admin) === -->
+    <div id="edit-url-overlay" class="modal-overlay hidden" onclick="closeEditUrlModal()"></div>
+    <div id="edit-url-modal" class="edit-url-modal hidden">
+        <h3>🔗 Редактирование ссылки</h3>
+        <p class="edit-url-chapter-name" id="edit-url-chapter-name"></p>
+        <input type="text" id="edit-url-input" class="edit-url-input" placeholder="https://telegra.ph/...">
+        <div class="edit-url-actions">
+            <button class="edit-url-cancel" onclick="closeEditUrlModal()">Отмена</button>
+            <button class="edit-url-save" id="edit-url-save" onclick="saveEditUrl()">💾 Сохранить</button>
+        </div>
+    </div>
+
+    <!-- === Bulk Upload Modal (Admin) === -->
+    <div id="bulk-upload-overlay" class="modal-overlay hidden" onclick="closeBulkModal()"></div>
+    <div id="bulk-upload-modal" class="bulk-upload-modal hidden">
+        <h3>📦 Массовое добавление глав</h3>
+        <p class="bulk-upload-hint">Вставьте ссылки (по одной на строку). Нумерация продолжится автоматически.</p>
+        <textarea id="bulk-upload-input" class="bulk-upload-input" placeholder="https://telegra.ph/chapter-15\nhttps://telegra.ph/chapter-16\nhttps://telegra.ph/chapter-17" rows="6"></textarea>
+        <div class="bulk-upload-actions">
+            <button class="edit-url-cancel" onclick="closeBulkModal()">Отмена</button>
+            <button class="edit-url-save" id="bulk-upload-save" onclick="executeBulkUpload()">📤 Добавить</button>
+        </div>
+    </div>
+
+    <!-- === Typo Reporter === -->
+    <div id="typo-tooltip" class="typo-tooltip" onclick="openTypoModal()">
+        <span>📝</span> Сообщить об опечатке
+    </div>
+
+    <div id="typo-modal-overlay" class="modal-overlay hidden" onclick="closeTypoModal()"></div>
+    <div id="typo-modal" class="edit-url-modal hidden">
+        <h3>🚨 Репорт об опечатке</h3>
+        <div class="typo-modal-context" id="typo-modal-context">
+            Текст с <span class="typo-modal-selected">оШибкой</span>
+        </div>
+        <textarea id="typo-comment" class="typo-modal-input" placeholder="Комментарий (необязательно)..." rows="3"></textarea>
+        <div class="edit-url-actions" style="margin-top: 16px;">
+            <button class="edit-url-cancel" onclick="closeTypoModal()">Отмена</button>
+            <button class="edit-url-save" id="typo-submit-btn" onclick="submitTypoReport()">📤 Отправить</button>
+        </div>
+    </div>
+
+    <script src="reader.js?v=6"></script>
 </body>
 </html>

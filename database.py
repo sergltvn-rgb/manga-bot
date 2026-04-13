@@ -50,7 +50,14 @@ async def init_db():
             user_id TEXT NOT NULL,
             user_name TEXT DEFAULT '',
             text TEXT NOT NULL,
+            parent_id INTEGER DEFAULT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+
+        # Миграция: добавление parent_id, если его нет
+        try:
+            await db.execute('ALTER TABLE chapter_comments ADD COLUMN parent_id INTEGER DEFAULT NULL')
+        except sqlite3.OperationalError:
+            pass # Колонка уже существует
 
         # Таблица прогресса чтения (WebApp)
         await db.execute('''CREATE TABLE IF NOT EXISTS user_bookmarks (
@@ -62,8 +69,25 @@ async def init_db():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (user_id, series_id))''')
 
+        # Таблица репортов об опечатках (WebApp)
+        await db.execute('''CREATE TABLE IF NOT EXISTS chapter_typos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chapter_key TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            user_name TEXT DEFAULT '',
+            selected_text TEXT NOT NULL,
+            context_text TEXT NOT NULL,
+            comment TEXT DEFAULT '',
+            status TEXT DEFAULT 'open',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+
         # Инициализация режима Али по умолчанию (если пусто)
         await db.execute('INSERT OR IGNORE INTO alya_settings (bot_id, mode) VALUES (1, "normal")')
+        
+        # Создание индексов для ускорения поиска (WebApp)
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_comments_chapter ON chapter_comments(chapter_key)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_likes_chapter ON chapter_likes(chapter_key)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON user_bookmarks(user_id)')
             
         await db.commit()
 

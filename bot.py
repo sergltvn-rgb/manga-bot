@@ -1864,7 +1864,6 @@ import re
 
 async def build_reader_data() -> dict:
     import aiosqlite
-    from database import get_custom_name
     from aiogram import Bot
     
     # Пытаемся получить имя бота, чтобы WebApp мог генерировать правильные deeplink-и
@@ -1878,19 +1877,25 @@ async def build_reader_data() -> dict:
     result = {"series": [], "bot_username": bot_username}
     
     async with aiosqlite.connect('manga.db') as db:
+        # ПРЕДЗАГРУЗКА: Читаем все кастомные имена разом (решение N+1 Query)
+        custom_names = {}
+        async with db.execute('SELECT id, name FROM custom_names') as c:
+            for row in await c.fetchall():
+                custom_names[row[0]] = row[1]
+
         async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
             ak_vols = [row[0] for row in await cursor.fetchall()]
         if ak_vols:
-            custom_title = await get_custom_name("series_akashic_records") or "Хроники Акаши"
-            akashic = {"id": "akashic_records", "title": custom_title, "volumes": []}
+            custom_title = custom_names.get("series_akashic_records") or "Хроники Акаши"
+            akashic = {"id": "akashic_records", "title": custom_title, "cover_url": custom_names.get("cover_akashic_records", ""), "volumes": []}
             for vol in ak_vols:
-                custom_vol = await get_custom_name(f"vol_akashic_records_{vol}") or f"Том {vol}"
+                custom_vol = custom_names.get(f"vol_akashic_records_{vol}") or f"Том {vol}"
                 async with db.execute('SELECT chapter, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
                     chapters = []
                     for row in await c.fetchall():
                         extracted = _clean_urls(row[1])
                         url_val = extracted[0] if len(extracted) == 1 else ""
-                        custom_chap = await get_custom_name(f"chap_akashic_records_{vol}_{row[0]}") or f"Глава {row[0]}"
+                        custom_chap = custom_names.get(f"chap_akashic_records_{vol}_{row[0]}") or f"Глава {row[0]}"
                         chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
                 akashic["volumes"].append({"volume": vol, "custom_name": custom_vol, "chapters": chapters})
             result["series"].append(akashic)
@@ -1898,16 +1903,16 @@ async def build_reader_data() -> dict:
         async with db.execute('SELECT DISTINCT volume FROM british_ranobe ORDER BY volume') as cursor:
             br_vols = [row[0] for row in await cursor.fetchall()]
         if br_vols:
-            custom_title = await get_custom_name("series_british_belle") or "Поцелуй британской красавицы"
-            british = {"id": "british_belle", "title": custom_title, "volumes": []}
+            custom_title = custom_names.get("series_british_belle") or "Поцелуй британской красавицы"
+            british = {"id": "british_belle", "title": custom_title, "cover_url": custom_names.get("cover_british_belle", ""), "volumes": []}
             for vol in br_vols:
-                custom_vol = await get_custom_name(f"vol_british_belle_{vol}") or f"Том {vol}"
+                custom_vol = custom_names.get(f"vol_british_belle_{vol}") or f"Том {vol}"
                 async with db.execute('SELECT chapter, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
                     chapters = []
                     for row in await c.fetchall():
                         extracted = _clean_urls(row[1])
                         url_val = extracted[0] if len(extracted) == 1 else ""
-                        custom_chap = await get_custom_name(f"chap_british_belle_{vol}_{row[0]}") or f"Глава {row[0]}"
+                        custom_chap = custom_names.get(f"chap_british_belle_{vol}_{row[0]}") or f"Глава {row[0]}"
                         chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
                 british["volumes"].append({"volume": vol, "custom_name": custom_vol, "chapters": chapters})
             result["series"].append(british)
@@ -1920,14 +1925,14 @@ async def build_reader_data() -> dict:
                 for row in await c.fetchall():
                     extracted = _clean_urls(row[1])
                     url_val = extracted[0] if len(extracted) == 1 else ""
-                    custom_chap = await get_custom_name(f"chap_ranobe_{lang}_1_{row[0]}") or f"Глава {row[0]}"
+                    custom_chap = custom_names.get(f"chap_ranobe_{lang}_1_{row[0]}") or f"Глава {row[0]}"
                     chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
             if chapters:
                 lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
-                custom_title = await get_custom_name(f"series_ranobe_{lang}") or f"Ранобэ ({lname})"
-                custom_vol = await get_custom_name(f"vol_ranobe_{lang}_1") or "Том 1"
+                custom_title = custom_names.get(f"series_ranobe_{lang}") or f"Ранобэ ({lname})"
+                custom_vol = custom_names.get(f"vol_ranobe_{lang}_1") or "Том 1"
                 result["series"].append({
-                    "id": f"ranobe_{lang}", "title": custom_title, "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}]
+                    "id": f"ranobe_{lang}", "title": custom_title, "cover_url": custom_names.get(f"cover_ranobe_{lang}", ""), "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}]
                 })
                 
         async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
@@ -1938,14 +1943,14 @@ async def build_reader_data() -> dict:
                 for row in await c.fetchall():
                     extracted = _clean_urls(row[1])
                     url_val = extracted[0] if len(extracted) == 1 else ""
-                    custom_chap = await get_custom_name(f"chap_manga_{lang}_1_{row[0]}") or f"Глава {row[0]}"
+                    custom_chap = custom_names.get(f"chap_manga_{lang}_1_{row[0]}") or f"Глава {row[0]}"
                     chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
             if chapters:
                 lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
-                custom_title = await get_custom_name(f"series_manga_{lang}") or f"Манга ({lname})"
-                custom_vol = await get_custom_name(f"vol_manga_{lang}_1") or "Том 1"
+                custom_title = custom_names.get(f"series_manga_{lang}") or f"Манга ({lname})"
+                custom_vol = custom_names.get(f"vol_manga_{lang}_1") or "Том 1"
                 result["series"].append({
-                    "id": f"manga_{lang}", "title": custom_title, "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}]
+                    "id": f"manga_{lang}", "title": custom_title, "cover_url": custom_names.get(f"cover_manga_{lang}", ""), "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}]
                 })
                 
     return result
@@ -2620,7 +2625,7 @@ class StatsMiddleware(BaseMiddleware):
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
 }
 
@@ -2738,6 +2743,133 @@ async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Resp
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 
+# --- Маппинг series_id -> таблица/формат для прямого редактирования URL ---
+
+def _get_table_info(series_id: str, volume):
+    """Возвращает (table_name, chapter_col, where_clause, params_fn) для серии."""
+    if series_id == 'akashic_records':
+        return ('akashic_ranobe', 'chapter', 'volume = ? AND chapter = ?', lambda v, c: (v, c))
+    elif series_id == 'british_belle':
+        return ('british_ranobe', 'chapter', 'volume = ? AND chapter = ?', lambda v, c: (v, c))
+    elif series_id.startswith('ranobe_'):
+        lang = series_id.replace('ranobe_', '')
+        return ('ranobe_urls', 'chapter_number', 'chapter_number = ? AND lang = ?', lambda v, c: (c, lang))
+    elif series_id.startswith('manga_'):
+        lang = series_id.replace('manga_', '')
+        return ('chapters_urls', 'chapter_number', 'chapter_number = ? AND lang = ?', lambda v, c: (c, lang))
+    return None
+
+async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """PUT: Обновить URL главы. Только для админов."""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = data.get('series_id', '')
+        volume = data.get('volume')
+        chapter = data.get('chapter', '')
+        new_url = data.get('url', '').strip()
+
+        if not series_id or not chapter or not new_url:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+
+        info = _get_table_info(series_id, volume)
+        if not info:
+            return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
+
+        table, col, where, params_fn = info
+        params = params_fn(volume, chapter)
+
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute(f'UPDATE {table} SET url = ? WHERE {where}', (new_url,) + params)
+            await db.commit()
+
+        # Пересобираем JSON и синхронизируем
+        result = await build_reader_data()
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync("URL edited via webapp editor"))
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Chapter Edit API Error: {e}")
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """POST: Массовое добавление глав с URL. Только для админов."""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = data.get('series_id', '')
+        volume = data.get('volume')
+        start_chapter = data.get('start_chapter', 1)
+        urls = data.get('urls', [])
+
+        if not series_id or not urls:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+
+        info = _get_table_info(series_id, volume)
+        if not info:
+            return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
+
+        table, col, where, params_fn = info
+        added = 0
+
+        async with aiosqlite.connect('manga.db') as db:
+            for i, url in enumerate(urls):
+                ch_num = str(start_chapter + i)
+                url = url.strip()
+                if not url:
+                    continue
+                if series_id in ('akashic_records', 'british_belle'):
+                    await db.execute(
+                        f'INSERT OR REPLACE INTO {table} (volume, chapter, url) VALUES (?, ?, ?)',
+                        (volume, ch_num, url)
+                    )
+                else:
+                    # ranobe_*/manga_* — используем lang
+                    lang = series_id.split('_', 1)[1] if '_' in series_id else 'ru'
+                    await db.execute(
+                        f'INSERT OR REPLACE INTO {table} (chapter_number, lang, url) VALUES (?, ?, ?)',
+                        (ch_num, lang, url)
+                    )
+                added += 1
+            await db.commit()
+
+        # Пересобираем JSON и синхронизируем
+        result = await build_reader_data()
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"bulk upload {added} chapters via webapp"))
+
+        return aiohttp.web.json_response({"ok": True, "added": added}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Bulk Upload API Error: {e}")
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+
 async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Response:
     return aiohttp.web.Response(status=200, headers=CORS_HEADERS)
 
@@ -2799,11 +2931,11 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
     try:
         async with aiosqlite.connect('manga.db') as db:
             async with db.execute(
-                'SELECT id, user_id, user_name, text, created_at FROM chapter_comments WHERE chapter_key = ? ORDER BY created_at ASC',
+                'SELECT id, user_id, user_name, text, created_at, parent_id FROM chapter_comments WHERE chapter_key = ? ORDER BY created_at ASC',
                 (chapter_key,)
             ) as c:
                 rows = await c.fetchall()
-        comments = [{"id": r[0], "user_id": r[1], "user_name": r[2], "text": r[3], "created_at": r[4]} for r in rows]
+        comments = [{"id": r[0], "user_id": r[1], "user_name": r[2], "text": r[3], "created_at": r[4], "parent_id": r[5]} for r in rows]
         return aiohttp.web.json_response({"comments": comments}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
@@ -2820,6 +2952,7 @@ async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
         data = await request.json()
         chapter_key = data.get('chapter_key', '')
         text = data.get('text', '').strip()
+        parent_id = data.get('parent_id', None)
         if not chapter_key or not text:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
         if len(text) > 500:
@@ -2827,8 +2960,8 @@ async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
 
         async with aiosqlite.connect('manga.db') as db:
             await db.execute(
-                'INSERT INTO chapter_comments (chapter_key, user_id, user_name, text) VALUES (?, ?, ?, ?)',
-                (chapter_key, user_id, user_name, text)
+                'INSERT INTO chapter_comments (chapter_key, user_id, user_name, text, parent_id) VALUES (?, ?, ?, ?, ?)',
+                (chapter_key, user_id, user_name, text, parent_id)
             )
             await db.commit()
 
@@ -2868,6 +3001,37 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+# --- Репорты об опечатках ---
+
+async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Добавить репорт об опечатке."""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        user_name = user.get("first_name", "Аноним")
+
+        data = await request.json()
+        chapter_key = data.get('chapter_key', '')
+        selected_text = data.get('selected_text', '').strip()
+        context_text = data.get('context_text', '').strip()
+        comment = data.get('comment', '').strip()
+
+        if not chapter_key or not selected_text or not context_text:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute(
+                'INSERT INTO chapter_typos (chapter_key, user_id, user_name, selected_text, context_text, comment) VALUES (?, ?, ?, ?, ?, ?)',
+                (chapter_key, user_id, user_name, selected_text, context_text, comment)
+            )
+            await db.commit()
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
 # --- Прогресс чтения (Закладки) ---
 
 async def handle_progress_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -2924,6 +3088,80 @@ async def handle_progress_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 
+# --- Сортировка глав (Admin DnD) ---
+
+async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Сохранить порядок глав после перетаскивания (только для админов)."""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = int(user.get("id", 0))
+        
+        admins = await get_admins()
+        if user_id not in admins:
+            return aiohttp.web.json_response({"error": "Forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = data.get('series_id', '')
+        volume = data.get('volume', '')
+        order = data.get('order', [])  # List of chapter identifiers in new order
+
+        if not series_id or not order:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+
+        # Determine the table based on series_id
+        table = None
+        id_col = None
+        chapter_col = None
+        for ctype, cfg in CONTENT_TYPES.items():
+            if series_id.startswith(ctype) or series_id == ctype:
+                table = cfg['table']
+                id_col = cfg['id_col']
+                chapter_col = cfg['chapter_col']
+                break
+        
+        if not table:
+            # Try to match by prefix pattern
+            if 'manga' in series_id or series_id in LANGUAGES:
+                table = 'chapters_urls'
+                id_col = 'lang'
+                chapter_col = 'chapter_number'
+            elif 'ranobe' in series_id or series_id in RANOBE_LANGUAGES:
+                table = 'ranobe_urls'
+                id_col = 'lang'
+                chapter_col = 'chapter_number'
+            elif 'akashic' in series_id:
+                table = 'akashic_ranobe'
+                id_col = 'volume'
+                chapter_col = 'chapter'
+            elif 'british' in series_id:
+                table = 'british_ranobe'
+                id_col = 'volume'
+                chapter_col = 'chapter'
+            else:
+                return aiohttp.web.json_response({"error": "unknown series type"}, status=400, headers=CORS_HEADERS)
+
+        async with aiosqlite.connect('manga.db') as db:
+            # Ensure sort_order column exists
+            try:
+                await db.execute(f'ALTER TABLE {table} ADD COLUMN sort_order INTEGER DEFAULT 0')
+                await db.commit()
+            except Exception:
+                pass  # Column already exists
+
+            # Update sort_order for each chapter
+            for idx, chapter_id in enumerate(order):
+                await db.execute(
+                    f'UPDATE {table} SET sort_order = ? WHERE {id_col} = ? AND {chapter_col} = ?',
+                    (idx, str(volume), str(chapter_id))
+                )
+            await db.commit()
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
 # ==============================================================================
 # БЛОК: ЗАПУСК БОТА
 # ==============================================================================
@@ -2967,9 +3205,21 @@ async def main():
     app.router.add_get("/api/progress", handle_progress_get)
     app.router.add_post("/api/progress", handle_progress_post)
     app.router.add_options("/api/progress", handle_cors_preflight)
+    # Репорты об опечатках
+    app.router.add_post("/api/typo", handle_typo_post)
+    app.router.add_options("/api/typo", handle_cors_preflight)
+    # Сортировка глав (Admin DnD)
+    app.router.add_route("PUT", "/api/sort", handle_sort_chapters)
+    app.router.add_options("/api/sort", handle_cors_preflight)
     # ИИ-чат (серверный прокси — ключ Groq не покидает сервер)
     app.router.add_post("/api/ai_chat", handle_ai_chat)
     app.router.add_options("/api/ai_chat", handle_cors_preflight)
+    # Редактирование URL глав (Admin)
+    app.router.add_route("PUT", "/api/chapters", handle_chapter_edit)
+    app.router.add_options("/api/chapters", handle_cors_preflight)
+    # Массовое добавление глав (Admin)
+    app.router.add_post("/api/chapters/bulk", handle_chapter_bulk)
+    app.router.add_options("/api/chapters/bulk", handle_cors_preflight)
     
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
