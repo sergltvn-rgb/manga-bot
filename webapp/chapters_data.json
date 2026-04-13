@@ -6,6 +6,85 @@
       "cover_url": "",
       "volumes": [
         {
+          "volume": 11,
+          "custom_name": "Том 11",
+          "chapters": [
+            {
+              "chapter": "0",
+              "custom_name": "Глава 0",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/y5hEFW8_Puf",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-Prolog-04-13"
+              ]
+            },
+            {
+              "chapter": "1",
+              "custom_name": "Глава 1",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/zRWN1C2g0pc",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-1-glava-1-chast-04-13",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-1-glava-2-chast-04-13"
+              ]
+            },
+            {
+              "chapter": "2",
+              "custom_name": "Глава 2",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/VWSAvUh1oS-",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-2-glava-1-chast-04-13",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-2-glava-2-chast-04-13",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-2-glava-3-chast-04-13"
+              ]
+            },
+            {
+              "chapter": "3",
+              "custom_name": "Глава 3",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/KWJrO62L-Dt",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-1-glava-1-chast-04-13-2",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-2-glava-2-chast-04-13-2",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-3-glava-3-chast-04-13"
+              ]
+            },
+            {
+              "chapter": "4",
+              "custom_name": "Глава 4",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/ADCqZOFmxhL",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-4-glava-1-chast-04-13",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-4-glava-2-chast-04-13",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-4-glava-3-chast-04-13"
+              ]
+            },
+            {
+              "chapter": "5",
+              "custom_name": "Глава 5",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/woqFKZO7LJG",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-5-glava-1-chast-04-13",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-5-glava-2-chast-04-13"
+              ]
+            },
+            {
+              "chapter": "6",
+              "custom_name": "Глава 6",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/b_Hxn6jQzYN",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-6-glava-1-chast-04-13",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-6-glava-2-chast-04-13",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-6-glava-3-chast-04-13"
+              ]
+            }
+          ]
+        },
+        {
           "volume": 12,
           "custom_name": "Том 12",
           "chapters": [
