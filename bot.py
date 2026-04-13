@@ -503,6 +503,10 @@ async def process_project_info_menu(callback: types.CallbackQuery):
 def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
     return InlineKeyboardBuilder().row(types.InlineKeyboardButton(text=text, callback_data=callback_data)).as_markup()
 
+@dp.callback_query(F.data == "empty")
+async def process_empty_callback(callback: types.CallbackQuery):
+    await callback.answer("Здесь пока пусто 😔", show_alert=False)
+
 @dp.message(Command("start", ignore_mention=True), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -1846,13 +1850,6 @@ async def build_reader_data() -> dict:
 def _clean_urls(url_text: str) -> list:
     # Ищем все ссылки
     links = re.findall(r'(https?://[^\s<"\'>]+)', url_text)
-    if not links:
-        return []
-    # Если есть telegraph ссылки, берём их все (на случай разбивки на части)
-    telegraph_links = [l for l in links if 'telegra.ph' in l]
-    if telegraph_links:
-        return telegraph_links
-    # Иначе возвращаем все найденные
     return links
 
 @dp.message(Command("toggle_sync"))
@@ -2613,6 +2610,7 @@ async def handle_likes_get(request: aiohttp.web.Request) -> aiohttp.web.Response
 
 async def handle_likes_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Поставить/убрать лайк (toggle)."""
+    # TODO(Backlog): Использовать Telegram WebApp initData и проверять HMAC-SHA256 подпись на сервере
     try:
         data = await request.json()
         chapter_key = data.get('chapter_key', '')
@@ -2657,6 +2655,7 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
 
 async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Добавить комментарий."""
+    # TODO(Backlog): Использовать Telegram WebApp initData и проверять HMAC-SHA256 подпись на сервере
     try:
         data = await request.json()
         chapter_key = data.get('chapter_key', '')
