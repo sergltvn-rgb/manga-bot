@@ -39,10 +39,10 @@ async function resetCustomName(objId) {
     if (!API_URL) return alert('Сброс доступен только через прямое подключение (не GitHub Pages).');
     if (!confirm(`Сбросить кастомное имя "${objId}" на дефолт?`)) return;
     try {
-        const resp = await fetch(`${API_URL}/api/rename`, {
+        const resp = await apiFetch(`${API_URL}/api/rename`, {
             method: 'DELETE',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ obj_id: objId, user_id: userId })
+            body: JSON.stringify({ obj_id: objId })
         });
         const result = await resp.json();
         if (result.ok) {
@@ -73,6 +73,16 @@ let readChapters = JSON.parse(localStorage.getItem('reader_progress') || '{}');
 const urlParams = new URLSearchParams(window.location.search);
 const API_URL = urlParams.get('api') || (window.location.hostname !== 'localhost' && !window.location.hostname.includes('github.io') ? window.location.origin : '');
 
+// === API Wrapper ===
+async function apiFetch(url, options = {}) {
+    options.headers = options.headers || {};
+    if (typeof tg !== 'undefined' && tg.initData) {
+        options.headers['Authorization'] = 'tma ' + tg.initData;
+    }
+    return fetch(url, options);
+}
+
+
 // === Сохранение позиции чтения ===
 function getScrollKey() {
     if (!currentSeries || !currentVolume) return null;
@@ -90,11 +100,10 @@ function saveScrollPosition() {
     
     // Синхронизация с сервером
     if (API_URL && userId && currentSeries && currentVolume && currentChapters[currentChapterIdx]) {
-        fetch(API_URL + '/api/progress', {
+        apiFetch(API_URL + '/api/progress', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                user_id: userId,
                 series_id: currentSeries.id,
                 volume_id: currentVolume.volume,
                 chapter_key: currentChapters[currentChapterIdx].chapter,
@@ -197,7 +206,7 @@ let serverBookmarks = []; // Хранит загруженные закладк�
 async function loadData() {
     if (API_URL && userId) {
         try {
-            const bResp = await fetch(API_URL + '/api/progress?user_id=' + userId);
+            const bResp = await apiFetch(API_URL + '/api/progress');
             if (bResp.ok) {
                 const bData = await bResp.json();
                 serverBookmarks = bData.bookmarks || [];
@@ -209,7 +218,7 @@ async function loadData() {
 
     if (API_URL) {
         try {
-            const resp = await fetch(API_URL + '/api/reader', { signal: AbortSignal.timeout(8000) });
+            const resp = await apiFetch(API_URL + '/api/reader', { signal: AbortSignal.timeout(8000) });
             if (resp.ok) {
                 allData = await resp.json();
                 if (allData.series && allData.series.length > 0) {
@@ -555,7 +564,7 @@ async function loadLikes() {
     const key = getChapterKey();
     if (!key) return;
     try {
-        const resp = await fetch(API_URL + `/api/likes?chapter_key=${encodeURIComponent(key)}&user_id=${encodeURIComponent(userId)}`);
+        const resp = await apiFetch(API_URL + `/api/likes?chapter_key=${encodeURIComponent(key)}`);
         const data = await resp.json();
         updateLikeUI(data.count, data.liked);
     } catch (e) {
@@ -568,10 +577,10 @@ async function toggleLike() {
     const key = getChapterKey();
     if (!key) return;
     try {
-        const resp = await fetch(API_URL + '/api/likes', {
+        const resp = await apiFetch(API_URL + '/api/likes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chapter_key: key, user_id: userId })
+            body: JSON.stringify({ chapter_key: key })
         });
         const data = await resp.json();
         
@@ -604,7 +613,7 @@ async function loadComments() {
     const key = getChapterKey();
     if (!key) return;
     try {
-        const resp = await fetch(API_URL + `/api/comments?chapter_key=${encodeURIComponent(key)}`);
+        const resp = await apiFetch(API_URL + `/api/comments?chapter_key=${encodeURIComponent(key)}`);
         const data = await resp.json();
         renderComments(data.comments || []);
     } catch (e) {
@@ -656,13 +665,11 @@ async function postComment() {
     btn.disabled = true;
     
     try {
-        await fetch(API_URL + '/api/comments', {
+        await apiFetch(API_URL + '/api/comments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chapter_key: key,
-                user_id: userId,
-                user_name: userName,
                 text: text
             })
         });
@@ -678,10 +685,10 @@ async function postComment() {
 async function deleteComment(commentId) {
     if (!API_URL || !userId) return;
     try {
-        await fetch(API_URL + '/api/comments', {
+        await apiFetch(API_URL + '/api/comments', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ comment_id: commentId, user_id: userId })
+            body: JSON.stringify({ comment_id: commentId })
         });
         await loadComments();
     } catch (e) {
@@ -969,140 +976,7 @@ function renderContinueReading() {
     `;
 }
 
-function getChapterKey() {
-    if (!currentSeries || !currentVolume) return '';
-    return `${currentSeries.id}_v${currentVolume.volume}_ch${currentChapters[currentChapterIdx]?.chapter}`;
-}
 
-async function loadLikes() {
-    const ck = getChapterKey();
-    if (!ck || !API_URL) return;
-    try {
-        const res = await fetch(`${API_URL}/api/likes?chapter_key=${ck}&user_id=${userId}`);
-        const data = await res.json();
-        const countEl = document.getElementById('like-count');
-        if (countEl) countEl.textContent = data.count || 0;
-        const btn = document.getElementById('like-btn');
-        if (btn) {
-            if (data.user_liked) {
-                btn.classList.add('liked');
-                document.getElementById('like-icon').textContent = '❤️';
-            } else {
-                btn.classList.remove('liked');
-                document.getElementById('like-icon').textContent = '🤍';
-            }
-        }
-    } catch (e) {
-        console.warn('Likes error:', e);
-    }
-}
-
-async function toggleLike() {
-    const ck = getChapterKey();
-    if (!ck || !API_URL || !userId) return;
-    const btn = document.getElementById('like-btn');
-    const isLiked = btn.classList.contains('liked');
-    
-    // Optimistic UI
-    btn.classList.toggle('liked');
-    document.getElementById('like-icon').textContent = !isLiked ? '❤️' : '🤍';
-    const cEl = document.getElementById('like-count');
-    if (cEl) cEl.textContent = parseInt(cEl.textContent) + (!isLiked ? 1 : -1);
-    
-    try {
-        await fetch(`${API_URL}/api/likes`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chapter_key: ck, user_id: userId })
-        });
-        loadLikes();
-    } catch (e) {
-        console.warn('Like toggle error:', e);
-    }
-}
-
-async function loadComments() {
-    const ck = getChapterKey();
-    if (!ck || !API_URL) return;
-    try {
-        const res = await fetch(`${API_URL}/api/comments?chapter_key=${ck}`);
-        const data = await res.json();
-        renderComments(data.comments || []);
-    } catch (e) {
-        console.warn('Comments error:', e);
-    }
-}
-
-function renderComments(comments) {
-    const list = document.getElementById('comments-list');
-    const badge = document.getElementById('comments-count-badge');
-    if (badge) badge.textContent = comments.length > 0 ? comments.length : '';
-    if (!list) return;
-    
-    if (comments.length === 0) {
-        list.innerHTML = `<div class="no-comments">Комментариев пока нет. Будьте первыми!</div>`;
-        return;
-    }
-    
-    list.innerHTML = comments.map(c => `
-        <div class="comment-item" style="margin-bottom: 12px; padding: 12px; background: var(--card-bg); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
-                <div class="comment-author" style="color:var(--text); font-weight:bold;">${escapeHtml(c.user_name || 'Аноним')}</div>
-                <div style="display:flex; align-items:center; gap: 8px;">
-                    <div class="comment-date" style="color:var(--text-secondary); font-size:12px;">${new Date(c.created_at).toLocaleDateString()}</div>
-                    ${(String(c.user_id) === String(userId) || isAdminMode) ? `<button class="comment-delete-btn" onclick="deleteComment(${c.id})">🗑️</button>` : ''}
-                </div>
-            </div>
-            <div class="comment-text" style="color:var(--text)!important; line-height:1.4;">${escapeHtml(c.text)}</div>
-        </div>
-    `).join('');
-}
-
-async function postComment() {
-    const input = document.getElementById('comment-input');
-    if (!input) return;
-    const text = input.value.trim();
-    if (!text || !userId || !API_URL) return;
-    
-    try {
-        const res = await fetch(`${API_URL}/api/comments`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chapter_key: getChapterKey(),
-                user_id: userId,
-                user_name: userName,
-                text: text
-            })
-        });
-        if (res.ok) {
-            input.value = '';
-            loadComments();
-        } else {
-             alert('Ошибка при отправке комментария.');
-        }
-    } catch (e) {
-        console.warn('Post comment error:', e);
-    }
-}
-
-async function deleteComment(id) {
-    if (!confirm('Удалить комментарий?')) return;
-    try {
-        const res = await fetch(`${API_URL}/api/comments`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ comment_id: id, user_id: userId })
-        });
-        if (res.ok) {
-            loadComments();
-        } else {
-            alert('Ошибка удаления.');
-        }
-    } catch (e) {
-        console.warn('Delete comment error', e);
-    }
-}
 
 
 // ==========================================================================

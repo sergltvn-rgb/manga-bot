@@ -4,6 +4,9 @@ import time
 from typing import Union
 from aiogram import types
 from database import get_admins
+import hmac
+import hashlib
+from urllib.parse import parse_qsl
 
 # Кэш кулдаунов: key -> (timestamp, cooldown_duration)
 COOLDOWNS: dict = {}
@@ -78,6 +81,35 @@ async def delete_after(message: types.Message, delay: int):
 async def temp_reply(message: types.Message, text: str, delay: int = 5, **kwargs):
     msg = await message.answer(text, **kwargs)
     asyncio.create_task(delete_after(msg, delay))
+
+def validate_telegram_data(init_data: str, bot_token: str) -> dict | None:
+    """Validate data received from Telegram Web App via HMAC-SHA256.
+    Returns the parsed data dict if valid, else None."""
+    try:
+        if not init_data:
+            return None
+        parsed_data = dict(parse_qsl(init_data, keep_blank_values=True))
+        if 'hash' not in parsed_data:
+            return None
+            
+        hash_value = parsed_data.pop('hash')
+        
+        # Sort keys
+        sorted_keys = sorted(parsed_data.keys())
+        data_check_string = '\n'.join(f"{k}={parsed_data[k]}" for k in sorted_keys)
+        
+        secret_key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
+        
+        if calculated_hash == hash_value:
+            # Reattach hash for completeness (optional)
+            parsed_data['hash'] = hash_value
+            return parsed_data
+        return None
+    except Exception as e:
+        import logging
+        logging.error(f"Telegram data validation error: {e}")
+        return None
 
 
 async def run_git_sync(commit_message: str = "sync webapp db") -> tuple[bool, str]:

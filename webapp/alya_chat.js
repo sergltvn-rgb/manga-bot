@@ -22,7 +22,26 @@ let messageHistory = [{ role: "system", content: SYSTEM_PROMPT }];
 // Если WebApp открыт через Telegram, используем origin сервера бота.
 // Fallback: относительный путь (если бот и WebApp на одном хосте).
 const urlParams = new URLSearchParams(window.location.search);
-const API_URL = urlParams.get('api') || window.location.origin || '';
+const API_URL = urlParams.get('api') || (window.location.hostname !== 'localhost' && !window.location.hostname.includes('github.io') ? window.location.origin : '');
+
+// === API Wrapper ===
+async function apiFetch(url, options = {}) {
+    options.headers = options.headers || {};
+    if (typeof tg !== 'undefined' && tg.initData) {
+        options.headers['Authorization'] = 'tma ' + tg.initData;
+    }
+    return fetch(url, options);
+}
+
+
+if (!API_URL) {
+    userInput.disabled = true;
+    sendBtn.disabled = true;
+    userInput.placeholder = "ИИ-чат доступен только внутри бота";
+    setTimeout(() => {
+        addMessage("❌ Системная ошибка: Чат заблокирован. Пожалуйста, откройте его через кнопку в Telegram-боте.", false);
+    }, 100);
+}
 
 // === Утилиты ===
 function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
@@ -37,7 +56,7 @@ function addMessage(text, isUser = false) {
 
 // === Запрос к серверному прокси /api/ai_chat ===
 async function callAI(messages) {
-    const response = await fetch(`${API_URL}/api/ai_chat`, {
+    const response = await apiFetch(`${API_URL}/api/ai_chat`, {
         method: "POST",
         headers: {
             "Content-Type": "application/json"

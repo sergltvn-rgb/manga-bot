@@ -171,7 +171,7 @@ CONTENT_TYPES = {
 # ==============================================================================
 # БЛОК 2: АНТИСПАМ И КУЛДАУНЫ
 # ==============================================================================
-from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply, run_git_sync, safe_edit_or_reply
+from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply, run_git_sync, safe_edit_or_reply, validate_telegram_data
 
 
 # ==============================================================================
@@ -714,7 +714,13 @@ def get_langs_menu(prefix="lang"):
     builder = InlineKeyboardBuilder()
     for code, name in LANGUAGES.items():
         builder.row(types.InlineKeyboardButton(text=name, callback_data=f"{prefix}_{code}"))
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu" if prefix == "lang" else "admin_menu"))
+        
+    if prefix == "readlang":
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="section_read"))
+    elif prefix in ("ucadd", "ucdel"):
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_state"))
+    else:
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     return builder.as_markup()
 
 def get_ranobe_langs_menu(prefix="ranobelang"):
@@ -726,8 +732,8 @@ def get_ranobe_langs_menu(prefix="ranobelang"):
         builder.row(types.InlineKeyboardButton(text="📖 Хроники Акаши", callback_data="akashic_vols"))
         builder.row(types.InlineKeyboardButton(text="👸 Британская красавица", callback_data="british_vols"))
         builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="section_read"))
-    elif prefix == "adminranobe":
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
+    elif prefix in ("adminranobe", "ucadd", "ucdel"):
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_state"))
     else:
         builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     return builder.as_markup()
@@ -1736,22 +1742,120 @@ async def cmd_delete_admin(message: types.Message):
 async def cmd_admin(message: types.Message):
     admins = await get_admins()
     if message.from_user.id not in admins: return
-    text = (
-        "👑 <b>Админка</b>\n"
-        "/add_chapter | /delete_chapter - Главы манги\n"
-        "/add_ranobe | /delete_ranobe - Главы ранобэ\n"
-        "/add_akashic | /delete_akashic - Хроники Акаши\n"
-        "/add_british | /delete_british - Британская красавица\n"
-        "/add_art | /arts_list | /delete_art - Арты\n"
-        "/add_admin | /delete_admin - Админы\n"
-        "/sync_webapp - 🚀 Синхронизация БД с WebApp (Github Pages)\n"
-        "/blacklist_ai | /unblacklist_ai - ЧС для ИИ\n"
-        "/toggle_ai - Вкл/выкл ИИ\n"
-        "/alya_mode - Режим Али\n"
-        "/set_commands_link - Telegraph ссылка\n"
-        "/cancel - Отмена"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="➕ Добавить Главу", callback_data="admin_add_chapter"),
+        types.InlineKeyboardButton(text="🗑 Удалить Главу", callback_data="admin_del_chapter")
     )
-    await message.answer(text, parse_mode="HTML")
+    builder.row(
+        types.InlineKeyboardButton(text="🔄 Синхронизация WebApp (Github)", callback_data="admin_sync_webapp")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🤖 Настройки ИИ", callback_data="admin_ai_settings")
+    )
+    
+    text = "👑 <b>Панель управления:</b>\nВыберите действие:"
+    await message.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_menu")
+async def admin_menu_back(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="➕ Добавить Главу", callback_data="admin_add_chapter"),
+        types.InlineKeyboardButton(text="🗑 Удалить Главу", callback_data="admin_del_chapter")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔄 Синхронизация WebApp (Github)", callback_data="admin_sync_webapp")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🤖 Настройки ИИ", callback_data="admin_ai_settings")
+    )
+    await callback.message.edit_text("👑 <b>Панель управления:</b>\nВыберите действие:", parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_add_chapter")
+async def admin_menu_add_chapter(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="Манга", callback_data="admin_cmd_add_chapter"),
+        types.InlineKeyboardButton(text="Ранобэ", callback_data="admin_cmd_add_ranobe")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="Хроники Акаши", callback_data="admin_cmd_add_akashic"),
+        types.InlineKeyboardButton(text="Брит. красавица", callback_data="admin_cmd_add_british")
+    )
+    builder.row(types.InlineKeyboardButton(text="Арт", callback_data="admin_cmd_add_art"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
+    await callback.message.edit_text("➕ <b>Что добавить?</b>", parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_del_chapter")
+async def admin_menu_del_chapter(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="Манга", callback_data="admin_cmd_delete_chapter"),
+        types.InlineKeyboardButton(text="Ранобэ", callback_data="admin_cmd_delete_ranobe")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="Хроники Акаши", callback_data="admin_cmd_delete_akashic"),
+        types.InlineKeyboardButton(text="Брит. красавица", callback_data="admin_cmd_delete_british")
+    )
+    builder.row(types.InlineKeyboardButton(text="Арт", callback_data="admin_cmd_delete_art"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
+    await callback.message.edit_text("🗑 <b>Что удалить?</b>", parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_ai_settings")
+async def admin_menu_ai_settings(callback: types.CallbackQuery):
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="Вкл/выкл ИИ", callback_data="admin_cmd_toggle_ai"),
+        types.InlineKeyboardButton(text="Режим Али", callback_data="admin_cmd_alya_mode")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="ЧС (ИИ)", callback_data="admin_cmd_blacklist_ai"),
+        types.InlineKeyboardButton(text="Удалить из ЧС", callback_data="admin_cmd_unblacklist_ai")
+    )
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
+    await callback.message.edit_text("🤖 <b>Настройки ИИ:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data == "admin_sync_webapp")
+async def admin_menu_sync_webapp(callback: types.CallbackQuery):
+    await callback.message.delete()
+    await cmd_sync_webapp(callback.message)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("admin_cmd_"))
+async def admin_menu_commands(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.delete()
+    cmd = callback.data.replace("admin_cmd_", "")
+    
+    try:
+        msg = callback.message.model_copy(update={"from_user": callback.from_user, "text": f"/{cmd}"})
+    except AttributeError:
+        msg = callback.message.copy(update={"from_user": callback.from_user, "text": f"/{cmd}"})
+        
+    commands = {
+        "add_chapter": cmd_add_chapter,
+        "add_ranobe": cmd_add_ranobe,
+        "add_akashic": cmd_add_akashic,
+        "add_british": cmd_add_british,
+        "add_art": cmd_add_art,
+        "delete_chapter": cmd_delete_chapter,
+        "delete_ranobe": cmd_delete_ranobe,
+        "delete_akashic": cmd_delete_akashic,
+        "delete_british": cmd_delete_british,
+        "delete_art": cmd_delete_art,
+        "toggle_ai": cmd_toggle_ai,
+        "alya_mode": cmd_alya_mode,
+        "blacklist_ai": cmd_blacklist_ai,
+        "unblacklist_ai": cmd_unblacklist_ai
+    }
+    
+    if cmd in commands:
+        if "add" in cmd or "delete" in cmd:
+            await commands[cmd](msg, state)
+        else:
+            await commands[cmd](msg)
+    await callback.answer()
 
 import json
 import os
@@ -2175,6 +2279,16 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Действие отменено ❌")
 
+@dp.callback_query(F.data == "cancel_state", StateFilter("*"))
+async def process_cancel_state(callback: types.CallbackQuery, state: FSMContext):
+    ART_CACHE.pop(callback.from_user.id, None)
+    await state.clear()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.answer("Действие отменено ❌", show_alert=True)
+
 @dp.message(Command("add_chapter"))
 async def cmd_add_chapter(message: types.Message, state: FSMContext):
     admins = await get_admins()
@@ -2507,8 +2621,29 @@ class StatsMiddleware(BaseMiddleware):
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
 }
+
+def get_auth_user(request: aiohttp.web.Request) -> dict | None:
+    """Извлекает и валидирует Telegram пользователя из заголовка Authorization."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("tma "):
+        init_data = auth_header[4:]
+    else:
+        # Fallback to initData parameter for backward compatibility if we want it, 
+        # but header is preferred.
+        init_data = request.query.get("initData", "")
+        
+    if not init_data:
+        return None
+        
+    parsed = validate_telegram_data(init_data, BOT_TOKEN)
+    if not parsed or 'user' not in parsed:
+        return None
+    try:
+        return json.loads(parsed['user'])
+    except Exception:
+        return None
 
 # --- ИИ-чат (серверный прокси для WebApp) ---
 
@@ -2517,6 +2652,10 @@ async def handle_ai_chat(request: aiohttp.web.Request) -> aiohttp.web.Response:
     сервер сам обращается к Groq и возвращает готовый ответ.
     Ключ GROQ_API_KEY никогда не покидает сервер."""
     try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+
         data = await request.json()
         messages = data.get('messages', [])
         if not messages or not isinstance(messages, list):
@@ -2539,7 +2678,7 @@ async def handle_ai_chat(request: aiohttp.web.Request) -> aiohttp.web.Response:
         prompt = ""
         if history and history[-1]['role'] == 'user':
             prompt = history.pop()['content']
-        if not prompt:
+        if not prompt.strip():
             return aiohttp.web.json_response(
                 {"error": "no user message found"}, status=400, headers=CORS_HEADERS
             )
@@ -2565,9 +2704,13 @@ async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Respon
 async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Сброс кастомного имени элемента обратно в дефолт. Только для AdminMode."""
     try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+
         data = await request.json()
         obj_id = data.get('obj_id', '').strip()
-        user_id = data.get('user_id', '')
         if not obj_id:
             return aiohttp.web.json_response({"error": "missing obj_id"}, status=400, headers=CORS_HEADERS)
         # Проверяем что запрашивающий — админ
@@ -2582,6 +2725,14 @@ async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Resp
             await db.execute('DELETE FROM custom_names WHERE id = ?', (obj_id,))
             await db.commit()
 
+        # Обновляем JSON и синхронизируем с GitHub в фоне
+        result = await build_reader_data()
+        import json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        asyncio.create_task(run_git_sync("reset custom name via webapp"))
+
         return aiohttp.web.json_response({"ok": True, "obj_id": obj_id}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
@@ -2595,7 +2746,8 @@ async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Res
 async def handle_likes_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Получить количество лайков и статус лайка пользователя."""
     chapter_key = request.query.get('chapter_key', '')
-    user_id = request.query.get('user_id', '')
+    user = get_auth_user(request)
+    user_id = str(user.get("id", "")) if user else ""
     try:
         async with aiosqlite.connect('manga.db') as db:
             async with db.execute('SELECT COUNT(*) FROM chapter_likes WHERE chapter_key = ?', (chapter_key,)) as c:
@@ -2610,12 +2762,15 @@ async def handle_likes_get(request: aiohttp.web.Request) -> aiohttp.web.Response
 
 async def handle_likes_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Поставить/убрать лайк (toggle)."""
-    # TODO(Backlog): Использовать Telegram WebApp initData и проверять HMAC-SHA256 подпись на сервере
     try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+
         data = await request.json()
         chapter_key = data.get('chapter_key', '')
-        user_id = data.get('user_id', '')
-        if not chapter_key or not user_id:
+        if not chapter_key:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
 
         async with aiosqlite.connect('manga.db') as db:
@@ -2655,14 +2810,17 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
 
 async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Добавить комментарий."""
-    # TODO(Backlog): Использовать Telegram WebApp initData и проверять HMAC-SHA256 подпись на сервере
     try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        user_name = user.get("first_name", "Аноним")
+
         data = await request.json()
         chapter_key = data.get('chapter_key', '')
-        user_id = data.get('user_id', '')
-        user_name = data.get('user_name', 'Аноним')
         text = data.get('text', '').strip()
-        if not chapter_key or not user_id or not text:
+        if not chapter_key or not text:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
         if len(text) > 500:
             return aiohttp.web.json_response({"error": "too long"}, status=400, headers=CORS_HEADERS)
@@ -2681,9 +2839,13 @@ async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
 async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Удалить комментарий (только свой или админ)."""
     try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+
         data = await request.json()
         comment_id = data.get('comment_id', 0)
-        user_id = data.get('user_id', '')
 
         async with aiosqlite.connect('manga.db') as db:
             # Проверяем владельца
@@ -2711,14 +2873,18 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
 async def handle_progress_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Сохранить позицию прокрутки и текущую главу."""
     try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+
         data = await request.json()
-        user_id = data.get('user_id', '')
         series_id = data.get('series_id', '')
         volume_id = data.get('volume_id', '')
         chapter_key = data.get('chapter_key', '')
         scroll_pos = data.get('scroll_pos', 0)
 
-        if not user_id or not series_id:
+        if not series_id:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
 
         async with aiosqlite.connect('manga.db') as db:
@@ -2739,9 +2905,10 @@ async def handle_progress_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
 
 async def handle_progress_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Получить все закладки пользователя."""
-    user_id = request.query.get('user_id', '')
-    if not user_id:
-        return aiohttp.web.json_response({"bookmarks": []}, headers=CORS_HEADERS)
+    user = get_auth_user(request)
+    if not user:
+        return aiohttp.web.json_response({"error": "Unauthorized", "bookmarks": []}, status=401, headers=CORS_HEADERS)
+    user_id = str(user.get("id", ""))
     
     try:
         async with aiosqlite.connect('manga.db') as db:
