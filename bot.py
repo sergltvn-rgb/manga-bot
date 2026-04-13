@@ -467,7 +467,7 @@ async def process_section_ai(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html"
+    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     await safe_edit_or_reply(callback, "🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -549,7 +549,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
         builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=f"{WEBAPP_URL.rstrip('/')}/webapp/index.html")))
+        alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
+        builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
         builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
         return await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
     elif deep_link == "project":
@@ -619,7 +620,7 @@ async def handle_reply_ai(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html"
+    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
     builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
     await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -1292,7 +1293,9 @@ async def akashic_show_volumes(callback: types.CallbackQuery):
     volumes = await get_akashic_volumes()
     builder = InlineKeyboardBuilder()
     if not volumes:
-        return await callback.answer("Тома пока не добавлены 😔", show_alert=True)
+        builder.row(types.InlineKeyboardButton(text="Тома пока не добавлены 😔", callback_data="empty"))
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="read_ranobe_langs"))
+        return await callback.message.edit_text("📖 <b>Хроники Акаши</b>\nНет добавленных томов:", reply_markup=builder.as_markup(), parse_mode="HTML")
     for vol in volumes:
         builder.button(text=f"Том {vol}", callback_data=AkashicCallback(action="chaps", volume=vol).pack())
     builder.adjust(2)
@@ -1306,7 +1309,7 @@ async def akashic_show_chapters(callback: types.CallbackQuery, callback_data: Ak
     for chap in chapters:
         builder.button(text=f"Глава {chap}", callback_data=AkashicCallback(action="read", volume=callback_data.volume, chapter=chap).pack())
     builder.adjust(3)
-    builder.row(types.InlineKeyboardButton(text="🔙 Назад к томам", callback_data=AkashicCallback(action="vols").pack()))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад к томам", callback_data=AkashicCallback(action="vols").pack()))
     await callback.message.edit_text(f"📖 <b>Хроники Акаши</b> — Том {callback_data.volume}\nВыберите главу:", reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @dp.callback_query(AkashicCallback.filter(F.action == "read"))
@@ -1359,7 +1362,9 @@ async def british_show_volumes(callback: types.CallbackQuery):
     volumes = await get_british_volumes()
     builder = InlineKeyboardBuilder()
     if not volumes:
-        return await callback.answer("Тома пока не добавлены 😔", show_alert=True)
+        builder.row(types.InlineKeyboardButton(text="Тома пока не добавлены 😔", callback_data="empty"))
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="read_ranobe_langs"))
+        return await callback.message.edit_text("👸 <b>Британская красавица</b>\nНет добавленных томов:", reply_markup=builder.as_markup(), parse_mode="HTML")
     for vol in volumes:
         builder.button(text=f"Том {vol}", callback_data=BritishCallback(action="chaps", volume=vol).pack())
     builder.adjust(2)
@@ -1373,7 +1378,7 @@ async def british_show_chapters(callback: types.CallbackQuery, callback_data: Br
     for chap in chapters:
         builder.button(text=f"Глава {chap}", callback_data=BritishCallback(action="read", volume=callback_data.volume, chapter=chap).pack())
     builder.adjust(3)
-    builder.row(types.InlineKeyboardButton(text="🔙 Назад к томам", callback_data=BritishCallback(action="vols").pack()))
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад к томам", callback_data=BritishCallback(action="vols").pack()))
     await callback.message.edit_text(f"👸 <b>Британская красавица</b> — Том {callback_data.volume}\nВыберите главу:", reply_markup=builder.as_markup(), parse_mode="HTML")
 
 @dp.callback_query(BritishCallback.filter(F.action == "read"))

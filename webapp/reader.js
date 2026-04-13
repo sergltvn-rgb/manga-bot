@@ -451,7 +451,7 @@ function loadChapterContent(chapter) {
         });
         
         Promise.all(loadPromises).then(results => {
-            container.innerHTML = results.join('<div class="chapter-divider" style="text-align:center; margin: 40px 0;">❖ ❖ ❖</div>');
+            container.innerHTML = results.join('');
             
             if (!container.innerHTML.includes('<iframe')) {
                 container.innerHTML += `
