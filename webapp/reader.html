@@ -8,7 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="reader.css?v=10">
+    <link rel="stylesheet" href="reader.css?v=11">
 </head>
 <body class="theme-light">
     <!-- ★ Toast Container -->
@@ -155,15 +155,15 @@
             <button id="autoscroll-fab" class="autoscroll-fab hidden" onclick="toggleAutoscroll()">▶</button>
 
             <div class="fab-menu hidden" id="fab-menu">
-                <button class="fab-menu-item" onclick="fabAction('toc')">
+                <button class="fab-menu-item" data-action="toc" onclick="fabAction('toc')">
                     <svg class="icon-sm" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     <span>Оглавление</span>
                 </button>
-                <button class="fab-menu-item" onclick="fabAction('autoscroll')">
+                <button class="fab-menu-item" data-action="autoscroll" onclick="fabAction('autoscroll')">
                     <svg class="icon-sm" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     <span>Автоскролл</span>
                 </button>
-                <button class="fab-menu-item" onclick="fabAction('comments')">
+                <button class="fab-menu-item" data-action="comments" onclick="fabAction('comments')">
                     <svg class="icon-sm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     <span>Комментарии</span>
                 </button>
@@ -358,7 +358,7 @@
     </div>
 
     <!-- === Typo Reporter === -->
-    <div id="typo-tooltip" class="typo-tooltip" onclick="openTypoModal()">
+    <div id="typo-tooltip" class="typo-tooltip">
         <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-1px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Сообщить об опечатке
     </div>
@@ -376,6 +376,6 @@
         </div>
     </div>
 
-    <script src="reader.js?v=11"></script>
+    <script src="reader.js?v=12"></script>
 </body>
 </html>

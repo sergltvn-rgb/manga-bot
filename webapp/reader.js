@@ -94,6 +94,8 @@ function getScrollKey() {
     return `scroll_${currentSeries.id}_v${currentVolume.volume}_ch${currentChapters[currentChapterIdx].chapter}`;
 }
 
+let _progressSyncTimer = null;
+
 function saveScrollPosition() {
     const key = getScrollKey();
     if (!key) return;
@@ -103,22 +105,33 @@ function saveScrollPosition() {
     localStorage.setItem(key, JSON.stringify({ pct, ts: Date.now() }));
     saveLastRead();
 
-    // Синхронизация с сервером
+    // Синхронизация с сервером (debounced — не чаще 1 раз в 3 секунды)
     if (API_URL && userId && currentSeries && currentVolume && currentChapters[currentChapterIdx]) {
-        apiFetch(API_URL + '/api/progress', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                series_id: currentSeries.id,
-                volume_id: currentVolume.volume,
-                chapter_key: currentChapters[currentChapterIdx].chapter,
-                scroll_pos: pct
-            })
-        }).catch(e => console.warn('Progress sync error:', e));
+        clearTimeout(_progressSyncTimer);
+        _progressSyncTimer = setTimeout(() => {
+            apiFetch(API_URL + '/api/progress', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    series_id: currentSeries.id,
+                    volume_id: currentVolume.volume,
+                    chapter_key: currentChapters[currentChapterIdx].chapter,
+                    scroll_pos: pct
+                })
+            }).catch(e => console.warn('Progress sync error:', e));
+        }, 3000);
     }
 }
 
+let _scrollResizeObserver = null; // Единственный ResizeObserver для скролла
+
 function restoreScrollPosition() {
+    // Убираем предыдущий observer (если был — нет утечки)
+    if (_scrollResizeObserver) {
+        _scrollResizeObserver.disconnect();
+        _scrollResizeObserver = null;
+    }
+
     // 1. Пробуем серверную
     const chIdx = currentChapters[currentChapterIdx];
     if (!chIdx) return;
@@ -143,7 +156,7 @@ function restoreScrollPosition() {
     if (!el) return;
 
     let hasRestored = false;
-    const observer = new ResizeObserver(() => {
+    _scrollResizeObserver = new ResizeObserver(() => {
         const maxScroll = el.scrollHeight - el.clientHeight;
         if (maxScroll > 0) {
             el.scrollTop = pctToRestore * maxScroll;
@@ -151,10 +164,13 @@ function restoreScrollPosition() {
         }
     });
     
-    observer.observe(el);
+    _scrollResizeObserver.observe(el);
     
     setTimeout(() => {
-        observer.disconnect();
+        if (_scrollResizeObserver) {
+            _scrollResizeObserver.disconnect();
+            _scrollResizeObserver = null;
+        }
         if (!hasRestored) {
             const maxScroll = el.scrollHeight - el.clientHeight;
             el.scrollTop = pctToRestore * maxScroll;
@@ -498,9 +514,16 @@ function openChapter(idx, usePrefetch = false) {
 
 // === Prefetch cache ===
 let prefetchedChapter = { idx: -1, html: null };
+let _chapterAbortController = null; // AbortController для отмены загрузки при смене главы
 
 function loadChapterContent(chapter, usePrefetch = false) {
     const container = document.getElementById('reader-text');
+
+    // Отменяем предыдущую загрузку, если была
+    if (_chapterAbortController) {
+        _chapterAbortController.abort();
+        _chapterAbortController = null;
+    }
 
     // Check if we have prefetched content for this chapter
     if (usePrefetch && prefetchedChapter.idx === currentChapterIdx && prefetchedChapter.html) {
@@ -541,6 +564,9 @@ function loadChapterContent(chapter, usePrefetch = false) {
             </div>
         `;
 
+        _chapterAbortController = new AbortController();
+        const signal = _chapterAbortController.signal;
+
         const loadPromises = urlsToLoad.map(async (u) => {
             // Teletype — используем iframe
             if (u.includes('teletype.in')) {
@@ -549,12 +575,13 @@ function loadChapterContent(chapter, usePrefetch = false) {
             const telegraphMatch = u.match(/telegra\.ph\/(.+)/);
             if (telegraphMatch) {
                 try {
-                    const resp = await fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`);
+                    const resp = await fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`, { signal });
                     const data = await resp.json();
                     if (data.ok && data.result && data.result.content) {
                         return renderTelegraphContent(data.result.content);
                     }
                 } catch (e) {
+                    if (e.name === 'AbortError') throw e; // Пробрасываем abort
                     console.warn("Telegraph API err", e);
                 }
             }
@@ -562,7 +589,18 @@ function loadChapterContent(chapter, usePrefetch = false) {
         });
 
         Promise.all(loadPromises).then(results => {
+            if (signal.aborted) return; // Не рендерим если глава уже сменилась
             renderLoadedContent(container, results.join(''), chapter);
+        }).catch(err => {
+            if (err.name === 'AbortError') return; // Тихо игнорируем отмену
+            console.error('Chapter load failed:', err);
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">❌</div>
+                    <h3>Ошибка загрузки главы</h3>
+                    <p>Проверьте соединение или используйте VPN.</p>
+                    <button class="retry-btn" onclick="loadChapterContent(currentChapters[currentChapterIdx])">🔄 Повторить попытку</button>
+                </div>`;
         });
     } else if (chapter.text) {
         const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
@@ -846,7 +884,14 @@ function updateLikeUI(count, liked) {
     const countEl = document.getElementById('like-count');
 
     btn.classList.toggle('liked', liked);
-    icon.textContent = liked ? '❤️' : '🤍';
+    // Меняем заливку SVG-path вместо textContent (иначе SVG-дерево стирается)
+    if (icon) {
+        const path = icon.querySelector('path');
+        if (path) {
+            path.setAttribute('fill', liked ? '#ff6b81' : 'none');
+            path.setAttribute('stroke', liked ? '#ff6b81' : 'currentColor');
+        }
+    }
     countEl.textContent = count > 0 ? count : '';
 }
 
@@ -1549,7 +1594,11 @@ function highlightToCItem(idx) {
 
 function scrollToHeading(idx) {
     if (!tocItems[idx]) return;
-    tocItems[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Используем ручной offsetTop вместо scrollIntoView (на iOS/Telegram WebView скролит body, а не контейнер)
+    const content = document.getElementById('reader-content');
+    if (content) {
+        content.scrollTo({ top: tocItems[idx].offsetTop - 60, behavior: 'smooth' });
+    }
     toggleToC(); // Close sidebar
 }
 
@@ -2048,17 +2097,18 @@ function initTypoReporter() {
     const readerContent = document.getElementById('reader-content');
     if (!readerContent) return;
 
-    // Создаем тултип "Исправить"
-    const tooltip = document.createElement('div');
-    tooltip.id = 'typo-tooltip';
-    tooltip.className = 'typo-tooltip';
-    tooltip.innerHTML = '<span>🚨 Нашли опечатку?</span>';
-    tooltip.onpointerdown = (e) => {
-        e.preventDefault(); // Предотвращаем сброс выделения
-        e.stopPropagation();
-        showTypoModal();
-    };
-    document.body.appendChild(tooltip);
+    // Используем существующий тултип из HTML (не создаём дубликат)
+    const tooltip = document.getElementById('typo-tooltip');
+    if (tooltip) {
+        // Заменяем onclick на pointerdown чтобы не сбрасывать выделение
+        tooltip.onclick = null;
+        tooltip.removeAttribute('onclick');
+        tooltip.onpointerdown = (e) => {
+            e.preventDefault(); // Предотвращаем сброс выделения
+            e.stopPropagation();
+            showTypoModal();
+        };
+    }
 
     // Слушаем выделение
     document.addEventListener('selectionchange', handleSelection);
@@ -2188,12 +2238,15 @@ async function submitTypoReport() {
     }
 }
 
-// Глобальный перехватчик для кнопок (в т.ч. розового плюсика)
+// Глобальный перехватчик — закрывает FAB при клике вне контейнера
+// (действия кнопок .fab-menu-item обрабатываются через data-action в HTML onclick)
 document.addEventListener('click', (e) => {
-    const fabBtn = e.target.closest('.fab-btn');
-    if (fabBtn) toggleFab();
-    const actionItem = e.target.closest('.fab-menu-item');
-    if (actionItem) fabAction(actionItem.dataset.action);
+    const fabContainer = e.target.closest('.fab-container');
+    const menu = document.getElementById('fab-menu');
+
+    if (!fabContainer && menu && menu.classList.contains('fab-menu-visible')) {
+        toggleFab(); // Закрываем при клике мимо
+    }
 });
 
 // ==========================================================================
@@ -2283,8 +2336,12 @@ function fabAction(action) {
         }
     } else if (action === 'comments') {
         const social = document.getElementById('social-section');
-        if (social) {
-            social.scrollIntoView({ behavior: 'smooth' });
+        const content = document.getElementById('reader-content');
+        if (social && content) {
+            content.scrollTo({
+                top: social.offsetTop,
+                behavior: 'smooth'
+            });
         }
     }
 }
