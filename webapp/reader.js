@@ -502,10 +502,15 @@ function loadChapterContent(chapter, usePrefetch = false) {
         urlsToLoad = [chapter.url];
     }
 
-    // ★ ГОРЯЧИЙ ФИКС: Если есть Teletype — берём ТОЛЬКО его (убираем дубли Telegraph)
-    const teletypeUrls = urlsToLoad.filter(u => u.includes('teletype.in'));
-    if (teletypeUrls.length > 0) {
-        urlsToLoad = teletypeUrls;
+    // Prioritize Telegraph over Teletype
+    const telegraphUrls = urlsToLoad.filter(u => u.includes('telegra.ph'));
+    if (telegraphUrls.length > 0) {
+        urlsToLoad = [telegraphUrls[0]]; // Take only the first telegraph link
+    } else {
+        const teletypeUrls = urlsToLoad.filter(u => u.includes('teletype.in'));
+        if (teletypeUrls.length > 0) {
+            urlsToLoad = [teletypeUrls[0]];
+        }
     }
 
     if (urlsToLoad.length > 0) {
@@ -654,8 +659,13 @@ function prefetchNextChapter() {
         urlsToLoad = [chapter.url];
     }
 
-    const teletypeUrls = urlsToLoad.filter(u => u.includes('teletype.in'));
-    if (teletypeUrls.length > 0) urlsToLoad = teletypeUrls;
+    const telegraphUrls = urlsToLoad.filter(u => u.includes('telegra.ph'));
+    if (telegraphUrls.length > 0) {
+        urlsToLoad = [telegraphUrls[0]];
+    } else {
+        const teletypeUrls = urlsToLoad.filter(u => u.includes('teletype.in'));
+        if (teletypeUrls.length > 0) urlsToLoad = [teletypeUrls[0]];
+    }
 
     if (urlsToLoad.length > 0) {
         const loadPromises = urlsToLoad.map(async (u) => {
