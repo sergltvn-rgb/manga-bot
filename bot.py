@@ -229,7 +229,7 @@ async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider
     messages.append({"role": "user", "content": prompt})
     
     payload = {
-        "model": AI_PROVIDERS["groq"]["model"],
+        "model": AI_PROVIDERS.get(provider, AI_PROVIDERS["groq"])["model"],
         "messages": messages,
         "temperature": 0.65,
         "max_tokens": 300
@@ -318,6 +318,10 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
     
     user_id = message.from_user.id
     if await check_cd_and_warn(message, "ai_chat", COOLDOWN_TIME): return
+
+    if message.chat.type in ["group", "supergroup"]:
+        if not await is_ai_enabled(message.chat.id):
+            return
 
     data = await state.get_data()
     char_id = data.get("ai_character", "alya")
@@ -585,7 +589,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
                     # Проверяем, есть ли уже статы у юзера (если нет - он новый)
                     stats = await get_user_stats(user_id)
                     # Так как StatsMiddleware уже сработал и добавил 1 сообщение, проверяем на <= 1
-                    is_new_user = not already_referred and stats[5] <= 1 and stats[0] == 0
+                    is_new_user = not already_referred and stats[5] <= 1
                     
                     if is_new_user:
                         await add_referral(referrer_id, user_id)
@@ -1016,11 +1020,10 @@ async def cmd_lootbox(message: types.Message):
     stats = await get_user_stats(user_id)
     balance = stats[7]
     
-    if balance < 300:
-        return await message.answer("❌ У вас недостаточно монет! Лутбокс стоит <b>300</b> монет.", parse_mode="HTML")
-        
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('UPDATE users_stats SET balance = balance - 300 WHERE user_id = ?', (user_id,))
+        cursor = await db.execute('UPDATE users_stats SET balance = balance - 300 WHERE user_id = ? AND balance >= 300', (user_id,))
+        if cursor.rowcount == 0:
+            return await message.answer("❌ У вас недостаточно монет! Лутбокс стоит <b>300</b> монет.", parse_mode="HTML")
         await db.commit()
         
     res = random.random()
@@ -1058,12 +1061,10 @@ async def cmd_feed_harem(message: types.Message):
     if not any(m[0] == target_id for m in harem):
         return await message.answer("❌ Этот пользователь не в вашем гареме!")
         
-    stats = await get_user_stats(owner_id)
-    if not stats or stats[7] < 10:
-        return await message.answer("❌ Нужно 10 монет, чтобы покормить участника гарема!")
-        
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('UPDATE users_stats SET balance = balance - 10 WHERE user_id = ?', (owner_id,))
+        cursor = await db.execute('UPDATE users_stats SET balance = balance - 10 WHERE user_id = ? AND balance >= 10', (owner_id,))
+        if cursor.rowcount == 0:
+            return await message.answer("❌ Нужно 10 монет, чтобы покормить участника гарема!")
         await db.commit()
         
     await update_loyalty_level(owner_id, target_id, 2)
@@ -1081,12 +1082,10 @@ async def cmd_pet_harem(message: types.Message):
     if not any(m[0] == target_id for m in harem):
         return await message.answer("❌ Этот пользователь не в вашем гареме!")
         
-    stats = await get_user_stats(owner_id)
-    if not stats or stats[7] < 5:
-        return await message.answer("❌ Нужно 5 монет, чтобы погладить участника гарема!")
-        
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('UPDATE users_stats SET balance = balance - 5 WHERE user_id = ?', (owner_id,))
+        cursor = await db.execute('UPDATE users_stats SET balance = balance - 5 WHERE user_id = ? AND balance >= 5', (owner_id,))
+        if cursor.rowcount == 0:
+            return await message.answer("❌ Нужно 5 монет, чтобы погладить участника гарема!")
         await db.commit()
         
     await update_loyalty_level(owner_id, target_id, 1)
@@ -1115,8 +1114,9 @@ async def get_profile_content(chat_type: str, chat_id: int, user: types.User):
     
     total_rp = hugs + kisses + bites + slaps + pats
     
-    # Расчет уровня (используем из БД, если там есть, иначе старый расчет)
-    level = level_db if level_db > 1 else (int((m_count + s_count * 2) ** 0.5) + 1)
+    # Финальный расчет уровня
+    level = (xp // 100) + 1 if xp > 0 else level_db
+    if level < 1: level = 1
     
     if level < 5: rank = "Новичок 🍼"
     elif level < 15: rank = "Освоившийся 🥉"
@@ -1216,7 +1216,9 @@ async def cmd_rob(message: types.Message):
         if amount < 1: amount = 1
         
         async with aiosqlite.connect('manga.db') as db:
-            await db.execute('UPDATE users_stats SET balance = balance - ? WHERE user_id = ?', (amount, target.id))
+            await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (target.id,))
+            await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (initiator.id,))
+            await db.execute('UPDATE users_stats SET balance = MAX(0, balance - ?) WHERE user_id = ?', (amount, target.id))
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (amount, initiator.id))
             await db.commit()
             
@@ -1228,7 +1230,8 @@ async def cmd_rob(message: types.Message):
     else:
         # Провал - штраф 100 монет
         async with aiosqlite.connect('manga.db') as db:
-            await db.execute('UPDATE users_stats SET balance = balance - 100 WHERE user_id = ?', (initiator.id,))
+            await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (initiator.id,))
+            await db.execute('UPDATE users_stats SET balance = MAX(0, balance - 100) WHERE user_id = ?', (initiator.id,))
             await db.commit()
             
         await message.answer(
@@ -1444,10 +1447,13 @@ async def process_divorce(message: types.Message):
         "и в конце спроси, уверен(а) ли он(а)."
     )
     
-    try:
-        response = await ask_groq("Прокомментируй развод", system_prompt)
-    except Exception:
+    if not await is_ai_enabled(message.chat.id):
         response = f"Ты действительно хочешь развестись с {partner_name}? Подумай хорошенько, бака!"
+    else:
+        try:
+            response = await ask_groq("Прокомментируй развод", system_prompt)
+        except Exception:
+            response = f"Ты действительно хочешь развестись с {partner_name}? Подумай хорошенько, бака!"
         
     await wait_msg.delete()
     
@@ -1596,6 +1602,9 @@ async def cmd_alya_choose(message: types.Message):
 
     match = REGEX_ALYA_CHOOSE.search(message.text)
     item1, item2 = match.group(1).strip(), match.group(2).strip()
+
+    if message.chat.type in ["group", "supergroup"] and not await is_ai_enabled(message.chat.id):
+        return await message.answer(f"🌸 <b>Выбор Али:</b>\nБака, я сейчас не в настроении выбирать!", parse_mode="HTML")
     
     wait_msg = await message.answer("<i>Аля думает...</i>", parse_mode="HTML")
     system_prompt = (
@@ -1700,10 +1709,13 @@ async def bottle_spin(callback: types.CallbackQuery):
         "Максимум 2-3 предложения. Можешь прокомментировать это как цундере."
     )
     
-    try:
-        task = await ask_groq("Придумай фант для бутылочки", system_prompt)
-    except Exception:
-        task = f"Обнимите друг друга, баки! И не думайте, что я хочу на это смотреть!"
+    if not await is_ai_enabled(chat_id):
+        task = "Обнимите друг друга, баки! И не думайте, что я хочу на это смотреть!"
+    else:
+        try:
+            task = await ask_groq("Придумай фант для бутылочки", system_prompt)
+        except Exception:
+            task = "Обнимите друг друга, баки! И не думайте, что я хочу на это смотреть!"
         
     await wait_msg.delete()
     await callback.message.answer(f"🍾 <b>Бутылочка!</b>\n\nПара: <a href='tg://user?id={p1}'>{n1}</a> и <a href='tg://user?id={p2}'>{n2}</a>\n\n🌸 <b>Задание от Али:</b>\n{task}", parse_mode="HTML")
@@ -1734,10 +1746,13 @@ async def cmd_ship(message: types.Message):
         "Опиши, как они могли бы встретиться или почему они (не) подходят друг другу, в стиле цундере."
     )
     
-    try:
-        story = await ask_groq("Расскажи историю любви", system_prompt)
-    except Exception:
+    if not await is_ai_enabled(message.chat.id):
         story = "Эти баки настолько подходят друг другу, что я даже не хочу об этом говорить!"
+    else:
+        try:
+            story = await ask_groq("Расскажи историю любви", system_prompt)
+        except Exception:
+            story = "Эти баки настолько подходят друг другу, что я даже не хочу об этом говорить!"
         
     await wait_msg.delete()
     text = (
@@ -1780,11 +1795,10 @@ async def shop_buy_lootbox_cb(callback: types.CallbackQuery):
     stats = await get_user_stats(user_id)
     balance = stats[7] if stats else 0
     
-    if balance < 300:
-        return await callback.answer("Недостаточно монет! Нужно 300.", show_alert=True)
-        
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('UPDATE users_stats SET balance = balance - 300 WHERE user_id = ?', (user_id,))
+        cursor = await db.execute('UPDATE users_stats SET balance = balance - 300 WHERE user_id = ? AND balance >= 300', (user_id,))
+        if cursor.rowcount == 0:
+            return await callback.answer("Недостаточно монет! Нужно 300.", show_alert=True)
         await db.commit()
     
     # Логика Готчи
@@ -1845,7 +1859,10 @@ async def shop_process_title(message: types.Message, state: FSMContext):
         return await message.answer("Пока вы думали, у вас закончились монеты...")
         
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('UPDATE users_stats SET balance = balance - 500, custom_title = ? WHERE user_id = ?', (title, message.from_user.id))
+        cursor = await db.execute('UPDATE users_stats SET balance = balance - 500, custom_title = ? WHERE user_id = ? AND balance >= 500', (title, message.from_user.id))
+        if cursor.rowcount == 0:
+            await state.clear()
+            return await message.answer("Пока вы думали, у вас закончились монеты...")
         await db.commit()
         
     await state.clear()
@@ -1859,7 +1876,9 @@ async def shop_buy_hidden_cb(callback: types.CallbackQuery):
         return await callback.answer("Недостаточно монет! Нужно 1000.", show_alert=True)
         
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('UPDATE users_stats SET balance = balance - 1000, is_hidden = 1 WHERE user_id = ?', (callback.from_user.id,))
+        cursor = await db.execute('UPDATE users_stats SET balance = balance - 1000, is_hidden = 1 WHERE user_id = ? AND balance >= 1000', (callback.from_user.id,))
+        if cursor.rowcount == 0:
+            return await callback.answer("Недостаточно монет! Нужно 1000.", show_alert=True)
         await db.commit()
         
     await callback.message.edit_text("👻 Ваша статистика теперь скрыта из глобального топа!", reply_markup=None)
@@ -1877,7 +1896,9 @@ async def shop_buy_badge_vip_cb(callback: types.CallbackQuery):
         return await callback.answer("У вас уже есть этот значок!", show_alert=True)
         
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('UPDATE users_stats SET balance = balance - 2000 WHERE user_id = ?', (callback.from_user.id,))
+        cursor = await db.execute('UPDATE users_stats SET balance = balance - 2000 WHERE user_id = ? AND balance >= 2000', (callback.from_user.id,))
+        if cursor.rowcount == 0:
+            return await callback.answer("Недостаточно монет! Нужно 2000.", show_alert=True)
         await db.commit()
         
     await add_to_inventory(callback.from_user.id, "badge", "VIP 🌟")
@@ -1927,7 +1948,9 @@ async def cmd_dice_games(message: types.Message):
             
         # Списываем ставку
         async with aiosqlite.connect('manga.db') as db:
-            await db.execute('UPDATE users_stats SET balance = balance - ?, casino_played = casino_played + 1 WHERE user_id = ?', (bet, user_id))
+            cursor = await db.execute('UPDATE users_stats SET balance = balance - ?, casino_played = casino_played + 1 WHERE user_id = ? AND balance >= ?', (bet, user_id, bet))
+            if cursor.rowcount == 0:
+                return await message.answer(f"❌ <b>Недостаточно средств!</b>", parse_mode="HTML")
             await db.commit()
             
         msg = await message.answer_dice(emoji="🎰")
@@ -2413,10 +2436,11 @@ async def send_user_art_item(chat_id: int, index: int, user_id: int, message_to_
                 media=types.InputMediaPhoto(media=file_id, caption=caption, parse_mode="HTML"),
                 reply_markup=builder.as_markup()
             )
-        except Exception:
-            await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
-            try: await message_to_edit.delete() 
-            except Exception: pass
+        except Exception as e:
+            if "not modified" not in str(e).lower():
+                await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
+                try: await message_to_edit.delete() 
+                except Exception: pass
     else:
         await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -2427,7 +2451,15 @@ async def view_arts(callback: types.CallbackQuery):
     await send_user_art_item(callback.message.chat.id, 0, user_id=callback.from_user.id)
 
 @dp.callback_query(F.data.startswith("user_art_view:"))
-async def process_user_art_view(callback: types.CallbackQuery):
+async def process_user_art_view(callback: types.CallbackQuery, state: FSMContext):
+    # Очистка сетки если она была
+    data = await state.get_data()
+    if "user_grid_photos" in data:
+        for mid in data.get("user_grid_photos", []):
+            try: await bot.delete_message(callback.message.chat.id, mid)
+            except Exception: pass
+        await state.update_data(user_grid_photos=[])
+
     index = int(callback.data.split(":")[1])
     await send_user_art_item(callback.message.chat.id, index, user_id=callback.from_user.id, message_to_edit=callback.message)
     await callback.answer()
@@ -2461,7 +2493,13 @@ async def handle_art_number_input(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Неверный номер! Введите число от 1 до {len(arts)}.")
 
 @dp.callback_query(F.data.startswith("user_art_grid:"))
-async def process_user_art_grid(callback: types.CallbackQuery):
+async def process_user_art_grid(callback: types.CallbackQuery, state: FSMContext):
+    # Очистка предыдущей сетки
+    data = await state.get_data()
+    for mid in data.get("user_grid_photos", []):
+        try: await bot.delete_message(callback.message.chat.id, mid)
+        except Exception: pass
+
     page = int(callback.data.split(":")[1])
     arts = await get_all_arts()
     if not arts:
@@ -2482,7 +2520,8 @@ async def process_user_art_grid(callback: types.CallbackQuery):
     await callback.message.delete()
     
     media = [InputMediaPhoto(media=row[1]) for row in sliced]
-    await bot.send_media_group(chat_id=callback.message.chat.id, media=media)
+    messages = await bot.send_media_group(chat_id=callback.message.chat.id, media=media)
+    photo_ids = [m.message_id for m in messages]
 
     builder = InlineKeyboardBuilder()
     if page > 0:
@@ -2490,7 +2529,6 @@ async def process_user_art_grid(callback: types.CallbackQuery):
     if page < total_pages - 1:
         builder.button(text="След. стр ➡️", callback_data=f"user_art_grid:{page + 1}")
     
-    # Переход к слайдеру на первый арт ЭТОЙ страницы
     builder.row(
         types.InlineKeyboardButton(text="🎚 К слайдеру", callback_data=f"user_art_view:{start}"),
         types.InlineKeyboardButton(text="🔢 Номер арта", callback_data="grid_art_input")
@@ -2502,13 +2540,23 @@ async def process_user_art_grid(callback: types.CallbackQuery):
     
     art_from = start + 1
     art_to = end
-    await callback.message.answer(
+    control_msg = await callback.message.answer(
         f"📱 <b>Сетка артов</b>\n"
         f"🎨 Арты <b>{art_from}–{art_to}</b> из {len(arts)}\n"
         f"📄 Страница <b>{page + 1}</b> из <b>{total_pages}</b>",
         parse_mode="HTML",
         reply_markup=builder.as_markup()
     )
+
+    all_ids = photo_ids + [control_msg.message_id]
+    await state.update_data(user_grid_photos=all_ids)
+
+    async def auto_cleanup(chat_id: int, ids: list):
+        await asyncio.sleep(120)
+        for mid in ids:
+            try: await bot.delete_message(chat_id, mid)
+            except Exception: pass
+    asyncio.create_task(auto_cleanup(callback.message.chat.id, all_ids))
 
 # --- Ввод номера страницы в сетке ---
 @dp.callback_query(F.data == "grid_page_input")
@@ -2766,7 +2814,7 @@ async def build_reader_data() -> dict:
             akashic = {"id": "akashic_records", "title": custom_title, "cover_url": custom_names.get("cover_akashic_records", ""), "volumes": []}
             for vol in ak_vols:
                 custom_vol = custom_names.get(f"vol_akashic_records_{vol}") or f"Том {vol}"
-                async with db.execute('SELECT chapter, url FROM akashic_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
+                async with db.execute('SELECT chapter, url FROM akashic_ranobe WHERE volume = ? ORDER BY sort_order, CAST(chapter AS REAL)', (vol,)) as c:
                     chapters = []
                     for row in await c.fetchall():
                         extracted = _clean_urls(row[1])
@@ -2783,7 +2831,7 @@ async def build_reader_data() -> dict:
             british = {"id": "british_belle", "title": custom_title, "cover_url": custom_names.get("cover_british_belle", ""), "volumes": []}
             for vol in br_vols:
                 custom_vol = custom_names.get(f"vol_british_belle_{vol}") or f"Том {vol}"
-                async with db.execute('SELECT chapter, url FROM british_ranobe WHERE volume = ? ORDER BY CAST(chapter AS REAL)', (vol,)) as c:
+                async with db.execute('SELECT chapter, url FROM british_ranobe WHERE volume = ? ORDER BY sort_order, CAST(chapter AS REAL)', (vol,)) as c:
                     chapters = []
                     for row in await c.fetchall():
                         extracted = _clean_urls(row[1])
@@ -2796,7 +2844,7 @@ async def build_reader_data() -> dict:
         async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
             langs_ro = [row[0] for row in await cursor.fetchall()]
         for lang in langs_ro:
-            async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
+            async with db.execute('SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY sort_order, CAST(chapter_number AS REAL)', (lang,)) as c:
                 chapters = []
                 for row in await c.fetchall():
                     extracted = _clean_urls(row[1])
@@ -2814,7 +2862,7 @@ async def build_reader_data() -> dict:
         async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
             langs_mg = [row[0] for row in await cursor.fetchall()]
         for lang in langs_mg:
-            async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY CAST(chapter_number AS REAL)', (lang,)) as c:
+            async with db.execute('SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY sort_order, CAST(chapter_number AS REAL)', (lang,)) as c:
                 chapters = []
                 for row in await c.fetchall():
                     extracted = _clean_urls(row[1])
@@ -2995,11 +3043,12 @@ async def send_admin_art_item(chat_id: int, index: int, message_to_edit: types.M
                 media=types.InputMediaPhoto(media=file_id, caption=caption, parse_mode="HTML"),
                 reply_markup=builder.as_markup()
             )
-        except Exception:
-            # На случай осечки
-            await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
-            try: await message_to_edit.delete() 
-            except: pass
+        except Exception as e:
+            if "not modified" not in str(e).lower():
+                # На случай осечки
+                await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
+                try: await message_to_edit.delete() 
+                except Exception: pass
     else:
         await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -3231,7 +3280,7 @@ async def uc_upload_id_text(message: types.Message, state: FSMContext):
 async def uc_upload_chapter(message: types.Message, state: FSMContext):
     await state.update_data(chapter=message.text.strip())
     await state.set_state(UniversalContentUpload.waiting_for_link)
-    await message.answer("🔗 Отправьте ссылку на главу:")
+    await message.answer("🔗 Отправьте ссылку на главу (можно несколько ссылок, каждую с новой строки, если глава разделена):")
 
 @dp.message(UniversalContentUpload.waiting_for_link, F.text)
 async def uc_upload_link(message: types.Message, state: FSMContext):
@@ -3240,14 +3289,29 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
     ct = CONTENT_TYPES.get(ctype, CONTENT_TYPES['manga'])
     content_id = data.get('content_id', '')
     chapter = data.get('chapter', '')
-    link = message.html_text.strip()
+    link = message.text.strip()
 
     async with aiosqlite.connect('manga.db') as db:
+        # Получаем текущий макс. sort_order для этого тайтла/тома
+        async with db.execute(f'SELECT MAX(sort_order) FROM {ct["table"]} WHERE {ct["id_col"]} = ?', (content_id,)) as cursor:
+            row = await cursor.fetchone()
+            next_order = (row[0] or 0) + 1 if row else 1
+
         await db.execute(
-            f'INSERT OR REPLACE INTO {ct["table"]} ({ct["id_col"]}, {ct["chapter_col"]}, {ct["url_col"]}) VALUES (?, ?, ?)',
-            (content_id, chapter, link)
+            f'INSERT INTO {ct["table"]} ({ct["id_col"]}, {ct["chapter_col"]}, {ct["url_col"]}, sort_order) VALUES (?, ?, ?, ?) '
+            f'ON CONFLICT({ct["id_col"]}, {ct["chapter_col"]}) DO UPDATE SET {ct["url_col"]}=excluded.{ct["url_col"]}',
+            (content_id, chapter, link, next_order)
         )
         await db.commit()
+
+    # СИНХРОНИЗАЦИЯ: Обновляем JSON и пушим в GitHub
+    try:
+        result = await build_reader_data()
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"tg upload sync: {series_id if 'series_id' in locals() else content_id}")) # type: ignore
+    except Exception as e: logging.error(f"Sync error: {e}")
 
     # Формируем имя для уведомления
     id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
@@ -3527,21 +3591,36 @@ class StatsMiddleware(BaseMiddleware):
                 async with aiosqlite.connect('manga.db') as db:
                     await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
                     if getattr(event, 'sticker', None):
-                        await db.execute('UPDATE users_stats SET stickers_count = stickers_count + 1 WHERE user_id = ?', (user_id,))
+                        if is_group:
+                            await db.execute('UPDATE users_stats SET stickers_count = stickers_count + 1 WHERE user_id = ?', (user_id,))
                     elif getattr(event, 'text', None) or getattr(event, 'caption', None):
-                        await db.execute('UPDATE users_stats SET messages_count = messages_count + 1, balance = balance + 1, xp = xp + 1 WHERE user_id = ?', (user_id,))
-                        
-                        # --- Level-up System ---
-                        async with db.execute('SELECT xp, level FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
-                            res = await cursor.fetchone()
-                            if res:
-                                curr_xp, curr_level = res
-                                if curr_xp >= curr_level * 20:
-                                    new_level = curr_level + 1
-                                    await db.execute('UPDATE users_stats SET level = ?, balance = balance + 500 WHERE user_id = ?', (new_level, user_id))
-                                    user_name = event.from_user.first_name
-                                    await event.answer(f"🎉 <b>Поздравляем!</b> {user_name} повысил(а) свой уровень до <b>{new_level}</b>! Награда: 500 монет 💰", parse_mode="HTML")
-                        # -----------------------
+                        text = event.text or event.caption or ""
+                        is_cmd = text.startswith('/')
+                        is_reply_to_bot = event.reply_to_message and event.reply_to_message.from_user.id == event.bot.id
+                        if not is_cmd and not is_reply_to_bot:
+                            if is_group:
+                                await db.execute('UPDATE users_stats SET messages_count = messages_count + 1, balance = balance + 1, xp = xp + 1 WHERE user_id = ?', (user_id,))
+                                # --- Level-up System (Только для групп) ---
+                                async with db.execute('SELECT xp, level, messages_count, stickers_count FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
+                                    res = await cursor.fetchone()
+                                    if res:
+                                        curr_xp, curr_level, m_count, s_count = res
+                                        # Если XP <= 1 и есть сообщения/стикеры, значит это старый юзер (миграция)
+                                        if curr_xp <= 1 and (m_count + s_count > 1):
+                                            curr_xp = m_count + s_count * 2
+                                            await db.execute('UPDATE users_stats SET xp = ? WHERE user_id = ?', (curr_xp, user_id))
+                                        
+                                        target_level = (curr_xp // 100) + 1
+                                        if target_level > curr_level:
+                                            reward = (target_level - curr_level) * 500
+                                            await db.execute('UPDATE users_stats SET level = ?, balance = balance + ? WHERE user_id = ?', (target_level, reward, user_id))
+                                            async with db.execute('SELECT balance FROM users_stats WHERE user_id = ?', (user_id,)) as b_cursor:
+                                                new_balance = (await b_cursor.fetchone())[0]
+                                            user_name = event.from_user.first_name
+                                            await event.answer(f"🎉 <b>Поздравляем!</b> {user_name} достигает <b>{target_level} уровня</b>!\n💰 Награда: {reward} монет\n💳 Текущий баланс: {new_balance}", parse_mode="HTML")
+                                # -----------------------
+                            else:
+                                await db.execute('UPDATE users_stats SET messages_count = messages_count + 1 WHERE user_id = ?', (user_id,))
                     await db.commit()
             except Exception as e:
                 logging.error(f"StatsMiddleware error: {e}")
@@ -3610,9 +3689,13 @@ async def handle_ai_chat(request: aiohttp.web.Request) -> aiohttp.web.Response:
                 history.append({"role": role, "content": content})
         # Последнее сообщение пользователя — prompt, остальное — history
         prompt = ""
+        while history and history[-1]['role'] != 'user':
+            history.pop() # Убираем ассистента в конце, если нет user
+            
         if history and history[-1]['role'] == 'user':
             prompt = history.pop()['content']
-        if not prompt.strip():
+            
+        if not prompt or not prompt.strip():
             return aiohttp.web.json_response(
                 {"error": "no user message found"}, status=400, headers=CORS_HEADERS
             )
@@ -3765,23 +3848,36 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
         table, col, where, params_fn = info
         added = 0
 
+        # Определяем id_col и idx_val исходя из типа контента
+        id_col = 'lang' if series_id.startswith(('manga_', 'ranobe_')) else 'volume'
+        idx_val = series_id.split('_', 1)[1] if '_' in series_id else volume
+
         async with aiosqlite.connect('manga.db') as db:
+            # Получаем текущий макс. sort_order
+            async with db.execute(f'SELECT MAX(sort_order) FROM {table} WHERE {id_col} = ?', (str(idx_val),)) as cursor:
+                row = await cursor.fetchone()
+                current_max = row[0] or 0
+
             for i, url in enumerate(urls):
                 ch_num = str(start_chapter + i)
                 url = url.strip()
                 if not url:
                     continue
+                
+                next_order = current_max + added + 1
+                
                 if series_id in ('akashic_records', 'british_belle'):
                     await db.execute(
-                        f'INSERT OR REPLACE INTO {table} (volume, chapter, url) VALUES (?, ?, ?)',
-                        (volume, ch_num, url)
+                        f'INSERT INTO {table} (volume, chapter, url, sort_order) VALUES (?, ?, ?, ?) '
+                        f'ON CONFLICT(volume, chapter) DO UPDATE SET url=excluded.url',
+                        (volume, ch_num, url, next_order)
                     )
                 else:
-                    # ranobe_*/manga_* — используем lang
                     lang = series_id.split('_', 1)[1] if '_' in series_id else 'ru'
                     await db.execute(
-                        f'INSERT OR REPLACE INTO {table} (chapter_number, lang, url) VALUES (?, ?, ?)',
-                        (ch_num, lang, url)
+                        f'INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?) '
+                        f'ON CONFLICT(chapter_number, lang) DO UPDATE SET url=excluded.url',
+                        (ch_num, lang, url, next_order)
                     )
                 added += 1
             await db.commit()
@@ -3924,7 +4020,7 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
                 except (ValueError, TypeError):
                     return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
 
-            await db.execute('DELETE FROM chapter_comments WHERE id = ?', (comment_id,))
+            await db.execute('DELETE FROM chapter_comments WHERE id = ? OR parent_id = ?', (comment_id, comment_id))
             await db.commit()
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
@@ -3957,6 +4053,20 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
             )
             await db.commit()
 
+        # Уведомление админам
+        admins = await get_admins()
+        report_text = (
+            f"🚨 <b>Новая опечатка!</b>\n"
+            f"От: {user_name} (ID: {user_id})\n"
+            f"Глава: <code>{chapter_key}</code>\n\n"
+            f"<b>Текст:</b> <code>{selected_text}</code>\n"
+            f"<b>Контекст:</b> <i>...{context_text}...</i>\n"
+            f"<b>Комментарий:</b> {comment}"
+        )
+        for admin_id in admins:
+            try: await bot.send_message(admin_id, report_text, parse_mode="HTML")
+            except Exception: pass
+
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
@@ -3977,7 +4087,7 @@ async def handle_progress_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
         chapter_key = data.get('chapter_key', '')
         scroll_pos = data.get('scroll_pos', 0)
 
-        if not series_id:
+        if not series_id or not chapter_key or chapter_key == "undefined":
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
 
         async with aiosqlite.connect('manga.db') as db:
@@ -4039,54 +4149,51 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
         if not series_id or not order:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
 
-        # Determine the table based on series_id
+        # Determine the table and index value
         table = None
         id_col = None
         chapter_col = None
-        for ctype, cfg in CONTENT_TYPES.items():
-            if series_id.startswith(ctype) or series_id == ctype:
-                table = cfg['table']
-                id_col = cfg['id_col']
-                chapter_col = cfg['chapter_col']
-                break
+        idx_val = volume
+        
+        if series_id.startswith('manga_'):
+            table = 'chapters_urls'
+            id_col = 'lang'
+            chapter_col = 'chapter_number'
+            idx_val = series_id.replace('manga_', '')
+        elif series_id.startswith('ranobe_'):
+            table = 'ranobe_urls'
+            id_col = 'lang'
+            chapter_col = 'chapter_number'
+            idx_val = series_id.replace('ranobe_', '')
+        elif 'akashic' in series_id:
+            table = 'akashic_ranobe'
+            id_col = 'volume'
+            chapter_col = 'chapter'
+        elif 'british' in series_id:
+            table = 'british_ranobe'
+            id_col = 'volume'
+            chapter_col = 'chapter'
         
         if not table:
-            # Try to match by prefix pattern
-            if 'manga' in series_id or series_id in LANGUAGES:
-                table = 'chapters_urls'
-                id_col = 'lang'
-                chapter_col = 'chapter_number'
-            elif 'ranobe' in series_id or series_id in RANOBE_LANGUAGES:
-                table = 'ranobe_urls'
-                id_col = 'lang'
-                chapter_col = 'chapter_number'
-            elif 'akashic' in series_id:
-                table = 'akashic_ranobe'
-                id_col = 'volume'
-                chapter_col = 'chapter'
-            elif 'british' in series_id:
-                table = 'british_ranobe'
-                id_col = 'volume'
-                chapter_col = 'chapter'
-            else:
-                return aiohttp.web.json_response({"error": "unknown series type"}, status=400, headers=CORS_HEADERS)
+            return aiohttp.web.json_response({"error": "unknown series type"}, status=400, headers=CORS_HEADERS)
 
         async with aiosqlite.connect('manga.db') as db:
-            # Ensure sort_order column exists
-            try:
-                await db.execute(f'ALTER TABLE {table} ADD COLUMN sort_order INTEGER DEFAULT 0')
-                await db.commit()
-            except Exception:
-                pass  # Column already exists
-
             # Update sort_order for each chapter
             for idx, chapter_id in enumerate(order):
                 await db.execute(
                     f'UPDATE {table} SET sort_order = ? WHERE {id_col} = ? AND {chapter_col} = ?',
-                    (idx, str(volume), str(chapter_id))
+                    (idx, str(idx_val), str(chapter_id))
                 )
             await db.commit()
 
+        # Обновляем JSON и синхронизируем с GitHub
+        result = await build_reader_data()
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"chapters sorting updated for {series_id}"))
+
+      
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
@@ -4100,7 +4207,7 @@ async def main():
     
     await init_db()
     
-    dp.message.middleware(StatsMiddleware())
+    dp.message.outer_middleware(StatsMiddleware())
     
     # === Регистрация команд бота ===
     commands = [

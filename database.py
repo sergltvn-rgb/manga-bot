@@ -75,6 +75,13 @@ async def init_db():
         # Таблица для выбора провайдера ИИ (groq / gemma) для каждого чата
         await db.execute('CREATE TABLE IF NOT EXISTS chat_ai_provider (chat_id INTEGER PRIMARY KEY, provider TEXT DEFAULT "groq")')
         
+        # Миграция: добавляем колонку для Drag-and-Drop сортировки
+        for tbl in ['chapters_urls', 'ranobe_urls', 'akashic_ranobe', 'british_ranobe']:
+            async with db.execute(f"PRAGMA table_info({tbl})") as cursor:
+                columns = [row[1] for row in await cursor.fetchall()]
+                if 'sort_order' not in columns:
+                    await db.execute(f'ALTER TABLE {tbl} ADD COLUMN sort_order INTEGER DEFAULT 0')
+        
         # Таблица для кастомных названий тайтлов/томов/глав в WebApp
         await db.execute('CREATE TABLE IF NOT EXISTS custom_names (id TEXT PRIMARY KEY, name TEXT)')
 
@@ -307,9 +314,9 @@ async def remove_admin(user_id: int):
 
 async def get_chapters(lang: str):
     async with aiosqlite.connect('manga.db') as db:
-        async with db.execute('SELECT chapter_number FROM chapters_urls WHERE lang = ?', (lang,)) as cursor:
+        async with db.execute('SELECT chapter_number FROM chapters_urls WHERE lang = ? ORDER BY sort_order, CAST(chapter_number AS REAL)', (lang,)) as cursor:
             rows = await cursor.fetchall()
-            return sorted([row[0] for row in rows], key=float)
+            return [row[0] for row in rows]
 
 async def get_chapter_link(lang: str, chapter_number: str):
     async with aiosqlite.connect('manga.db') as db:
@@ -319,9 +326,9 @@ async def get_chapter_link(lang: str, chapter_number: str):
 
 async def get_ranobe_chapters(lang: str):
     async with aiosqlite.connect('manga.db') as db:
-        async with db.execute('SELECT chapter_number FROM ranobe_urls WHERE lang = ?', (lang,)) as cursor:
+        async with db.execute('SELECT chapter_number FROM ranobe_urls WHERE lang = ? ORDER BY sort_order, CAST(chapter_number AS REAL)', (lang,)) as cursor:
             rows = await cursor.fetchall()
-            return sorted([row[0] for row in rows], key=float)
+            return [row[0] for row in rows]
 
 async def get_ranobe_chapter_link(lang: str, chapter_number: str):
     async with aiosqlite.connect('manga.db') as db:
@@ -348,14 +355,9 @@ async def get_akashic_volumes():
 
 async def get_akashic_chapters(volume: int):
     async with aiosqlite.connect('manga.db') as db:
-        async with db.execute('SELECT chapter FROM akashic_ranobe WHERE volume = ?', (volume,)) as cursor:
+        async with db.execute('SELECT chapter FROM akashic_ranobe WHERE volume = ? ORDER BY sort_order, CAST(chapter AS REAL)', (volume,)) as cursor:
             rows = await cursor.fetchall()
-            chapters = [row[0] for row in rows]
-            try:
-                # Пытаемся отсортировать как числа, чтобы 2 шло перед 10
-                return sorted(chapters, key=float)
-            except ValueError:
-                return sorted(chapters)
+            return [row[0] for row in rows]
 
 async def get_akashic_chapter_link(volume: int, chapter: str):
     async with aiosqlite.connect('manga.db') as db:
@@ -371,16 +373,9 @@ async def get_british_volumes():
 
 async def get_british_chapters(volume: int):
     async with aiosqlite.connect('manga.db') as db:
-        async with db.execute('SELECT chapter FROM british_ranobe WHERE volume = ?', (volume,)) as cursor:
+        async with db.execute('SELECT chapter FROM british_ranobe WHERE volume = ? ORDER BY sort_order, CAST(chapter AS REAL)', (volume,)) as cursor:
             rows = await cursor.fetchall()
-            
-            def parse_chapter(chap_str):
-                import re
-                match = re.search(r'\d+', chap_str)
-                return float(match.group()) if match else float('inf')
-                
-            chapters = [row[0] for row in rows]
-            return sorted(chapters, key=parse_chapter) if chapters else []
+            return [row[0] for row in rows]
 
 async def get_british_chapter_link(volume: int, chapter: str):
     async with aiosqlite.connect('manga.db') as db:
@@ -454,4 +449,3 @@ async def get_user_referred_by(user_id: int):
         async with db.execute('SELECT referred_by FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
-

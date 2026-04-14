@@ -90,8 +90,8 @@ async function apiFetch(url, options = {}) {
 
 // === Сохранение позиции чтения ===
 function getScrollKey() {
-    if (!currentSeries || !currentVolume) return null;
-    return `scroll_${currentSeries.id}_v${currentVolume.volume}_ch${currentChapters[currentChapterIdx]?.chapter}`;
+    if (!currentSeries || !currentVolume || !currentChapters[currentChapterIdx]) return null;
+    return `scroll_${currentSeries.id}_v${currentVolume.volume}_ch${currentChapters[currentChapterIdx].chapter}`;
 }
 
 function saveScrollPosition() {
@@ -142,10 +142,24 @@ function restoreScrollPosition() {
     const el = document.getElementById('reader-content');
     if (!el) return;
 
-    setTimeout(() => {
+    let hasRestored = false;
+    const observer = new ResizeObserver(() => {
         const maxScroll = el.scrollHeight - el.clientHeight;
-        el.scrollTop = pctToRestore * maxScroll;
-    }, 300);
+        if (maxScroll > 0) {
+            el.scrollTop = pctToRestore * maxScroll;
+            hasRestored = true;
+        }
+    });
+    
+    observer.observe(el);
+    
+    setTimeout(() => {
+        observer.disconnect();
+        if (!hasRestored) {
+            const maxScroll = el.scrollHeight - el.clientHeight;
+            el.scrollTop = pctToRestore * maxScroll;
+        }
+    }, 5000);
 }
 
 function saveLastRead() {
@@ -210,7 +224,7 @@ let serverBookmarks = []; // Хранит загруженные закладк�
 
 async function loadData() {
     console.log("Starting loadData...");
-    
+
     // Вспомогательная функция для таймаута, если AbortSignal.timeout не поддерживается
     const getTimeoutSignal = (ms) => {
         if (AbortSignal.timeout) return AbortSignal.timeout(ms);
@@ -505,7 +519,7 @@ function loadChapterContent(chapter, usePrefetch = false) {
     // Prioritize Telegraph over Teletype
     const telegraphUrls = urlsToLoad.filter(u => u.includes('telegra.ph'));
     if (telegraphUrls.length > 0) {
-        urlsToLoad = [telegraphUrls[0]]; // Take only the first telegraph link
+        urlsToLoad = telegraphUrls; // Загружаем все части телеграфа последовательно
     } else {
         const teletypeUrls = urlsToLoad.filter(u => u.includes('teletype.in'));
         if (teletypeUrls.length > 0) {
@@ -530,9 +544,7 @@ function loadChapterContent(chapter, usePrefetch = false) {
         const loadPromises = urlsToLoad.map(async (u) => {
             // Teletype — используем iframe
             if (u.includes('teletype.in')) {
-                const isDark = settings.theme === 'dark' || settings.theme === 'amoled';
-                const filterStyle = isDark ? 'filter: invert(1) hue-rotate(180deg);' : '';
-                return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;${filterStyle}" loading="lazy"></iframe>`;
+                return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;" loading="lazy"></iframe>`;
             }
             const telegraphMatch = u.match(/telegra\.ph\/(.+)/);
             if (telegraphMatch) {
@@ -635,11 +647,12 @@ function initImageFadeIn(container) {
     });
 }
 
-// ★ Smart Dark Mode для Teletype iframes (пункт 7)
+// ★ Smart Dark Mode для Teletype iframes (пункт 7) - Отключено (вызывало негатив)
 function applyIframeDarkMode() {
+    const iframes = document.querySelectorAll('.teletype-iframe');
     const isDark = settings.theme === 'dark' || settings.theme === 'amoled';
-    document.querySelectorAll('.teletype-iframe').forEach(iframe => {
-        iframe.style.filter = isDark ? 'invert(1) hue-rotate(180deg)' : 'none';
+    iframes.forEach(f => {
+        f.style.filter = isDark ? 'brightness(0.7) contrast(1.1)' : 'none';
     });
 }
 
@@ -661,7 +674,7 @@ function prefetchNextChapter() {
 
     const telegraphUrls = urlsToLoad.filter(u => u.includes('telegra.ph'));
     if (telegraphUrls.length > 0) {
-        urlsToLoad = [telegraphUrls[0]];
+        urlsToLoad = telegraphUrls;
     } else {
         const teletypeUrls = urlsToLoad.filter(u => u.includes('teletype.in'));
         if (teletypeUrls.length > 0) urlsToLoad = [teletypeUrls[0]];
@@ -670,9 +683,7 @@ function prefetchNextChapter() {
     if (urlsToLoad.length > 0) {
         const loadPromises = urlsToLoad.map(async (u) => {
             if (u.includes('teletype.in')) {
-                const isDark = settings.theme === 'dark' || settings.theme === 'amoled';
-                const filterStyle = isDark ? 'filter: invert(1) hue-rotate(180deg);' : '';
-                return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;${filterStyle}" loading="lazy"></iframe>`;
+                return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;" loading="lazy"></iframe>`;
             }
             const telegraphMatch = u.match(/telegra\.ph\/(.+)/);
             if (telegraphMatch) {
@@ -2039,7 +2050,8 @@ function initTypoReporter() {
     tooltip.id = 'typo-tooltip';
     tooltip.className = 'typo-tooltip';
     tooltip.innerHTML = '<span>🚨 Нашли опечатку?</span>';
-    tooltip.onclick = (e) => {
+    tooltip.onpointerdown = (e) => {
+        e.preventDefault(); // Предотвращаем сброс выделения
         e.stopPropagation();
         showTypoModal();
     };
@@ -2081,11 +2093,11 @@ function handleSelection() {
     typoSelectedText = selectedText;
     typoSelectionRange = range.cloneRange();
 
-    // Получаем контекст (текст вокруг)
-    const container = range.commonAncestorContainer.parentElement;
-    const fullText = container.innerText;
-    const startIdx = Math.max(0, fullText.indexOf(selectedText) - 50);
-    const endIdx = Math.min(fullText.length, fullText.indexOf(selectedText) + selectedText.length + 50);
+    // Получаем контекст (текст вокруг) точнее, используя позицию в узле
+    const startNode = range.startContainer;
+    const fullText = startNode.textContent || "";
+    const startIdx = Math.max(0, range.startOffset - 60);
+    const endIdx = Math.min(fullText.length, range.endOffset + 60);
     typoContextText = fullText.substring(startIdx, endIdx);
 
     // Позиционируем тултип
@@ -2173,6 +2185,14 @@ async function submitTypoReport() {
     }
 }
 
+// Глобальный перехватчик для кнопок (в т.ч. розового плюсика)
+document.addEventListener('click', (e) => {
+    const fabBtn = e.target.closest('.fab-btn');
+    if (fabBtn) toggleFab();
+    const actionItem = e.target.closest('.fab-menu-item');
+    if (actionItem) fabAction(actionItem.dataset.action);
+});
+
 // ==========================================================================
 // ★ HAPTIC FEEDBACK HELPER (пункт 8)
 // ==========================================================================
@@ -2212,26 +2232,28 @@ function showToast(message, type = 'info') {
 
 // === Fab Menu ===
 function toggleFab() {
-    const container = document.getElementById('fab-container');
+    const btn = document.getElementById('fab-btn');
     const menu = document.getElementById('fab-menu');
-    const plus = document.getElementById('fab-icon-plus');
     const close = document.getElementById('fab-icon-close');
 
-    if (!container || !menu) return;
+    if (!btn || !menu) return;
 
-    const isOpening = menu.classList.contains('hidden');
+    const isOpening = !btn.classList.contains('fab-open');
     haptic('medium');
 
     if (isOpening) {
-        container.classList.add('active');
         menu.classList.remove('hidden');
-        plus.classList.add('hidden');
-        close.classList.remove('hidden');
+        if (close) close.classList.remove('hidden');
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                btn.classList.add('fab-open');
+                menu.classList.add('fab-menu-visible');
+            });
+        });
     } else {
-        container.classList.remove('active');
-        menu.classList.add('hidden');
-        plus.classList.remove('hidden');
-        close.classList.add('hidden');
+        btn.classList.remove('fab-open');
+        menu.classList.remove('fab-menu-visible');
+        setTimeout(() => menu.classList.add('hidden'), 400);
     }
 }
 
@@ -2241,8 +2263,13 @@ function fabAction(action) {
     else if (action === 'autoscroll') {
         const toggle = document.getElementById('autoscroll-toggle');
         if (toggle) {
-            toggle.click(); // This will trigger the existing toggleAutoscrollSetting logic
+            toggle.checked = !toggle.checked;
+            toggleAutoscrollSetting(toggle.checked);
             showToast(toggle.checked ? 'Автоскролл включен' : 'Автоскролл выключен');
+        } else {
+            // Backup if toggle is missing
+            toggleAutoscrollSetting(!autoscrollEnabled);
+            showToast(autoscrollEnabled ? 'Автоскролл включен' : 'Автоскролл выключен');
         }
     } else if (action === 'comments') {
         const social = document.getElementById('social-section');
@@ -2256,7 +2283,7 @@ function fabAction(action) {
 let touchStartX = 0;
 let gestureTouchStartY = 0;
 let isSwipeActive = false;
-let isPullingNext = false;
+let isGlobalPullingNext = false; // Переименовано чтобы избежать конфликтов (Баг 2)
 
 function initGestures() {
     const reader = document.getElementById('screen-reader');
@@ -2266,27 +2293,29 @@ function initGestures() {
 
     if (!reader || !content || !indicator || !pullNext) return;
 
-    reader.addEventListener('touchstart', (e) => {
-        touchStartX = e.touches[0].clientX;
-        gestureTouchStartY = e.touches[0].clientY;
+    reader.addEventListener('pointerdown', (e) => {
+        touchStartX = e.clientX;
+        gestureTouchStartY = e.clientY;
         isSwipeActive = touchStartX < 35; // edge detection
     }, { passive: true });
 
-    reader.addEventListener('touchmove', (e) => {
+    reader.addEventListener('pointermove', (e) => {
         if (!isSwipeActive) return;
-        let deltaX = e.touches[0].clientX - touchStartX;
-        let deltaY = Math.abs(e.touches[0].clientY - gestureTouchStartY);
+        let deltaX = e.clientX - touchStartX;
+        let deltaY = Math.abs(e.clientY - gestureTouchStartY);
 
-        if (deltaX > 0 && deltaY < 25) {
-            indicator.style.opacity = Math.min(deltaX / 100, 1);
-            indicator.style.transform = `scaleY(${Math.min(0.5 + deltaX / 200, 1)}) translateX(${deltaX / 2}px)`;
+        // Добавлен порог по Y чтобы не срабатывало при скролле (Баг 1)
+        if (deltaX > 10 && deltaY < 40) { 
+            indicator.style.opacity = Math.min(deltaX / 100, 0.8);
+            // Сохраняем translateY(-50%) для центрирования (Баг 3)
+            indicator.style.transform = `translateY(-50%) scaleY(${Math.min(0.5 + deltaX / 200, 1)}) translateX(${deltaX / 2}px)`;
         }
     }, { passive: true });
 
-    reader.addEventListener('touchend', (e) => {
-        let deltaX = e.changedTouches[0].clientX - touchStartX;
+    reader.addEventListener('pointerup', (e) => {
+        let deltaX = e.clientX - touchStartX;
         indicator.style.opacity = 0;
-        indicator.style.transform = ''; // Сброс трансформации (Баг 3)
+        indicator.style.transform = 'translateY(-50%) translateX(-100%)'; 
 
         if (isSwipeActive && deltaX > 85) {
             haptic('medium');
@@ -2295,27 +2324,87 @@ function initGestures() {
         isSwipeActive = false;
     }, { passive: true });
 
-    // Pull-to-next logic at bottom
-    content.addEventListener('scroll', () => {
-        const bottomOffset = content.scrollHeight - content.scrollTop - content.clientHeight;
-        if (bottomOffset < 60 && currentChapterIdx < currentChapters.length - 1) {
-            pullNext.style.display = 'flex';
-            pullNext.style.opacity = Math.min(1, 1 - (bottomOffset / 60));
-            isPullingNext = bottomOffset <= 10;
-        } else {
-            pullNext.style.display = 'none';
-            isPullingNext = false;
-        }
-    }, { passive: true });
+    // Pull-to-next logic at bottom (Hybrid Touch/Mouse version for maximum compatibility)
+    let pullTouchStartY = 0;
+    let pullDistance = 0;
+    const pullNextText = document.getElementById('pull-next-text');
+    const pullNextArrow = pullNext.querySelector('.pull-next-arrow');
 
-    content.addEventListener('touchend', () => {
-        if (isPullingNext) {
+    const onStart = (e) => {
+        const scrollTop = content.scrollTop;
+        const scrollHeight = content.scrollHeight;
+        const clientHeight = content.clientHeight;
+        
+        // Для мыши (ПК) начинаем жест только если мы УЖЕ внизу страницы, 
+        // чтобы не ломать выделение текста и клики в середине контента.
+        if (!e.touches && (scrollTop + clientHeight < scrollHeight - 50)) {
+            pullTouchStartY = 0;
+            return;
+        }
+
+        pullTouchStartY = e.touches ? e.touches[0].clientY : e.clientY;
+        pullDistance = 0;
+        isGlobalPullingNext = false;
+    };
+
+    const onMove = (e) => {
+        if (currentChapterIdx >= currentChapters.length - 1 || pullTouchStartY === 0) return;
+        
+        const touchY = e.touches ? e.touches[0].clientY : e.clientY;
+        const scrollTop = content.scrollTop;
+        const scrollHeight = content.scrollHeight;
+        const clientHeight = content.clientHeight;
+
+        // Если мы внизу или уже тянем (используем порог 1px для точности на ПК)
+        if (isGlobalPullingNext || (Math.ceil(scrollTop + clientHeight) >= scrollHeight - 1)) {
+            let diff = pullTouchStartY - touchY;
+
+            if (diff > 15) { 
+                if (!isGlobalPullingNext) {
+                    isGlobalPullingNext = true;
+                    haptic('light');
+                }
+                // На мобилках принудительно отменяем скролл чтобы жесту ничто не мешало
+                if (e.cancelable && e.touches) e.preventDefault(); 
+                
+                pullDistance = diff;
+                pullNext.style.display = 'flex';
+                pullNext.style.opacity = Math.min(diff / 100, 1);
+
+                if (diff > 80) {
+                    if (pullNextText) pullNextText.textContent = 'Отпустите для следующей главы';
+                    if (pullNextArrow) pullNextArrow.style.transform = 'rotate(180deg)';
+                } else {
+                    if (pullNextText) pullNextText.textContent = 'Тяните для следующей главы';
+                    if (pullNextArrow) pullNextArrow.style.transform = 'rotate(0deg)';
+                }
+            } else if (isGlobalPullingNext && diff < 5) {
+                isGlobalPullingNext = false;
+                pullNext.style.display = 'none';
+                pullDistance = 0;
+            }
+        }
+    };
+
+    const onEnd = () => {
+        if (isGlobalPullingNext && pullDistance > 80) {
             haptic('medium');
             navigateChapter(1);
-            isPullingNext = false;
-            pullNext.style.display = 'none';
         }
-    }, { passive: true });
+        pullNext.style.display = 'none';
+        pullDistance = 0;
+        isGlobalPullingNext = false;
+        if (pullNextArrow) pullNextArrow.style.transform = 'rotate(0deg)';
+    };
+
+    // Используем раздельные слушатели для Touch и Mouse чтобы избежать pointercancel от pan-y
+    content.addEventListener('touchstart', onStart, { passive: true });
+    content.addEventListener('touchmove', onMove, { passive: false });
+    content.addEventListener('touchend', onEnd);
+
+    content.addEventListener('mousedown', onStart);
+    document.addEventListener('mousemove', (e) => { if (pullTouchStartY && !e.touches) onMove(e); });
+    document.addEventListener('mouseup', () => { if (pullTouchStartY) { onEnd(); pullTouchStartY = 0; } });
 }
 
 
