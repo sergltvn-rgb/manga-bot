@@ -41,7 +41,7 @@ from database import (
     get_chat_ai_provider, set_chat_ai_provider,
     add_to_harem, remove_from_harem, get_user_harem, update_loyalty_level,
     add_to_inventory, get_user_inventory, get_users_with_bookmark,
-    add_referral, get_referral_stats, get_user_referred_by, get_user_stat
+    add_referral, get_referral_stats, get_user_referred_by
 )
 
 COOLDOWN_TIME = 30 

@@ -536,7 +536,7 @@ function renderLoadedContent(container, html, chapter) {
 
     // --- Расчет примерного времени чтения ---
     const textContent = container.innerText;
-    onst wordCount = textContent.split(/\s+/).filter(w => w.length > 0).length;
+    const wordCount = textContent.split(/\s+/).filter(w => w.length > 0).length;
     if (wordCount > 50) {
         const readingTimeMins = Math.max(1, Math.ceil(wordCount / 200)); // В среднем 200 слов в минуту
         const timeBadge = document.createElement('div');
@@ -2236,7 +2236,7 @@ function initGestures() {
         let deltaX = e.touches[0].clientX - touchStartX;
         let deltaY = Math.abs(e.touches[0].clientY - touchStartY);
 
-        if (deltaX > 0 && deltaY < 50) {
+        if (deltaX > 0 && deltaY < 25) {
             indicator.style.opacity = Math.min(deltaX / 100, 1);
             indicator.style.transform = `scaleY(${Math.min(0.5 + deltaX / 200, 1)}) translateX(${deltaX / 2}px)`;
         }
@@ -2277,13 +2277,6 @@ function initGestures() {
     }, { passive: true });
 }
 
-function haptic(style = 'light') {
-    try {
-        if (tg && tg.HapticFeedback) {
-            tg.HapticFeedback.impactOccurred(style);
-        }
-    } catch (e) { }
-}
 
 // ==========================================================================
 // ИНИЦИАЛИЗАЦИЯ
