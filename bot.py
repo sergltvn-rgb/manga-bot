@@ -60,6 +60,15 @@ async def get_http_session() -> aiohttp.ClientSession:
         _http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
     return _http_session
 
+# --- Хелперы ---
+def fmt_name(uid, name):
+    """Форматирует имя пользователя в красивую ссылку."""
+    name = str(name)
+    clean_name = name.lstrip("@").strip()
+    if clean_name.startswith("<a"): return f"<b>{name}</b>"
+    if clean_name.startswith("Пользователь"): clean_name = "Пользователь"
+    return f'<b><a href="tg://user?id={uid}">{clean_name}</a></b>'
+
 LANGUAGES = {"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "jp": "🇯🇵 日本語", "color": "🎨 Цветная манга"}
 RANOBE_LANGUAGES = {"alya": "⚔️ Воительница-Аля", "ru": "🇷🇺 Русский (Ранобэ)"}
 ITEMS_PER_PAGE = 15
@@ -1095,8 +1104,9 @@ async def get_profile_content(chat_type: str, chat_id: int, user: types.User):
         marriage = await get_user_marriage(chat_id, user_id)
         if marriage:
             u1_id, u1_name, u2_id, u2_name, date, love_level = marriage
-            partner_name = u2_name if u1_name == name else u1_name
-            partner_text = f"В браке с <b>{partner_name}</b> 💍 ({date}, ❤️ Уровень: {love_level})"
+            partner_id = u2_id if u1_id == user_id else u1_id
+            partner_name = u2_name if u1_id == user_id else u1_name
+            partner_text = f"В браке с {fmt_name(partner_id, partner_name)} 💍 ({date}, ❤️ Уровень: {love_level})"
     
     stats = await get_user_stats(user_id)
     (hugs, kisses, bites, slaps, pats, m_count, s_count, balance, 
@@ -1268,7 +1278,7 @@ async def callback_inventory(callback: types.CallbackQuery):
     else:
         harem_members = []
         for i, (m_id, m_name, loyalty) in enumerate(harem, 1):
-            harem_members.append(f"{i}. {m_name} (💖 Lvl: {loyalty})")
+            harem_members.append(f"{i}. {fmt_name(m_id, m_name)} (💖 Lvl: {loyalty})")
         harem_text = "🌸 <b>Ваш гарем:</b>\n" + "\n".join(harem_members)
     
     text = f"{inv_text}\n\n{harem_text}\n\n💡 <i>Чтобы покормить или погладить участника гарема, используйте /feed или /pet ответом на его сообщение!</i>"
@@ -1374,7 +1384,7 @@ async def propose_marriage(message: types.Message):
         return await temp_reply(message, "Кто-то из вас уже состоит в браке!")
 
 
-    MARRIAGE_PROPOSALS[f"{chat_id}_{initiator.id}_{target.id}"] = f"@{initiator.username}" if initiator.username else initiator.first_name
+    MARRIAGE_PROPOSALS[f"{chat_id}_{initiator.id}_{target.id}"] = initiator.first_name
 
     builder = InlineKeyboardBuilder()
     builder.button(text="💍 Согласиться", callback_data=f"marry_yes_{initiator.id}_{target.id}")
@@ -1397,12 +1407,12 @@ async def process_marriage_callback(callback: types.CallbackQuery):
     else:
         try:
             chat_member = await bot.get_chat_member(chat_id, int(init_id))
-            init_name = f"@{chat_member.user.username}" if chat_member.user.username else chat_member.user.first_name
+            init_name = chat_member.user.first_name
         except Exception:
-            init_name = f'<a href="tg://user?id={init_id}">Пользователь</a>'
+            init_name = 'Пользователь'
             
     targ_user = callback.from_user
-    targ_name = f"@{targ_user.username}" if targ_user.username else targ_user.first_name
+    targ_name = targ_user.first_name
         
     date_now = datetime.now().strftime("%d.%m.%Y")
     
@@ -1489,7 +1499,7 @@ async def propose_harem(message: types.Message):
     if any(m[0] == target.id for m in harem):
         return await temp_reply(message, "Этот пользователь уже в вашем гареме!")
 
-    HAREM_PROPOSALS[f"{initiator.id}_{target.id}"] = f"@{initiator.username}" if initiator.username else initiator.first_name
+    HAREM_PROPOSALS[f"{initiator.id}_{target.id}"] = initiator.first_name
 
     builder = InlineKeyboardBuilder()
     builder.button(text="😈 Согласиться", callback_data=f"harem_yes_{initiator.id}_{target.id}")
@@ -1516,12 +1526,12 @@ async def process_harem_callback(callback: types.CallbackQuery):
     else:
         try:
             chat_member = await bot.get_chat_member(callback.message.chat.id, int(init_id))
-            init_name = f"@{chat_member.user.username}" if chat_member.user.username else chat_member.user.first_name
+            init_name = chat_member.user.first_name
         except Exception:
-            init_name = f'<a href="tg://user?id={init_id}">Пользователь</a>'
+            init_name = 'Пользователь'
             
     targ_user = callback.from_user
-    targ_name = f"@{targ_user.username}" if targ_user.username else targ_user.first_name
+    targ_name = targ_user.first_name
         
     await add_to_harem(int(init_id), int(targ_id), targ_name)
     await callback.message.edit_text(f"🎉 <b>Новое пополнение гарема!</b>\n\nТеперь {targ_name} принадлежит {init_name} 👑", parse_mode="HTML")
@@ -1550,13 +1560,6 @@ async def list_marriages(message: types.Message):
             
     if not marriages: return await temp_reply(message, "В этой беседе пока нет ни одной пары 😔", parse_mode="HTML")
     
-    # helper for safe name display
-    def fmt_name(uid, name):
-        name = str(name)
-        if name.startswith("Пользователь "): return f'<a href="tg://user?id={uid}">Пользователь</a>'
-        if name.startswith("@") or name.startswith("<a"): return f"<b>{name}</b>"
-        return f'<b><a href="tg://user?id={uid}">{name}</a></b>'
-
     lines = [f"{i}. {fmt_name(u1_id, u1_name)} ❤️ {fmt_name(u2_id, u2_name)} <i>({d})</i>" for i, (u1_id, u2_id, u1_name, u2_name, d) in enumerate(marriages, 1)]
     text = f"💍 <b>Топ пар:</b>\n\n" + "\n".join(lines)
     await message.answer(text, parse_mode="HTML")
