@@ -53,9 +53,12 @@ if not exist bot.py (
 )
 
 echo.
-echo === ЗАПУСК БОТА ===
-echo Используемая команда: %py_cmd%
-echo.
+if exist .venv\Scripts\python.exe (
+    echo [OK] Найдено виртуальное окружение .venv
+    set py_cmd=.venv\Scripts\python.exe
+) else (
+    echo [!] Виртуальное окружение .venv не найдено, используем системный Python
+)
 
 %py_cmd% bot.py
 

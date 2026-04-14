@@ -2213,7 +2213,7 @@ function fabAction(action) {
 
 // === Gestures: Swipe Back & Pull to Next ===
 let touchStartX = 0;
-let touchStartY = 0;
+let gestureTouchStartY = 0;
 let isSwipeActive = false;
 let isPullingNext = false;
 
@@ -2227,14 +2227,14 @@ function initGestures() {
 
     reader.addEventListener('touchstart', (e) => {
         touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
+        gestureTouchStartY = e.touches[0].clientY;
         isSwipeActive = touchStartX < 35; // edge detection
     }, { passive: true });
 
     reader.addEventListener('touchmove', (e) => {
         if (!isSwipeActive) return;
         let deltaX = e.touches[0].clientX - touchStartX;
-        let deltaY = Math.abs(e.touches[0].clientY - touchStartY);
+        let deltaY = Math.abs(e.touches[0].clientY - gestureTouchStartY);
 
         if (deltaX > 0 && deltaY < 25) {
             indicator.style.opacity = Math.min(deltaX / 100, 1);

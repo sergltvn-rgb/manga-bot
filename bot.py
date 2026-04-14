@@ -4147,6 +4147,15 @@ async def main():
     app.router.add_post("/api/chapters/bulk", handle_chapter_bulk)
     app.router.add_options("/api/chapters/bulk", handle_cors_preflight)
     
+    # --- Статические файлы для WebApp ---
+    # Это позволяет запускать читалку прямо с того же сервера, что и API. 
+    # В WEBAPP_URL в codes.env теперь можно прописать URL этого сервера (или ngrok).
+    try:
+        app.router.add_static('/webapp', 'webapp', show_index=True)
+        logging.info("Маршрут /webapp зарегистрирован для статических файлов.")
+    except Exception as e:
+        logging.warning(f"Не удалось зарегистрировать /webapp: {e}")
+    
     runner = aiohttp.web.AppRunner(app)
     await runner.setup()
     site = aiohttp.web.TCPSite(runner, "0.0.0.0", 8080)
