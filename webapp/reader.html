@@ -8,26 +8,35 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="reader.css?v=6">
+    <link rel="stylesheet" href="reader.css?v=8">
 </head>
 <body>
+    <!-- ★ Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- ★ Swipe-back edge indicator -->
+    <div id="swipe-back-indicator" class="swipe-back-indicator"></div>
+
     <!-- === ЭКРАН 1: Выбор серии === -->
     <div id="screen-series" class="screen active">
         <div class="reader-header">
             <div class="header-title">
-                <span class="header-icon">📖</span>
+                <svg class="icon header-icon-svg" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <h1>Библиотека</h1>
             </div>
-            <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+            <button class="settings-btn" onclick="toggleSettings()" aria-label="Настройки">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
         </div>
         <div class="content-area">
             <!-- Блок "Продолжить чтение" -->
             <div id="continue-reading-container" style="display:none;"></div>
             
             <div id="series-list">
-                <div class="loading-spinner">
-                    <div class="spinner"></div>
-                    <p>Загрузка библиотеки...</p>
+                <div class="skeleton-cards">
+                    <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
+                    <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:40%"></div></div></div>
+                    <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:55%"></div></div></div>
                 </div>
             </div>
         </div>
@@ -36,11 +45,15 @@
     <!-- === ЭКРАН 2: Выбор главы === -->
     <div id="screen-chapters" class="screen">
         <div class="reader-header">
-            <button class="back-btn" onclick="showScreen('series')">←</button>
+            <button class="back-btn" onclick="showScreen('series')" aria-label="Назад">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
             <div class="header-title">
                 <h1 id="chapters-title">Том 1</h1>
             </div>
-            <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+            <button class="settings-btn" onclick="toggleSettings()" aria-label="Настройки">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
         </div>
         <div class="volume-tabs" id="volume-tabs"></div>
         <div id="chapters-list" class="content-area"></div>
@@ -49,27 +62,38 @@
     <!-- === ЭКРАН 3: Чтение === -->
     <div id="screen-reader" class="screen">
         <div class="reader-header reader-top-bar" id="reader-top-bar">
-            <button class="back-btn" onclick="backFromReader()">←</button>
+            <button class="back-btn" onclick="backFromReader()" aria-label="Назад">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
             <div class="header-title">
                 <h1 id="reader-title">Глава 1</h1>
             </div>
-            <button class="toc-toggle-btn" id="toc-toggle-btn" onclick="toggleToC()" title="Оглавление" style="display:none;">☰</button>
-            <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+            <button class="toc-toggle-btn" id="toc-toggle-btn" onclick="toggleToC()" title="Оглавление" style="display:none;">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <button class="settings-btn" onclick="toggleSettings()" aria-label="Настройки">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
         </div>
         <!-- ToC Sidebar -->
         <div id="toc-overlay" class="toc-overlay hidden" onclick="toggleToC()"></div>
         <div id="toc-panel" class="toc-panel hidden">
             <div class="toc-header">
-                <h3>📑 Оглавление</h3>
-                <button class="toc-close-btn" onclick="toggleToC()">✕</button>
+                <h3>Оглавление</h3>
+                <button class="toc-close-btn" onclick="toggleToC()">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
             </div>
             <div id="toc-list" class="toc-list"></div>
         </div>
         <div class="reader-content" id="reader-content">
             <div class="reader-text" id="reader-text">
-                <div class="loading-spinner">
-                    <div class="spinner"></div>
-                    <p>Загрузка главы...</p>
+                <div class="skeleton-loader">
+                    <div class="skeleton-line" style="width:100%"></div>
+                    <div class="skeleton-line" style="width:92%"></div>
+                    <div class="skeleton-line" style="width:85%"></div>
+                    <div class="skeleton-line" style="width:95%"></div>
+                    <div class="skeleton-line" style="width:70%"></div>
                 </div>
             </div>
 
@@ -78,19 +102,24 @@
                 <!-- Лайк -->
                 <div class="like-section">
                     <button class="like-btn" id="like-btn" onclick="toggleLike()">
-                        <span class="like-icon" id="like-icon">🤍</span>
+                        <svg class="like-icon" id="like-icon" viewBox="0 0 24 24" width="22" height="22"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         <span class="like-count" id="like-count">0</span>
                     </button>
                 </div>
 
                 <!-- Комментарии -->
                 <div class="comments-section">
-                    <h3 class="comments-title">💬 Комментарии <span class="comments-count" id="comments-count-badge"></span></h3>
+                    <h3 class="comments-title">
+                        <svg class="icon-sm" viewBox="0 0 24 24" style="vertical-align:-3px;margin-right:6px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Комментарии <span class="comments-count" id="comments-count-badge"></span>
+                    </h3>
                     
                     <div class="comment-form" id="comment-form">
                         <div id="reply-indicator" class="reply-indicator" style="display:none;">
                             <span>Ответ: <strong id="reply-to-name"></strong></span>
-                            <button class="cancel-reply-btn" onclick="cancelReply()">✕</button>
+                            <button class="cancel-reply-btn" onclick="cancelReply()">
+                                <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
                         </div>
                         <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="2"></textarea>
                         <button class="comment-submit-btn" onclick="postComment()">Отправить</button>
@@ -99,37 +128,77 @@
                     <div id="comments-list" class="comments-list"></div>
                 </div>
             </div>
+
+            <!-- ★ Pull-to-next-chapter indicator -->
+            <div id="pull-next-indicator" class="pull-next-indicator" style="display:none;">
+                <div class="pull-next-content">
+                    <svg class="icon pull-next-arrow" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span id="pull-next-text">Тяните для следующей главы</span>
+                </div>
+            </div>
         </div>
         <div class="reader-bottom-bar" id="reader-bottom-bar">
-            <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">← Пред.</button>
+            <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">
+                <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Пред.
+            </button>
             <span class="chapter-indicator" id="chapter-indicator">1 / 10</span>
-            <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">След. →</button>
+            <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">
+                След.
+                <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:4px;"><path d="M5 12h14M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
         </div>
-        <!-- Autoscroll FAB -->
-        <button class="autoscroll-fab hidden" id="autoscroll-fab" onclick="toggleAutoscroll()" title="Автопрокрутка">▶</button>
+
+        <!-- ★ Morphing FAB (пункт 10) -->
+        <div class="fab-container" id="fab-container">
+            <div class="fab-menu hidden" id="fab-menu">
+                <button class="fab-menu-item" onclick="fabAction('toc')">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Оглавление</span>
+                </button>
+                <button class="fab-menu-item" onclick="fabAction('autoscroll')">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Автоскролл</span>
+                </button>
+                <button class="fab-menu-item" onclick="fabAction('comments')">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Комментарии</span>
+                </button>
+            </div>
+            <button class="fab-btn" id="fab-btn" onclick="toggleFab()">
+                <svg class="fab-icon fab-icon-plus" id="fab-icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg class="fab-icon fab-icon-close hidden" id="fab-icon-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+        </div>
     </div>
 
     <!-- === ЭКРАН 4: Моя библиотека === -->
     <div id="screen-library" class="screen">
         <div class="reader-header">
             <div class="header-title">
-                <span class="header-icon">📚</span>
+                <svg class="icon header-icon-svg" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 <h1>Моя библиотека</h1>
             </div>
-            <button class="settings-btn" onclick="toggleSettings()">⚙️</button>
+            <button class="settings-btn" onclick="toggleSettings()" aria-label="Настройки">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
         </div>
         <div class="content-area">
             <!-- Reading Stats -->
             <div class="reading-stats-card">
                 <div class="stat-item">
-                    <span class="stat-icon">⏱️</span>
+                    <span class="stat-icon">
+                        <svg class="icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><polyline points="12 6 12 12 16 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
                     <div class="stat-info">
                         <div class="stat-value" id="stat-time">0 ч 0 м</div>
                         <div class="stat-label">Время за чтением</div>
                     </div>
                 </div>
                 <div class="stat-item">
-                    <span class="stat-icon">📖</span>
+                    <span class="stat-icon">
+                        <svg class="icon-sm" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
                     <div class="stat-info">
                         <div class="stat-value" id="stat-chapters">0</div>
                         <div class="stat-label">Прочитано глав</div>
@@ -139,8 +208,8 @@
             
             <h3 class="library-section-title">В процессе чтения</h3>
             <div id="library-list">
-                <div class="loading-spinner">
-                    <div class="spinner"></div>
+                <div class="skeleton-cards">
+                    <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
                 </div>
             </div>
         </div>
@@ -149,11 +218,11 @@
     <!-- === ТАБ БАР (Нижняя навигация) === -->
     <div class="bottom-nav-bar" id="main-bottom-nav">
         <button class="nav-tab active" id="tab-series" onclick="showScreen('series')">
-            <span class="tab-icon">🏠</span>
+            <svg class="tab-icon-svg" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="9 22 9 12 15 12 15 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span class="tab-label">Главная</span>
         </button>
         <button class="nav-tab" id="tab-library" onclick="showScreen('library')">
-            <span class="tab-icon">📚</span>
+            <svg class="tab-icon-svg" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span class="tab-label">Библиотека</span>
         </button>
     </div>
@@ -161,10 +230,10 @@
     <!-- === Панель настроек === -->
     <div id="settings-overlay" class="settings-overlay hidden" onclick="toggleSettings()"></div>
     <div id="settings-panel" class="settings-panel hidden">
-        <h2>⚙️ Настройки чтения</h2>
+        <h2>Настройки чтения</h2>
         
         <div class="setting-group">
-            <label>📝 Размер шрифта</label>
+            <label>Размер шрифта</label>
             <div class="setting-buttons">
                 <button onclick="setFontSize(14)" data-size="14">A<small>−</small></button>
                 <button onclick="setFontSize(17)" data-size="17" class="active">A</button>
@@ -174,22 +243,22 @@
         </div>
 
         <div class="setting-group">
-            <label>🎨 Тема</label>
+            <label>Тема</label>
             <div class="setting-buttons theme-buttons">
-                <button onclick="setTheme('light')" data-theme="light" class="theme-light-btn active">☀️</button>
-                <button onclick="setTheme('sepia')" data-theme="sepia" class="theme-sepia-btn">📜</button>
-                <button onclick="setTheme('dark')" data-theme="dark" class="theme-dark-btn">🌙</button>
-                <button onclick="setTheme('amoled')" data-theme="amoled" class="theme-amoled-btn">⚫</button>
+                <button onclick="setTheme('light')" data-theme="light" class="theme-light-btn active">Светлая</button>
+                <button onclick="setTheme('sepia')" data-theme="sepia" class="theme-sepia-btn">Сепия</button>
+                <button onclick="setTheme('dark')" data-theme="dark" class="theme-dark-btn">Тёмная</button>
+                <button onclick="setTheme('amoled')" data-theme="amoled" class="theme-amoled-btn">AMOLED</button>
             </div>
         </div>
 
         <div class="setting-group">
-            <label>📏 Ширина текста</label>
+            <label>Ширина текста</label>
             <input type="range" id="width-slider" min="60" max="100" value="90" oninput="setTextWidth(this.value)">
         </div>
 
         <div class="setting-group">
-            <label>↕️ Межстрочный интервал</label>
+            <label>Межстрочный интервал</label>
             <div class="setting-buttons">
                 <button onclick="setLineHeight(1.5)" data-lh="1.5">Компактный</button>
                 <button onclick="setLineHeight(1.8)" data-lh="1.8" class="active">Обычный</button>
@@ -198,7 +267,7 @@
         </div>
 
         <div class="setting-group">
-            <label>📖 Шрифт</label>
+            <label>Шрифт</label>
             <div class="setting-buttons font-buttons">
                 <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">Серифный</button>
                 <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
@@ -207,7 +276,7 @@
         </div>
 
         <div class="setting-group">
-            <label>📐 Выравнивание текста</label>
+            <label>Выравнивание текста</label>
             <div class="setting-buttons">
                 <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
                 <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
@@ -223,26 +292,26 @@
         </div>
 
         <div class="setting-group" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-            <label style="margin-bottom:0;">▶ Автопрокрутка</label>
+            <label style="margin-bottom:0;">Автопрокрутка</label>
             <label class="switch">
                 <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
                 <span class="slider round"></span>
             </label>
         </div>
         <div class="setting-group autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
-            <label>🐢 Скорость автопрокрутки 🐇</label>
+            <label>Скорость автопрокрутки</label>
             <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
         </div>
 
         <div class="setting-group" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--divider);">
             <label style="display: flex; justify-content: space-between; align-items: center;">
-                <span>🔧 Режим редактора</span>
+                <span>Режим редактора</span>
                 <label class="switch">
                     <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
                     <span class="slider round"></span>
                 </label>
             </label>
-            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px; line-height: 1.3;">Включает ✏️ для переименования проектов, томов и глав.</p>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px; line-height: 1.3;">Включает редактирование для переименования проектов, томов и глав.</p>
         </div>
         
         <button class="close-settings-btn" onclick="toggleSettings()">Готово</button>
@@ -250,7 +319,9 @@
 
     <!-- === Image Lightbox === -->
     <div id="lightbox-overlay" class="lightbox-overlay hidden">
-        <button class="lightbox-close" onclick="closeLightbox()">✕</button>
+        <button class="lightbox-close" onclick="closeLightbox()">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
         <button class="lightbox-nav lightbox-prev" id="lightbox-prev" onclick="lightboxNavigate(-1)">‹</button>
         <div class="lightbox-image-wrapper" id="lightbox-image-wrapper">
             <img id="lightbox-img" class="lightbox-img" src="" alt="">
@@ -262,45 +333,46 @@
     <!-- === Edit URL Modal (Admin) === -->
     <div id="edit-url-overlay" class="modal-overlay hidden" onclick="closeEditUrlModal()"></div>
     <div id="edit-url-modal" class="edit-url-modal hidden">
-        <h3>🔗 Редактирование ссылки</h3>
+        <h3>Редактирование ссылки</h3>
         <p class="edit-url-chapter-name" id="edit-url-chapter-name"></p>
         <input type="text" id="edit-url-input" class="edit-url-input" placeholder="https://telegra.ph/...">
         <div class="edit-url-actions">
             <button class="edit-url-cancel" onclick="closeEditUrlModal()">Отмена</button>
-            <button class="edit-url-save" id="edit-url-save" onclick="saveEditUrl()">💾 Сохранить</button>
+            <button class="edit-url-save" id="edit-url-save" onclick="saveEditUrl()">Сохранить</button>
         </div>
     </div>
 
     <!-- === Bulk Upload Modal (Admin) === -->
     <div id="bulk-upload-overlay" class="modal-overlay hidden" onclick="closeBulkModal()"></div>
     <div id="bulk-upload-modal" class="bulk-upload-modal hidden">
-        <h3>📦 Массовое добавление глав</h3>
+        <h3>Массовое добавление глав</h3>
         <p class="bulk-upload-hint">Вставьте ссылки (по одной на строку). Нумерация продолжится автоматически.</p>
-        <textarea id="bulk-upload-input" class="bulk-upload-input" placeholder="https://telegra.ph/chapter-15\nhttps://telegra.ph/chapter-16\nhttps://telegra.ph/chapter-17" rows="6"></textarea>
+        <textarea id="bulk-upload-input" class="bulk-upload-input" placeholder="https://telegra.ph/chapter-15&#10;https://telegra.ph/chapter-16&#10;https://telegra.ph/chapter-17" rows="6"></textarea>
         <div class="bulk-upload-actions">
             <button class="edit-url-cancel" onclick="closeBulkModal()">Отмена</button>
-            <button class="edit-url-save" id="bulk-upload-save" onclick="executeBulkUpload()">📤 Добавить</button>
+            <button class="edit-url-save" id="bulk-upload-save" onclick="executeBulkUpload()">Добавить</button>
         </div>
     </div>
 
     <!-- === Typo Reporter === -->
     <div id="typo-tooltip" class="typo-tooltip" onclick="openTypoModal()">
-        <span>📝</span> Сообщить об опечатке
+        <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-1px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Сообщить об опечатке
     </div>
 
     <div id="typo-modal-overlay" class="modal-overlay hidden" onclick="closeTypoModal()"></div>
     <div id="typo-modal" class="edit-url-modal hidden">
-        <h3>🚨 Репорт об опечатке</h3>
+        <h3>Репорт об опечатке</h3>
         <div class="typo-modal-context" id="typo-modal-context">
             Текст с <span class="typo-modal-selected">оШибкой</span>
         </div>
         <textarea id="typo-comment" class="typo-modal-input" placeholder="Комментарий (необязательно)..." rows="3"></textarea>
         <div class="edit-url-actions" style="margin-top: 16px;">
             <button class="edit-url-cancel" onclick="closeTypoModal()">Отмена</button>
-            <button class="edit-url-save" id="typo-submit-btn" onclick="submitTypoReport()">📤 Отправить</button>
+            <button class="edit-url-save" id="typo-submit-btn" onclick="submitTypoReport()">Отправить</button>
         </div>
     </div>
 
-    <script src="reader.js?v=6"></script>
+    <script src="reader.js?v=8"></script>
 </body>
 </html>

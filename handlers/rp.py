@@ -104,7 +104,7 @@ async def get_rp_gif(action: str) -> str | None:
 
 # Сортировка по длине в обратном порядке для предотвращения багов частичного маппинга (например "спать" vs "спать вместе")
 keys_sorted = sorted(RP_ACTIONS.keys(), key=len, reverse=True)
-REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(keys_sorted) + r')')
+REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(keys_sorted) + r')(?:\s+(.+))?$')
 
 from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply
 
@@ -116,6 +116,7 @@ async def rp_commands(message: types.Message):
     match = REGEX_RP.search(message.text)
     if not match: return
     action_key = match.group(1).lower()
+    custom_text = match.group(2) if len(match.groups()) > 1 else None
             
     # Проверка на 18+ ограничение (Только для админов)
     if action_key in RP_18PLUS:
@@ -133,6 +134,9 @@ async def rp_commands(message: types.Message):
     await update_rp_stat(user1.id, stat_type)
     
     caption = f"{emoji} {user1.mention_html()} {text_act} {user2.mention_html()}"
+    if custom_text:
+        caption += f"\n💬 <i>«{custom_text}»</i>"
+        
     gif_url = await get_rp_gif(action_key)
     if gif_url:
         await message.answer_animation(animation=gif_url, caption=caption, parse_mode="HTML")

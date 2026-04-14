@@ -38,7 +38,10 @@ from database import (
     add_to_blacklist, remove_from_blacklist, is_blacklisted, get_blacklist,
     get_akashic_volumes, get_akashic_chapters, get_akashic_chapter_link,
     get_british_volumes, get_british_chapters, get_british_chapter_link,
-    get_chat_ai_provider, set_chat_ai_provider
+    get_chat_ai_provider, set_chat_ai_provider,
+    add_to_harem, remove_from_harem, get_user_harem, update_loyalty_level,
+    add_to_inventory, get_user_inventory, get_users_with_bookmark,
+    add_referral, get_referral_stats, get_user_referred_by, get_user_stat
 )
 
 COOLDOWN_TIME = 30 
@@ -63,6 +66,7 @@ ITEMS_PER_PAGE = 15
 
 ART_CACHE: dict = {}
 MARRIAGE_PROPOSALS: dict = {}
+HAREM_PROPOSALS: dict = {}
 REGEX_INFA = re.compile(r'(?i)^[/*\s]*инфа\s+(.+)$')
 REGEX_RANDOM = re.compile(r'(?i)^[/*\s]*рандом\s+(\d+)$')
 REGEX_CHOOSE = re.compile(r'(?i)^[/*\s]*выбери\s+(.+)\s+или\s+(.+)$')
@@ -83,6 +87,19 @@ REGEX_RPS = re.compile(r'(?i)^[/*\s]*(камень ножницы бумага|�
 REGEX_COMPATIBILITY = re.compile(r'(?i)^[/*\s]*совместимость')
 REGEX_MAGIC_BALL = re.compile(r'(?i)^[/*\s]*шар\s+(.+)')
 REGEX_ROULETTE = re.compile(r'(?i)^[/*\s]*рулетка')
+REGEX_BOTTLE = re.compile(r'(?i)^[/*\s]*(бутылочка|bottle)')
+REGEX_SHIP = re.compile(r'(?i)^[/*\s]*(шип|пейринг|ship)')
+REGEX_SHOP = re.compile(r'(?i)^[/*\s]*(магазин|shop)')
+REGEX_HELP = re.compile(r'(?i)^[/*\s]*(помощь|меню|help)')
+REGEX_HAREM_ADD = re.compile(r'(?i)^[/*\s]*(гарем\s+добавить|harem\s+add|harem_add)')
+REGEX_HAREM_REMOVE = re.compile(r'(?i)^[/*\s]*(гарем\s+удалить|harem\s+remove|harem_remove)')
+REGEX_DAILY = re.compile(r'(?i)^[/*\s]*(ежедневка|daily|🎁 Ежедневная награда)')
+REGEX_LOOTBOX = re.compile(r'(?i)^[/*\s]*(lootbox|📦 Секретный лутбокс)')
+REGEX_REF = re.compile(r'(?i)^[/*\s]*(реф|ref|🔗 Рефералы)')
+REGEX_SLOT = re.compile(r'(?i)^[/*\s]*(казино|слоты|слот)(?:\s+(\d+))?')
+REGEX_ROB = re.compile(r'(?i)^[/*\s]*(украсть|ограбить)')
+
+ACTIVE_DROPS = {} # {chat_id: reward}
 
 class NotifyUsers(StatesGroup):
     waiting_for_decision = State()
@@ -105,6 +122,9 @@ class ArtSuggest(StatesGroup):
 
 class AIChat(StatesGroup):
     chatting = State()
+
+class ShopBuyTitle(StatesGroup):
+    waiting_for_title = State()
 
 class ChapterJump(StatesGroup):
     waiting_for_manga_page = State()
@@ -507,6 +527,28 @@ def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
 async def process_empty_callback(callback: types.CallbackQuery):
     await callback.answer("Здесь пока пусто 😔", show_alert=False)
 
+@dp.callback_query(F.data == "claim_drop")
+async def callback_claim_drop(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    user_id = callback.from_user.id
+    
+    if chat_id not in ACTIVE_DROPS:
+        return await callback.answer("❌ Этот дроп уже забрали или он истек!", show_alert=True)
+    
+    reward = ACTIVE_DROPS.pop(chat_id)
+    
+    # Начисляем награду
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (reward, user_id))
+        await db.commit()
+    
+    await callback.message.edit_text(
+        f"🎊 🏆 <b>Победа!</b>\n\nМолниеносный @{callback.from_user.username} забирает <b>{reward} монет</b> из мешка!\n\n"
+        f"💼 <i>Твой баланс пополнен.</i>",
+        parse_mode="HTML"
+    )
+    await callback.answer(f"Вы получили {reward} монет!")
+
 @dp.message(Command("start", ignore_mention=True), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -519,10 +561,32 @@ async def cmd_start(message: types.Message, state: FSMContext):
     if not is_group:
         if not deep_link:
             await message.answer(
-                "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
+                "👋 <b>Добро пожаловать!</b>\n\nЯ — многофункциональный бот по вселенной <i>«Аля иногда кокетничает со мной по-русски» (Roshidere)</i>.\n\nЗдесь вы можете читать мангу и ранобэ в удобной Web-читалке, общаться с ИИ-персонажами, собирать арты и играть!\n\n👇 <b>Выберите раздел:</b>",
                 parse_mode="HTML",
                 reply_markup=REPLY_KB
             )
+        elif deep_link.startswith("ref_"):
+            try:
+                referrer_id = int(deep_link.split("_")[1])
+                user_id = message.from_user.id
+                
+                if referrer_id != user_id:
+                    already_referred = await get_user_referred_by(user_id)
+                    
+                    # Проверяем, есть ли уже статы у юзера (если нет - он новый)
+                    stats = await get_user_stats(user_id)
+                    # Так как StatsMiddleware уже сработал и добавил 1 сообщение, проверяем на <= 1
+                    is_new_user = not already_referred and stats[5] <= 1 and stats[0] == 0
+                    
+                    if is_new_user:
+                        await add_referral(referrer_id, user_id)
+                        await message.answer(f"🎉 Вы перешли по реферальной ссылке! Вам начислено <b>500 монет</b>.", parse_mode="HTML")
+                        try:
+                            await bot.send_message(referrer_id, f"👤 У вас новый реферал! За приглашение @{message.from_user.username} вам начислено <b>1000 монет</b> и <b>3 XP</b>.", parse_mode="HTML")
+                        except Exception:
+                            pass
+            except (ValueError, IndexError):
+                pass
             
     if deep_link and deep_link.startswith("rename_"):
         admins = await get_admins()
@@ -572,12 +636,12 @@ async def cmd_start(message: types.Message, state: FSMContext):
     # Обычный /start (без deep link)
     if is_group:
         await message.answer(
-            "👋 <b>Привет!</b> Я бот по манге <i>«Аля иногда кокетничает со мной по-русски»</i>.\n\nВыбирай раздел ниже:",
+            "👋 <b>Всем привет!</b> Я бот по вселенной <i>«Аля иногда кокетничает со мной по-русски» (Roshidere)</i>.\n\nЗовите меня, играйте в мини-игры и читайте мангу прямо в Telegram!\n\n👇 <b>Меню бота:</b>",
             parse_mode="HTML",
             reply_markup=get_main_menu(is_group=True)
         )
     else:
-        await message.answer("Главное меню:", reply_markup=get_main_menu())
+        await message.answer("🏠 <b>Главное меню</b>\n\nВыберите раздел для продолжения:", parse_mode="HTML", reply_markup=get_main_menu())
 
 async def _redirect_to_dm(message: types.Message, section: str, label: str):
     """В группе отправляет кнопку-ссылку на ЛС бота."""
@@ -652,24 +716,23 @@ async def handle_menu_button(message: types.Message, state: FSMContext):
     await message.answer("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
 
 
-async def get_help_text(user_id: int) -> str:
-    link = await get_commands_link()
-    link_line = f'\n🔗 <a href="{link}">Полный список всех команд (Telegraph)</a>' if link else ''
-    
-    text = (
-        "📜 <b>Все команды бота:</b>\n\n"
-        "<b>📋 Основные:</b>\n"
+HELP_CATEGORIES = {
+    "main": ("📋 Основные", 
         "/start — Главное меню\n"
-        "/help — Эта справка\n"
-        "/profile — РП-профиль (брак, действия)\n"
-        "/stats — Статистика чата (сообщения, стикеры)\n\n"
-        "<b>💍 Браки:</b>\n"
-        "/marry (реплаем) — Предложить брак\n"
-        "/divorce — Развод\n"
-        "/marriages — Топ пар\n\n"
-        "<b>🎭 РП-действия</b> (реплаем):\n"
+        "/help — Меню помощи\n"
+        "/profile — Ваш профиль (ачивки, монеты, титул)\n"
+        "/stats — Топ беседы\n"
+        "/shop — Магазин (покупка титулов и иммунитета)"
+    ),
+    "rp": ("🎭 РП и Браки",
+        "<b>РП-действия (реплаем, можно с текстом):</b>\n"
         "<i>обнять, поцеловать, кусь, ударить, погладить, пнуть, лизнуть, убить, воскресить, пожать, пощекотать, тыкнуть, покормить, прижаться, станцевать</i> и др.\n\n"
-        "<b>🎲 Мини-игры:</b>\n"
+        "<b>Браки:</b>\n"
+        "/marry (реплаем) — Предложить брак\n"
+        "/divorce — Драматичный развод\n"
+        "/marriages — Топ пар"
+    ),
+    "games": ("🎲 Игры",
         "/инфа [текст] — Вероятность\n"
         "/шар [вопрос] — Магический шар\n"
         "/монетка — Орёл/Решка\n"
@@ -678,25 +741,58 @@ async def get_help_text(user_id: int) -> str:
         "/рулетка — Русская рулетка\n"
         "/совместимость (реплаем)\n"
         "/рандом [число] — Случайное число\n"
-        "/выбери [А] или [Б]\n"
-        "/аля выбери [А] или [Б] — ИИ-выбор\n\n"
-        "<b>🤖 ИИ-чат:</b>\n"
-        "Напиши <i>\"аля [текст]\"</i> или <i>\"масачика [текст]\"</i> в любом чате"
-        f"{link_line}"
+        "/выбери [А] или [Б]"
+    ),
+    "ai": ("🤖 ИИ",
+        "/бутылочка — ИИ-игра в бутылочку\n"
+        "/шип — ИИ-шипперинг участников\n"
+        "/аля выбери [А] или [Б]\n"
+        "Напиши <i>\"аля [текст]\"</i> или <i>\"масачика [текст]\"</i> для общения."
     )
-    
-    admins = await get_admins()
-    if user_id in admins:
-        text += "\n\n👑 <i>Вы админ — /admin для скрытых команд</i>"
-    return text
+}
 
-@dp.message(Command("help"), StateFilter("*"))
+async def get_help_menu(category="main", is_admin=False):
+    title, text = HELP_CATEGORIES.get(category, HELP_CATEGORIES["main"])
+    
+    link = await get_commands_link()
+    link_line = f'\n\n🔗 <a href="{link}">Полный список (Telegraph)</a>' if link else ''
+    if is_admin:
+        link_line += "\n👑 <i>Вы админ — /admin для скрытых команд</i>"
+        
+    full_text = f"📜 <b>Справка | {title}</b>\n\n{text}{link_line}"
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="📋", callback_data="help_cat:main"),
+        types.InlineKeyboardButton(text="🎭", callback_data="help_cat:rp"),
+        types.InlineKeyboardButton(text="🎲", callback_data="help_cat:games"),
+        types.InlineKeyboardButton(text="🤖", callback_data="help_cat:ai")
+    )
+    builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
+    return full_text, builder.as_markup()
+
+@dp.message(F.text & F.text.regexp(REGEX_HELP), StateFilter("*"))
 async def cmd_help(message: types.Message):
-    await message.answer(await get_help_text(message.from_user.id), parse_mode="HTML", disable_web_page_preview=True)
+    admins = await get_admins()
+    text, markup = await get_help_menu("main", message.from_user.id in admins)
+    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=markup)
+
+@dp.callback_query(F.data.startswith("help_cat:"))
+async def process_help_cat(callback: types.CallbackQuery):
+    cat = callback.data.split(":")[1]
+    admins = await get_admins()
+    text, markup = await get_help_menu(cat, callback.from_user.id in admins)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=markup)
+    except Exception:
+        pass
+    await callback.answer()
 
 @dp.callback_query(F.data == "show_help")
 async def process_show_help(callback: types.CallbackQuery):
-    await callback.message.edit_text(await get_help_text(callback.from_user.id), parse_mode="HTML", reply_markup=get_back_button())
+    admins = await get_admins()
+    text, markup = await get_help_menu("main", callback.from_user.id in admins)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
 
 @dp.callback_query(F.data == "main_menu")
 async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
@@ -780,27 +876,51 @@ async def process_rename_name(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "schedule")
 async def process_schedule(callback: types.CallbackQuery):
-    await callback.message.edit_text("<b>📅 График:</b> Новые главы выходят раз в 2 недели по субботам в 18:00 МСК.", parse_mode="HTML", reply_markup=get_back_button())
+    text = (
+        "📅 <b>График выхода контента:</b>\n\n"
+        "📕 <b>Ранобэ:</b> Перевод новых томов начинается вскоре после их выхода в Японии.\n"
+        "📗 <b>Манга:</b> Новые главы выходят примерно раз в 2 недели.\n\n"
+        "🔔 <i>Самые точные даты, анонсы и спойлеры мы публикуем в нашем Telegram-канале. Включите уведомления, чтобы ничего не пропустить!</i>"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button())
 
 @dp.callback_query(F.data == "vs_anime")
 async def process_vs_anime(callback: types.CallbackQuery):
-    await callback.message.edit_text("<b>📺 Аниме vs Манга:</b>\nМанга подробнее раскрывает монологи и шутки. Читай мангу примерно с 35 главы после 1 сезона аниме!", parse_mode="HTML", reply_markup=get_back_button())
+    text = (
+        "📺 <b>Аниме или первоисточник?</b>\n\n"
+        "🎬 <b>Первый сезон аниме</b> охватывает первые 3 тома ранобэ (около 34-36 глав манги). Официально анонсирован 2 сезон!\n\n"
+        "💡 <b>С чего продолжить чтение?</b>\n"
+        "Если вы посмотрели аниме и хотите узнать, что было дальше:\n"
+        "👉 В манге: начинайте с <b>35 главы</b>.\n"
+        "👉 В ранобэ: начинайте с <b>4 тома</b>.\n\n"
+        "<i>Но мы настоятельно рекомендуем читать с самого начала! В адаптациях вырезано много уморительных внутренних монологов Масачики и милых реакций Али.</i>"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button())
 
 
 @dp.callback_query(F.data == "suggest_art_menu")
 async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMContext):
     if await check_cd_and_warn(callback, "suggest_art", 60): return
     await state.set_state(ArtSuggest.waiting_for_photo)
-    await callback.message.edit_text("🖼 <b>Предложка артов</b>\nОтправьте <b>одну</b> фотографию (арт), которую хотите предложить. Она будет проверена администрацией.\n\n❗️ Требования:\n1. Рисовка приближена к аниме.\n2. Хорошее качество.\n3. Без лишнего текста.", parse_mode="HTML", reply_markup=get_back_button(text="❌ Отмена"))
+    text = (
+        "🖼 <b>Предложка артов</b>\n\n"
+        "Отправьте <b>одну</b> красивую фотографию (арт), которую хотите предложить в нашу галерею.\n\n"
+        "❗️ <b>Требования:</b>\n"
+        "1. Рисовка качественная и приближена к аниме.\n"
+        "2. Без вотермарок на пол-экрана и лишнего текста.\n"
+        "3. Соответствие тематике Roshidere.\n\n"
+        "<i>Все арты проходят ручную проверку администрацией.</i>"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button(text="❌ Отмена"))
 
 @dp.callback_query(F.data == "tech_support_menu")
 async def process_tech_support_menu(callback: types.CallbackQuery, state: FSMContext):
     if await check_cd_and_warn(callback, "tech_support", 180): return
     await state.set_state(TechSupport.waiting_for_message)
     await callback.message.edit_text(
-        "🆘 <b>Техническая поддержка / Предложения</b>\n"
-        "Опишите вашу проблему, баг или идею в <b>одном сообщении</b>.\n"
-        "Оно будет отправлено всем администраторам бота.", 
+        "🆘 <b>Техническая поддержка / Идеи</b>\n\n"
+        "Нашли баг в читалке? Есть крутая идея для мини-игры? Или просто хотите поблагодарить разработчиков?\n\n"
+        "✍️ Напишите ваше обращение в <b>одном сообщении</b> ниже, и оно будет мгновенно доставлено администрации.", 
         parse_mode="HTML", 
         reply_markup=get_back_button(text="❌ Отмена")
     )
@@ -828,29 +948,166 @@ async def handle_tech_support_message(message: types.Message, state: FSMContext)
             
     await message.answer("✅ Ваше сообщение успешно отправлено! Спасибо за обращение.")
 
+# --- Phase 3: Ежедневные награды ---
+@dp.message(F.text & F.text.regexp(REGEX_DAILY))
+async def cmd_daily(message: types.Message):
+    if await check_cd_and_warn(message, "daily", 10): return
+    
+    user_id = message.from_user.id
+    now = datetime.now()
+    today_str = now.strftime('%Y-%m-%d')
+    
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT last_daily, daily_streak, balance FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            
+    if not row:
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('INSERT OR IGNORE INTO users_stats (user_id, balance) VALUES (?, 0)', (user_id,))
+            await db.commit()
+        last_daily, streak, balance = None, 0, 0
+    else:
+        last_daily, streak, balance = row
+
+    if last_daily == today_str:
+        return await message.answer("🎁 Вы уже получили свою награду сегодня! Приходите завтра. ✨")
+
+    if last_daily:
+        last_date = datetime.strptime(last_daily, '%Y-%m-%d')
+        delta = (now - last_date).days
+        if delta == 1:
+            streak = min(streak + 1, 30)
+        else:
+            streak = 1
+    else:
+        streak = 1
+        
+    reward = 50 + (streak * 10)
+    
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute(
+            'UPDATE users_stats SET balance = balance + ?, last_daily = ?, daily_streak = ? WHERE user_id = ?',
+            (reward, today_str, streak, user_id)
+        )
+        await db.commit()
+        
+    streak_text = f"\n🔥 Стрик: <b>{streak}</b> дн." if streak > 1 else ""
+    await message.answer(
+        f"🎁 <b>Ежедневная награда!</b>\n\n"
+        f"Вы получили <b>{reward}</b> монет!\n"
+        f"Ваш баланс: <b>{balance + reward}</b> монет.{streak_text}\n\n"
+        f"<i>Приходите завтра, чтобы увеличить награду!</i>",
+        parse_mode="HTML"
+    )
+
+@dp.message(F.text & F.text.regexp(REGEX_LOOTBOX))
+@dp.message(Command("lootbox"))
+async def cmd_lootbox(message: types.Message):
+    user_id = message.from_user.id
+    stats = await get_user_stats(user_id)
+    balance = stats[7]
+    
+    if balance < 300:
+        return await message.answer("❌ У вас недостаточно монет! Лутбокс стоит <b>300</b> монет.", parse_mode="HTML")
+        
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET balance = balance - 300 WHERE user_id = ?', (user_id,))
+        await db.commit()
+        
+    res = random.random()
+    if res < 0.5:
+        await message.answer("📦 <b>Лутбокс оказался пустым...</b> 😢\nПопробуйте в следующий раз!", parse_mode="HTML")
+    elif res < 0.8:
+        coins = random.randint(100, 500)
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (coins, user_id))
+            await db.commit()
+        await message.answer(f"📦 <b>Лутбокс!</b>\n\nВы нашли мешочек с монетами: <b>{coins}</b> монет! 💰", parse_mode="HTML")
+    elif res < 0.95:
+        badges = ["💎 Алмаз", "🔥 Огонь", "🌟 Звезда", "🍀 Клевер", "🧿 Амулет"]
+        badge = random.choice(badges)
+        await add_to_inventory(user_id, "badge", badge)
+        await message.answer(f"📦 <b>Лутбокс!</b>\n\nВы получили редкий значок: <b>{badge}</b>! 🏅", parse_mode="HTML")
+    else:
+        titles = ["Бог Рандома", "Счастливчик", "Охотник за Сокровищами", "Легенда Чатбота"]
+        title = random.choice(titles)
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('UPDATE users_stats SET custom_title = ? WHERE user_id = ?', (title, user_id))
+            await db.commit()
+        await message.answer(f"📦 <b>Лутбокс!</b>\n\nЭПИЧЕСУИЙ ВЫИГРЫШ! Вы получили уникальный титул: <b>{title}</b>! 👑", parse_mode="HTML")
+
+# --- Phase 3: Интерактивный гарем ---
+@dp.message(Command("feed"))
+async def cmd_feed_harem(message: types.Message):
+    if not message.reply_to_message:
+        return await message.answer("❌ Эту команду нужно использовать ответом на сообщение участника вашего гарема!")
+    
+    target_id = message.reply_to_message.from_user.id
+    owner_id = message.from_user.id
+    
+    harem = await get_user_harem(owner_id)
+    if not any(m[0] == target_id for m in harem):
+        return await message.answer("❌ Этот пользователь не в вашем гареме!")
+        
+    stats = await get_user_stats(owner_id)
+    if not stats or stats[7] < 10:
+        return await message.answer("❌ Нужно 10 монет, чтобы покормить участника гарема!")
+        
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET balance = balance - 10 WHERE user_id = ?', (owner_id,))
+        await db.commit()
+        
+    await update_loyalty_level(owner_id, target_id, 2)
+    await message.answer(f"🍏 Вы покормили {message.reply_to_message.from_user.first_name}! (+2 💖 к лояльности)")
+
+@dp.message(Command("pet"))
+async def cmd_pet_harem(message: types.Message):
+    if not message.reply_to_message:
+        return await message.answer("❌ Эту команду нужно использовать ответом на сообщение участника вашего гарема!")
+    
+    target_id = message.reply_to_message.from_user.id
+    owner_id = message.from_user.id
+    
+    harem = await get_user_harem(owner_id)
+    if not any(m[0] == target_id for m in harem):
+        return await message.answer("❌ Этот пользователь не в вашем гареме!")
+        
+    stats = await get_user_stats(owner_id)
+    if not stats or stats[7] < 5:
+        return await message.answer("❌ Нужно 5 монет, чтобы погладить участника гарема!")
+        
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET balance = balance - 5 WHERE user_id = ?', (owner_id,))
+        await db.commit()
+        
+    await update_loyalty_level(owner_id, target_id, 1)
+    await message.answer(f"👋 Вы погладили по голове {message.reply_to_message.from_user.first_name}! (+1 💖 к лояльности)")
+
 
 # ==============================================================================
 # БЛОК 6: ПРОФИЛИ И РП-КОМАНДЫ
-# ==============================================================================
-@dp.message(F.text & F.text.regexp(REGEX_PROFILE))
-async def cmd_profile(message: types.Message):
-    if await check_cd_and_warn(message, "profile", 5): return
-    user_id = message.from_user.id
-    name = message.from_user.first_name
+async def get_profile_content(chat_type: str, chat_id: int, user: types.User):
+    user_id = user.id
+    name = user.first_name
     
     partner_text = "Одинок(а) 💔"
-    if message.chat.type in ["group", "supergroup"]:
-        marriage = await get_user_marriage(message.chat.id, user_id)
+    if chat_type in ["group", "supergroup"]:
+        marriage = await get_user_marriage(chat_id, user_id)
         if marriage:
-            u1_id, u1_name, u2_id, u2_name, date = marriage
+            u1_id, u1_name, u2_id, u2_name, date, love_level = marriage
             partner_name = u2_name if u1_name == name else u1_name
-            partner_text = f"В браке с <b>{partner_name}</b> 💍 ({date})"
+            partner_text = f"В браке с <b>{partner_name}</b> 💍 ({date}, ❤️ Уровень: {love_level})"
     
-    hugs, kisses, bites, slaps, pats, m_count, s_count = await get_user_stats(user_id)
+    stats = await get_user_stats(user_id)
+    (hugs, kisses, bites, slaps, pats, m_count, s_count, balance, 
+     custom_title, is_hidden, casino_played, divorces_count, 
+     last_daily, daily_streak, referred_by, xp, level_db) = stats
+    
     total_rp = hugs + kisses + bites + slaps + pats
     
-    # Расчет уровня
-    level = int((m_count + s_count * 2) ** 0.5) + 1
+    # Расчет уровня (используем из БД, если там есть, иначе старый расчет)
+    level = level_db if level_db > 1 else (int((m_count + s_count * 2) ** 0.5) + 1)
+    
     if level < 5: rank = "Новичок 🍼"
     elif level < 15: rank = "Освоившийся 🥉"
     elif level < 30: rank = "Активный 🥈"
@@ -858,9 +1115,24 @@ async def cmd_profile(message: types.Message):
     elif level < 100: rank = "Легенда 👑"
     else: rank = "Божество 🌟"
     
+    # Ачивки
+    achievements = []
+    if slaps > 50: achievements.append("🥊")
+    if kisses > 100: achievements.append("💋")
+    if divorces_count >= 3: achievements.append("💔")
+    if casino_played > 50: achievements.append("🎰")
+    
+    title_str = f" [{custom_title}]" if custom_title else ""
+    achievements_str = " " + "".join(achievements) if achievements else ""
+    
+    ref_count = await get_referral_stats(user_id)
+    
     profile_text = (
-        f"👤 <b>Ваш профиль:</b> {name}\n"
+        f"👤 <b>Ваш профиль:</b> {name}{title_str}{achievements_str}\n"
         f"┣ 📊 <b>Уровень:</b> {level} ({rank})\n"
+        f"┣ ✨ <b>XP:</b> {xp}\n"
+        f"┣ 💰 <b>Монеты:</b> {balance}\n"
+        f"┣ 👥 <b>Рефералы:</b> {ref_count}\n"
         f"┗ 👩‍❤️‍👨 <b>Статус:</b> {partner_text}\n\n"
         f"💬 <b>Активность в чатах:</b>\n"
         f"┣ ✉️ Сообщения: <b>{m_count}</b>\n"
@@ -875,7 +1147,136 @@ async def cmd_profile(message: types.Message):
     
     builder = InlineKeyboardBuilder()
     builder.button(text="🔮 Узнать мнение Али о тебе", callback_data=f"roast_{user_id}")
-    await message.answer(profile_text, parse_mode="HTML", reply_markup=builder.as_markup())
+    builder.button(text="🎒 Инвентарь / Гарем", callback_data=f"inventory_{user_id}")
+    builder.adjust(1)
+    
+    return profile_text, builder.as_markup()
+
+@dp.message(F.text & F.text.regexp(REGEX_PROFILE))
+async def cmd_profile(message: types.Message):
+    if await check_cd_and_warn(message, "profile", 5): return
+    text, markup = await get_profile_content(message.chat.type, message.chat.id, message.from_user)
+    await message.answer(text, parse_mode="HTML", reply_markup=markup)
+
+@dp.message(F.text & F.text.regexp(REGEX_REF))
+async def cmd_ref(message: types.Message):
+    if message.chat.type != "private":
+        return await message.answer("❌ Реферальная система доступна только в личных сообщениях с ботом.")
+    
+    user_id = message.from_user.id
+    ref_count = await get_referral_stats(user_id)
+    
+    bot_info = await bot.get_me()
+    ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
+    
+    text = (
+        "🔗 <b>Реферальная система</b>\n\n"
+        f"Приглашайте друзей и получайте бонусы!\n"
+        f"─ Вы получите: <b>1000 монет</b> и <b>3 XP</b>\n"
+        f"─ Друг получит: <b>500 монет</b>\n\n"
+        f"👥 Ваших рефералов: <b>{ref_count}</b>\n\n"
+        f"📍 Ваша ссылка:\n<code>{ref_link}</code>"
+    )
+    await message.answer(text, parse_mode="HTML")
+
+@dp.message(F.text & F.text.regexp(REGEX_ROB))
+async def cmd_rob(message: types.Message):
+    if not message.reply_to_message:
+        return await message.answer("❌ <b>Ошибка:</b> Эту команду нужно использовать ответом на сообщение жертвы!", parse_mode="HTML")
+        
+    target = message.reply_to_message.from_user
+    initiator = message.from_user
+    
+    if target.id == initiator.id:
+        return await message.answer("🚷 Вы не можете ограбить самого себя!")
+    if target.is_bot:
+        return await message.answer("🤖 Роботы не носят с собой кошельки!")
+        
+    if await check_cd_and_warn(message, "rob", 3600): return
+    
+    target_stats = await get_user_stats(target.id)
+    target_balance = target_stats[7]
+    
+    if target_balance <= 0:
+        return await message.answer(f"📦 У @{target.username} совсем пусто в карманах... Нечего красть!")
+        
+    # Шанс 30%
+    if random.random() < 0.30:
+        amount = int(target_balance * 0.10)
+        if amount < 1: amount = 1
+        
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('UPDATE users_stats SET balance = balance - ? WHERE user_id = ?', (amount, target.id))
+            await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (amount, initiator.id))
+            await db.commit()
+            
+        await message.answer(
+            f"🥷 <b>Успешная кража!</b>\n"
+            f"Вы незаметно вытащили <b>{amount} монет</b> из кошелька @{target.username}.",
+            parse_mode="HTML"
+        )
+    else:
+        # Провал - штраф 100 монет
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('UPDATE users_stats SET balance = balance - 100 WHERE user_id = ?', (initiator.id,))
+            await db.commit()
+            
+        await message.answer(
+            f"🚨 <b>Провал!</b>\n"
+            f"Вас поймала <b>Аля</b> на месте преступления! За нарушение порядка вы оштрафованы на <b>100 монет</b>.",
+            parse_mode="HTML"
+        )
+
+@dp.callback_query(F.data.startswith("back_to_profile_"))
+async def callback_back_to_profile(callback: types.CallbackQuery):
+    target_user_id = int(callback.data.split("_")[3])
+    if callback.from_user.id != target_user_id:
+        return await callback.answer("Это не ваш профиль!", show_alert=True)
+    text, markup = await get_profile_content(callback.message.chat.type, callback.message.chat.id, callback.from_user)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+
+@dp.callback_query(F.data.startswith("inventory_"))
+async def callback_inventory(callback: types.CallbackQuery):
+    target_user_id = int(callback.data.split("_")[1])
+    if callback.from_user.id != target_user_id:
+        return await callback.answer("Вы можете смотреть только свой инвентарь!", show_alert=True)
+    stats = await get_user_stats(target_user_id)
+    custom_title = stats[8]
+    
+    items = []
+    if custom_title:
+        items.append(f"👑 Кастомный титул: <b>{custom_title}</b>")
+        
+    db_items = await get_user_inventory(target_user_id)
+    for itype, idata in db_items:
+        if itype == "badge":
+            items.append(f"🏅 Значок: <b>{idata}</b>")
+        else:
+            items.append(f"📦 <b>{idata}</b>")
+        
+    if not items:
+        inv_text = "🎒 В вашем инвентаре пока пусто..."
+    else:
+        inv_text = "🎒 <b>Ваш инвентарь:</b>\n" + "\n".join(f"┣ {item}" for item in items[:-1])
+        if len(items) > 1:
+            inv_text += f"\n┗ {items[-1]}"
+        elif len(items) == 1:
+            inv_text += f"\n┗ {items[0]}"
+    harem = await get_user_harem(target_user_id)
+    if not harem:
+        harem_text = "🌸 <b>Гарем:</b>\nПока никого нет... 💔"
+    else:
+        harem_members = []
+        for i, (m_id, m_name, loyalty) in enumerate(harem, 1):
+            harem_members.append(f"{i}. {m_name} (💖 Lvl: {loyalty})")
+        harem_text = "🌸 <b>Ваш гарем:</b>\n" + "\n".join(harem_members)
+    
+    text = f"{inv_text}\n\n{harem_text}\n\n💡 <i>Чтобы покормить или погладить участника гарема, используйте /feed или /pet ответом на его сообщение!</i>"
+    
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔙 Назад в профиль", callback_data=f"back_to_profile_{target_user_id}")
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data.startswith("roast_"))
 async def callback_roast_profile(callback: types.CallbackQuery):
@@ -889,7 +1290,7 @@ async def callback_roast_profile(callback: types.CallbackQuery):
     wait_msg = await callback.message.answer("<i>Аля изучает твое досье...</i>", parse_mode="HTML")
     
     name = callback.from_user.first_name
-    hugs, kisses, bites, slaps, pats, m_count, s_count = await get_user_stats(target_user_id)
+    hugs, kisses, bites, slaps, pats, m_count, s_count, balance, custom_title, is_hidden, casino_played, divorces_count = await get_user_stats(target_user_id)
     
     partner_text = "Одинок"
     if callback.message.chat.type in ["group", "supergroup"]:
@@ -913,7 +1314,44 @@ async def callback_roast_profile(callback: types.CallbackQuery):
 
 @dp.message(F.text & F.text.regexp(REGEX_STATS))
 async def cmd_stats(message: types.Message):
-    await cmd_profile(message)
+    if message.chat.type == "private":
+        return await message.answer("Статистика чата доступна только в группах.")
+    if await check_cd_and_warn(message, "stats", 10): return
+    
+    async with aiosqlite.connect('manga.db') as db:
+        # Берем с запасом 100 человек, чтобы отфильтровать только тех, кто в чате
+        async with db.execute('SELECT user_id, messages_count FROM users_stats ORDER BY messages_count DESC LIMIT 100') as cursor:
+            top_msg = await cursor.fetchall()
+            
+        async with db.execute('SELECT user_id, (hugs + kisses + bites + slaps + pats) as rp_total FROM users_stats ORDER BY rp_total DESC LIMIT 100') as cursor:
+            top_rp = await cursor.fetchall()
+            
+    # Собираем данные с фильтрацией по текущему чату
+    async def format_top(rows, unit, emoji_badge):
+        res = []
+        rank = 1
+        for uid, count in rows:
+            if count == 0: continue
+            if rank > 5: break
+            try:
+                chat_member = await bot.get_chat_member(message.chat.id, uid)
+                if chat_member.status in ["left", "kicked", "banned"]:
+                    continue
+                name = chat_member.user.first_name if chat_member.user else f"ID: {uid}"
+            except Exception:
+                continue
+            
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+            medal = medals.get(rank, "🏅")
+            res.append(f"{medal} <b>{name}</b> — {count} {unit} {emoji_badge}")
+            rank += 1
+        return "\n".join(res) if res else "<i>Пока пусто...</i>"
+
+    top_msg_text = await format_top(top_msg, "сообщ.", "✉️")
+    top_rp_text = await format_top(top_rp, "РП-действий", "💞")
+    
+    text = f"📊 <b>Статистика чата:</b>\n\n🗣 <b>Топ болтунов:</b>\n{top_msg_text}\n\n🎭 <b>Самые любвеобильные:</b>\n{top_rp_text}"
+    await message.answer(text, parse_mode="HTML")
 
 # РП команды теперь в handlers/rp.py
 
@@ -979,13 +1417,127 @@ async def process_divorce(message: types.Message):
     if message.chat.type == "private": return
     if await check_cd_and_warn(message, "divorce", 10): return
     
-    if not await get_user_marriage(message.chat.id, message.from_user.id):
+    marriage = await get_user_marriage(message.chat.id, message.from_user.id)
+    if not marriage:
         return await temp_reply(message, "Вы не состоите в браке в этой беседе.")
         
+    wait_msg = await message.answer("<i>Аля анализирует ситуацию...</i>", parse_mode="HTML")
+    
+    u1_name, u2_name = marriage[2], marriage[4]
+    partner_name = u2_name if marriage[0] == message.from_user.id else u1_name
+    initiator_name = message.from_user.first_name
+    
+    system_prompt = (
+        "Ты Аля (из аниме Roshidere). Цундере, которая управляет браками в чате. "
+        f"Пользователь {initiator_name} решил развестись с {partner_name}. "
+        "Прокомментируй это в стиле цундере (едким комментарием, можно с долей сарказма или осуждения) "
+        "и в конце спроси, уверен(а) ли он(а)."
+    )
+    
+    try:
+        response = await ask_groq("Прокомментируй развод", system_prompt)
+    except Exception:
+        response = f"Ты действительно хочешь развестись с {partner_name}? Подумай хорошенько, бака!"
+        
+    await wait_msg.delete()
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="✅ Да, развестись", callback_data=f"divorce_yes:{message.from_user.id}")],
+        [types.InlineKeyboardButton(text="❌ Передумал(а)", callback_data=f"divorce_no:{message.from_user.id}")]
+    ])
+    
+    await message.answer(f"🌸 <b>Аля:</b>\n{response}", parse_mode="HTML", reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("divorce_"))
+async def handle_divorce_cb(callback: types.CallbackQuery):
+    action, uid = callback.data.split(":")
+    if callback.from_user.id != int(uid):
+        return await callback.answer("Это не ваш запрос на развод!", show_alert=True)
+        
+    await callback.message.edit_reply_markup(reply_markup=None)
+    
+    if action == "divorce_no":
+        return await callback.message.answer("<i>Брак спасен! (пока что...)</i>", parse_mode="HTML")
+        
     async with aiosqlite.connect('manga.db') as db:
-        await db.execute('DELETE FROM marriages WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)', (message.chat.id, message.from_user.id, message.from_user.id))
+        # Get users in the marriage to update their divorce count
+        async with db.execute('SELECT user1_id, user2_id FROM marriages WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)', 
+                         (callback.message.chat.id, callback.from_user.id, callback.from_user.id)) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                u1, u2 = row
+                await db.execute('UPDATE users_stats SET divorces_count = divorces_count + 1 WHERE user_id IN (?, ?)', (u1, u2))
+        
+        await db.execute('DELETE FROM marriages WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)', 
+                         (callback.message.chat.id, callback.from_user.id, callback.from_user.id))
         await db.commit()
-    await message.answer("💔 Вы успешно расторгли брак.")
+    await callback.message.answer("💔 Вы успешно расторгли брак.")
+
+# ==============================================================================
+# БЛОК 7.1: ГАРЕМ
+# ==============================================================================
+@dp.message(F.text & F.text.regexp(REGEX_HAREM_ADD))
+async def propose_harem(message: types.Message):
+    if await check_cd_and_warn(message, "harem_add", 5): return
+    if not message.reply_to_message: return await temp_reply(message, "Ответьте на сообщение человека!")
+        
+    initiator, target = message.from_user, message.reply_to_message.from_user
+    if target.id == initiator.id: return await temp_reply(message, "Нельзя добавить себя в свой гарем!")
+    if target.is_bot: return await temp_reply(message, "С ботами нельзя!")
+
+    harem = await get_user_harem(initiator.id)
+    if any(m[0] == target.id for m in harem):
+        return await temp_reply(message, "Этот пользователь уже в вашем гареме!")
+
+    HAREM_PROPOSALS[f"{initiator.id}_{target.id}"] = f"@{initiator.username}" if initiator.username else initiator.first_name
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="😈 Согласиться", callback_data=f"harem_yes_{initiator.id}_{target.id}")
+    builder.button(text="🙅 Отказать", callback_data=f"harem_no_{initiator.id}_{target.id}")
+    await message.answer(f"👑 {target.mention_html()}, {initiator.mention_html()} предлагает тебе вступить в его/её гарем!\nЧто ответишь?", reply_markup=builder.as_markup(), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("harem_"))
+async def process_harem_callback(callback: types.CallbackQuery):
+    parts = callback.data.split("_")
+    if len(parts) == 4:
+        _, action, init_id, targ_id = parts
+    else: return
+    
+    if str(callback.from_user.id) != targ_id: return await callback.answer("Это не для вас!", show_alert=True)
+    if action == "no": return await callback.message.edit_text(f"🙅 {callback.from_user.mention_html()} отверг(ла) предложение вступить в гарем.", parse_mode="HTML")
+        
+    harem = await get_user_harem(int(init_id))
+    if any(m[0] == int(targ_id) for m in harem):
+        return await callback.message.edit_text("Пользователь уже в гареме!")
+
+    init_name_cached = HAREM_PROPOSALS.pop(f"{init_id}_{targ_id}", None)
+    if init_name_cached:
+        init_name = init_name_cached
+    else:
+        try:
+            chat_member = await bot.get_chat_member(callback.message.chat.id, int(init_id))
+            init_name = f"@{chat_member.user.username}" if chat_member.user.username else chat_member.user.first_name
+        except Exception:
+            init_name = f'<a href="tg://user?id={init_id}">Пользователь</a>'
+            
+    targ_user = callback.from_user
+    targ_name = f"@{targ_user.username}" if targ_user.username else targ_user.first_name
+        
+    await add_to_harem(int(init_id), int(targ_id), targ_name)
+    await callback.message.edit_text(f"🎉 <b>Новое пополнение гарема!</b>\n\nТеперь {targ_name} принадлежит {init_name} 👑", parse_mode="HTML")
+
+@dp.message(F.text & F.text.regexp(REGEX_HAREM_REMOVE))
+async def remove_harem_member(message: types.Message):
+    if await check_cd_and_warn(message, "harem_remove", 5): return
+    if not message.reply_to_message: return await temp_reply(message, "Ответьте на сообщение человека!")
+    
+    initiator, target = message.from_user, message.reply_to_message.from_user
+    harem = await get_user_harem(initiator.id)
+    if not any(m[0] == target.id for m in harem):
+        return await temp_reply(message, "Этого пользователя нет в вашем гареме!")
+        
+    await remove_from_harem(initiator.id, target.id)
+    await message.answer(f"🗑 {target.mention_html()} был(а) изгнан(а) из вашего гарема!")
 
 @dp.message(F.text & F.text.regexp(REGEX_MARRIAGES))
 async def list_marriages(message: types.Message):
@@ -1058,6 +1610,284 @@ async def cmd_coin(message: types.Message):
     coin = random.choice(["Орел", "Решка"])
     await message.answer(f"🪙 Выпало: <b>{coin}</b>", parse_mode="HTML")
 
+# ==============================================================================
+# БЛОК: ИИ-ИГРЫ И ШИППЕРИНГ
+# ==============================================================================
+BOTTLE_GAMES = {}
+
+@dp.message(F.text & F.text.regexp(REGEX_BOTTLE))
+async def cmd_bottle(message: types.Message):
+    if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
+    if await check_cd_and_warn(message, "bottle", 30): return
+    
+    chat_id = message.chat.id
+    if chat_id in BOTTLE_GAMES:
+        return await temp_reply(message, "В этой беседе уже идет сбор на бутылочку!")
+        
+    BOTTLE_GAMES[chat_id] = {
+        "participants": {message.from_user.id: message.from_user.first_name},
+        "msg_id": None
+    }
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🏃 Участников: 1", callback_data="bottle_join"),
+         types.InlineKeyboardButton(text="Крутить", callback_data="bottle_spin")]
+    ])
+    
+    msg = await message.answer(
+        "🍾 <b>Игра в Бутылочку!</b>\n\nПрисоединяйтесь к игре! Как только наберется народ, жмите «Крутить».",
+        parse_mode="HTML", reply_markup=kb
+    )
+    BOTTLE_GAMES[chat_id]["msg_id"] = msg.message_id
+
+@dp.callback_query(F.data == "bottle_join")
+async def bottle_join(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    if chat_id not in BOTTLE_GAMES:
+        return await callback.answer("Игра уже закончилась или не начиналась.", show_alert=True)
+        
+    game = BOTTLE_GAMES[chat_id]
+    uid = callback.from_user.id
+    if uid in game["participants"]:
+        return await callback.answer("Вы уже в игре!", show_alert=True)
+        
+    game["participants"][uid] = callback.from_user.first_name
+    count = len(game["participants"])
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text=f"🏃 Участников: {count}", callback_data="bottle_join"),
+         types.InlineKeyboardButton(text="Крутить", callback_data="bottle_spin")]
+    ])
+    try:
+        await callback.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+    await callback.answer("Вы присоединились!")
+
+@dp.callback_query(F.data == "bottle_spin")
+async def bottle_spin(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    if chat_id not in BOTTLE_GAMES:
+        return await callback.answer("Игра не найдена.", show_alert=True)
+        
+    game = BOTTLE_GAMES[chat_id]
+    participants = game["participants"]
+    
+    if len(participants) < 2:
+        return await callback.answer("Для игры нужно минимум 2 человека!", show_alert=True)
+        
+    del BOTTLE_GAMES[chat_id]
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    
+    p_ids = list(participants.keys())
+    p1 = random.choice(p_ids)
+    p_ids.remove(p1)
+    p2 = random.choice(p_ids)
+    
+    n1, n2 = participants[p1], participants[p2]
+    
+    wait_msg = await callback.message.answer(f"🍾 Бутылочка крутится... выпадают <b>{n1}</b> и <b>{n2}</b>!\n<i>Аля придумывает фант...</i>", parse_mode="HTML")
+    
+    system_prompt = (
+        "Ты Аля (из аниме Roshidere). Цундере. Придумай одно смешное или романтичное задание-фант "
+        f"для двоих игроков: {n1} и {n2}. Задание должно быть в рамках приличия, но с перчинкой. "
+        "Максимум 2-3 предложения. Можешь прокомментировать это как цундере."
+    )
+    
+    try:
+        task = await ask_groq("Придумай фант для бутылочки", system_prompt)
+    except Exception:
+        task = f"Обнимите друг друга, баки! И не думайте, что я хочу на это смотреть!"
+        
+    await wait_msg.delete()
+    await callback.message.answer(f"🍾 <b>Бутылочка!</b>\n\nПара: <a href='tg://user?id={p1}'>{n1}</a> и <a href='tg://user?id={p2}'>{n2}</a>\n\n🌸 <b>Задание от Али:</b>\n{task}", parse_mode="HTML")
+
+@dp.message(F.text & F.text.regexp(REGEX_SHIP))
+async def cmd_ship(message: types.Message):
+    if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
+    if await check_cd_and_warn(message, "ship", 60): return
+    
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT user_id, first_name FROM users_stats WHERE chat_id = ? ORDER BY RANDOM() LIMIT 2', (message.chat.id,)) as cursor:
+            participants = await cursor.fetchall()
+            
+    if len(participants) < 2:
+        return await message.answer("В этой беседе слишком мало людей для шипперинга!")
+        
+    p1_id, p1_name = participants[0]
+    p2_id, p2_name = participants[1]
+    
+    wait_msg = await message.answer(f"💞 <i>Аля анализирует совместимость {p1_name} и {p2_name}...</i>", parse_mode="HTML")
+    
+    compatibility = random.randint(0, 100)
+    
+    system_prompt = (
+        "Ты Аля (аниме Roshidere). Твоя задача — сгенерировать короткую, забавную или милую "
+        f"историю любви (шипперинг) между пользователями '{p1_name}' и '{p2_name}'. "
+        f"Их процент совместимости — {compatibility}%. "
+        "Опиши, как они могли бы встретиться или почему они (не) подходят друг другу, в стиле цундере."
+    )
+    
+    try:
+        story = await ask_groq("Расскажи историю любви", system_prompt)
+    except Exception:
+        story = "Эти баки настолько подходят друг другу, что я даже не хочу об этом говорить!"
+        
+    await wait_msg.delete()
+    text = (
+        f"💘 <b>Шипперинг!</b> 💘\n\n"
+        f"Пара: <a href='tg://user?id={p1_id}'>{p1_name}</a> x <a href='tg://user?id={p2_id}'>{p2_name}</a>\n"
+        f"Совместимость: <b>{compatibility}%</b>\n\n"
+        f"🌸 <b>Прогноз от Али:</b>\n{story}"
+    )
+    await message.answer(text, parse_mode="HTML")
+
+# ==============================================================================
+# БЛОК: ЭКОНОМИКА И МАГАЗИН
+# ==============================================================================
+
+@dp.message(F.text & F.text.regexp(REGEX_SHOP))
+async def cmd_shop(message: types.Message):
+    if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
+    
+    stats = await get_user_stats(message.from_user.id)
+    balance = stats[7] if stats else 0
+    
+    text = (
+        f"🛒 <b>Магазин Аля-бота</b>\n\n"
+        f"У вас <b>{balance}</b> монет.\n\n"
+        f"Доступные товары:"
+    )
+    
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🎁 Тайный Лутбокс (300 монет)", callback_data="buy_lootbox")],
+        [types.InlineKeyboardButton(text="👑 Кастомный титул (500 монет)", callback_data="buy_title")],
+        [types.InlineKeyboardButton(text="👻 Скрыть стату в топе (1000 монет)", callback_data="buy_hidden")],
+        [types.InlineKeyboardButton(text="🎖️ Значок VIP (2000 монет)", callback_data="buy_badge_vip")]
+    ])
+    
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+@dp.callback_query(F.data == "buy_lootbox")
+async def shop_buy_lootbox_cb(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    stats = await get_user_stats(user_id)
+    balance = stats[7] if stats else 0
+    
+    if balance < 300:
+        return await callback.answer("Недостаточно монет! Нужно 300.", show_alert=True)
+        
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET balance = balance - 300 WHERE user_id = ?', (user_id,))
+        await db.commit()
+    
+    # Логика Готчи
+    rnd = random.random()
+    if rnd < 0.50: # 50% нифига
+        res_text = "💨 К сожалению, лутбокс оказался пустым... Повезет в следующий раз!"
+        res_emoji = "😢"
+    elif rnd < 0.80: # 30% монеты (возврат или бонус)
+        reward = random.randint(50, 600)
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (reward, user_id))
+            await db.commit()
+        res_text = f"💰 Внутри вы нашли мешочек с монетами: <b>{reward}</b>!"
+        res_emoji = "🤑"
+    elif rnd < 0.95: # 15% значок
+        badges = ["🍀 Счастливчик", "📦 Коллекционер", "🦄 Редкий зверь", "🔮 Мистик"]
+        badge = random.choice(badges)
+        await add_to_inventory(user_id, "badge", badge)
+        res_text = f"🏅 Ого! Вам выпал редкий значок: <b>{badge}</b>!"
+        res_emoji = "✨"
+    else: # 5% Титул
+        titles = ["🎲 Мастер Азарта", "🎩 Джентльмен", "🦊 Хитрый Лис", "🌟 Сияющий"]
+        title = random.choice(titles)
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('UPDATE users_stats SET custom_title = ? WHERE user_id = ?', (title, user_id))
+            await db.commit()
+        res_text = f"👑 НЕВЕРОЯТНО! Вы получили уникальный титул: <b>{title}</b>!"
+        res_emoji = "🔥"
+
+    await callback.message.edit_text(f"{res_emoji} <b>Результат открытия лутбокса:</b>\n\n{res_text}", parse_mode="HTML", reply_markup=None)
+
+@dp.callback_query(F.data == "buy_title")
+async def shop_buy_title_cb(callback: types.CallbackQuery, state: FSMContext):
+    stats = await get_user_stats(callback.from_user.id)
+    balance = stats[7] if stats else 0
+    if balance < 500:
+        return await callback.answer("Недостаточно монет! Нужно 500.", show_alert=True)
+        
+    await state.set_state(ShopBuyTitle.waiting_for_title)
+    await state.update_data(chat_id=callback.message.chat.id)
+    await callback.message.edit_text("👑 Введите ваш новый титул (до 20 символов):", reply_markup=None)
+
+@dp.message(ShopBuyTitle.waiting_for_title)
+async def shop_process_title(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    chat_id = data.get("chat_id")
+    if chat_id != message.chat.id:
+        return
+        
+    title = message.text.strip()
+    if len(title) > 20:
+        return await message.answer("Слишком длинный титул! Максимум 20 символов. Попробуйте снова.")
+        
+    stats = await get_user_stats(message.from_user.id)
+    balance = stats[7] if stats else 0
+    if balance < 500:
+        await state.clear()
+        return await message.answer("Пока вы думали, у вас закончились монеты...")
+        
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET balance = balance - 500, custom_title = ? WHERE user_id = ?', (title, message.from_user.id))
+        await db.commit()
+        
+    await state.clear()
+    await message.answer(f"🎉 Вы успешно купили титул <b>{title}</b>!", parse_mode="HTML")
+
+@dp.callback_query(F.data == "buy_hidden")
+async def shop_buy_hidden_cb(callback: types.CallbackQuery):
+    stats = await get_user_stats(callback.from_user.id)
+    balance = stats[7] if stats else 0
+    if balance < 1000:
+        return await callback.answer("Недостаточно монет! Нужно 1000.", show_alert=True)
+        
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET balance = balance - 1000, is_hidden = 1 WHERE user_id = ?', (callback.from_user.id,))
+        await db.commit()
+        
+    await callback.message.edit_text("👻 Ваша статистика теперь скрыта из глобального топа!", reply_markup=None)
+
+@dp.callback_query(F.data == "buy_badge_vip")
+async def shop_buy_badge_vip_cb(callback: types.CallbackQuery):
+    stats = await get_user_stats(callback.from_user.id)
+    balance = stats[7] if stats else 0
+    if balance < 2000:
+        return await callback.answer("Недостаточно монет! Нужно 2000.", show_alert=True)
+        
+    # Check if they already have it
+    inv = await get_user_inventory(callback.from_user.id, item_type="badge")
+    if any(i[1] == "VIP 🌟" for i in inv):
+        return await callback.answer("У вас уже есть этот значок!", show_alert=True)
+        
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET balance = balance - 2000 WHERE user_id = ?', (callback.from_user.id,))
+        await db.commit()
+        
+    await add_to_inventory(callback.from_user.id, "badge", "VIP 🌟")
+    await callback.answer("Вы успешно приобрели значок VIP 🌟!", show_alert=True)
+    
+    # Update the shop message to reflect new balance
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="👑 Кастомный титул (500 монет)", callback_data="buy_title")],
+        [types.InlineKeyboardButton(text="👻 Скрыть стату в топе (1000 монет)", callback_data="buy_hidden")],
+        [types.InlineKeyboardButton(text="🎖️ Значок VIP (2000 монет)", callback_data="buy_badge_vip")]
+    ])
+    await callback.message.edit_text(f"🛒 <b>Магазин Аля-бота</b>\n\nУ вас <b>{balance-2000}</b> монет.\n\nДоступные товары:", parse_mode="HTML", reply_markup=kb)
+
 REGEX_DICE_GAMES = re.compile(r'(?i)^[/*\s]*(кости|кубик|дартс|баскетбол|футбол|казино|слоты|слот|боулинг)')
 
 @dp.message(F.text & F.text.regexp(REGEX_DICE_GAMES))
@@ -1072,6 +1902,49 @@ async def cmd_dice_games(message: types.Message):
     elif "казино" in text or "слот" in text: emoji = "🎰"
     elif "боулинг" in text: emoji = "🎳"
     
+    if emoji == "🎰":
+        match = REGEX_SLOT.search(message.text)
+        bet_str = match.group(2) if match else None
+        
+        if not bet_str:
+            return await message.answer("🎰 <b>Формат:</b> /казино [ставка]\n<i>Пример: /казино 100</i>", parse_mode="HTML")
+            
+        try:
+            bet = int(bet_str)
+            if bet <= 0: return await message.answer("❌ Ставка должна быть больше 0!")
+        except ValueError:
+            return await message.answer("❌ Введите корректное число для ставки!")
+
+        user_id = message.from_user.id
+        stats = await get_user_stats(user_id)
+        balance = stats[7]
+        
+        if balance < bet:
+            return await message.answer(f"❌ <b>Недостаточно средств!</b>\nВаш баланс: {balance} монет.", parse_mode="HTML")
+            
+        # Списываем ставку
+        async with aiosqlite.connect('manga.db') as db:
+            await db.execute('UPDATE users_stats SET balance = balance - ?, casino_played = casino_played + 1 WHERE user_id = ?', (bet, user_id))
+            await db.commit()
+            
+        msg = await message.answer_dice(emoji="🎰")
+        await asyncio.sleep(2)
+        
+        val = msg.dice.value
+        win = 0
+        if val == 64: win = bet * 50 # 777
+        elif val == 43: win = bet * 20 # Лимоны
+        elif val == 22: win = bet * 10 # Виноград
+        elif val == 1: win = bet * 10 # BAR
+        
+        if win > 0:
+            async with aiosqlite.connect('manga.db') as db:
+                await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (win, user_id))
+                await db.commit()
+            return await message.answer(f"🎉 <b>ДЖЕКПОТ!</b>\nВы выиграли <b>{win}</b> монет! 💰", parse_mode="HTML")
+        else:
+            return await message.answer(f"💨 <b>Вы проиграли ставку...</b>\nУдача обязательно вернется! 🎰", parse_mode="HTML")
+            
     await message.answer_dice(emoji=emoji)
 
 @dp.message(F.text & F.text.regexp(REGEX_RPS))
@@ -1189,11 +2062,11 @@ def get_ranobe_chapters_menu(lang: str, chapters: list, page: int = 0):
 @dp.callback_query(F.data == "read_langs")
 async def process_read_langs(callback: types.CallbackQuery):
     try:
-        await callback.message.edit_text("🌐 Выберите язык для чтения:", reply_markup=get_langs_menu("readlang"))
+        await callback.message.edit_text("🌐 <b>Каталог Манги</b>\nВыберите раздел для чтения:", parse_mode="HTML", reply_markup=get_langs_menu("readlang"))
     except Exception:
         try: await callback.message.delete()
         except Exception: pass
-        await callback.message.answer("🌐 Выберите язык для чтения:", reply_markup=get_langs_menu("readlang"))
+        await callback.message.answer("🌐 <b>Каталог Манги</b>\nВыберите раздел для чтения:", parse_mode="HTML", reply_markup=get_langs_menu("readlang"))
 
 @dp.callback_query(F.data.startswith("readlang_"))
 async def process_read_chapters(callback: types.CallbackQuery):
@@ -1204,11 +2077,11 @@ async def process_read_chapters(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "read_ranobe_langs")
 async def process_read_ranobe_langs(callback: types.CallbackQuery):
     try:
-        await callback.message.edit_text("📖 Выберите ранобэ для чтения:", reply_markup=get_ranobe_langs_menu("readranobelang"))
+        await callback.message.edit_text("📖 <b>Каталог Ранобэ</b>\nВыберите тайтл или язык для чтения:", parse_mode="HTML", reply_markup=get_ranobe_langs_menu("readranobelang"))
     except Exception:
         try: await callback.message.delete()
         except Exception: pass
-        await callback.message.answer("📖 Выберите ранобэ для чтения:", reply_markup=get_ranobe_langs_menu("readranobelang"))
+        await callback.message.answer("📖 <b>Каталог Ранобэ</b>\nВыберите тайтл или язык для чтения:", parse_mode="HTML", reply_markup=get_ranobe_langs_menu("readranobelang"))
 
 @dp.callback_query(F.data.startswith("readranobelang_"))
 async def process_read_ranobe_chapters(callback: types.CallbackQuery):
@@ -2378,11 +3251,17 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
     await message.answer(f"✅ {ct['emoji']} {ct['name']}: глава {chapter} ({id_label}) добавлена!\n🔗 Ссылка: {link}")
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="Да, разослать", callback_data="notify_yes")
-    builder.button(text="Нет", callback_data="notify_no")
+    builder.button(text="🔔 Разослать по закладкам", callback_data="notify_bookmarks")
+    builder.button(text="📢 Разослать ВСЕМ", callback_data="notify_all")
+    builder.button(text="❌ Отмена", callback_data="notify_no")
+    builder.adjust(1)
+    
     await state.set_state(NotifyUsers.waiting_for_decision)
-    await state.update_data(notify_text=f"{ct['emoji']} <b>Вышла новая глава {ct['name']}!</b>\n{id_label}, Глава {chapter}\n🔗 {link}")
-    await message.answer("Отправить уведомление всем пользователям?", reply_markup=builder.as_markup())
+    await state.update_data(
+        notify_text=f"{ct['emoji']} <b>Вышла новая глава {ct['name']}!</b>\n{id_label}, Глава {chapter}\n🔗 {link}",
+        series_id=str(content_id)
+    )
+    await message.answer("Выберите способ уведомления:", reply_markup=builder.as_markup())
 
 # --- УВЕДОМЛЕНИЯ ---
 @dp.callback_query(NotifyUsers.waiting_for_decision, F.data.startswith("notify_"))
@@ -2395,9 +3274,15 @@ async def process_notification_decision(callback: types.CallbackQuery, state: FS
     if decision == "no":
         return await callback.message.edit_text("Уведомление отменено.")
         
-    await callback.message.edit_text("⏳ <i>Начинаю массовую рассылку...</i>", parse_mode="HTML")
+    series_id = data.get("series_id")
     
-    users = await get_all_users()
+    if decision == "bookmarks":
+        await callback.message.edit_text("⏳ <i>Рассылаю уведомления читателям этого тайтла...</i>", parse_mode="HTML")
+        users = await get_users_with_bookmark(series_id)
+    else:
+        await callback.message.edit_text("⏳ <i>Начинаю массовую рассылку ВСЕМ пользователям...</i>", parse_mode="HTML")
+        users = await get_all_users()
+        
     count = 0
     for user_id in users:
         try:
@@ -2407,7 +3292,7 @@ async def process_notification_decision(callback: types.CallbackQuery, state: FS
         except Exception:
             pass
             
-    await callback.message.answer(f"✅ Рассылка завершена!\nСообщение получили <b>{count}</b> из <b>{len(users)}</b> пользователей.", parse_mode="HTML")
+    await callback.message.answer(f"✅ Рассылка завершена!\nСообщение получили <b>{count}</b> пользователей.", parse_mode="HTML")
 
 # --- УНИВЕРСАЛЬНОЕ УДАЛЕНИЕ КОНТЕНТА ---
 @dp.message(Command("delete_chapter"))
@@ -2513,7 +3398,16 @@ async def finish_art_upload(message: types.Message, state: FSMContext):
 async def cmd_suggest_art(message: types.Message, state: FSMContext):
     if await check_cd_and_warn(message, "suggest_art", 60): return
     await state.set_state(ArtSuggest.waiting_for_photo)
-    await message.answer("🖼 <b>Предложка артов</b>\nОтправьте <b>одну</b> фотографию (арт), которую хотите предложить. Она будет проверена администрацией.\n\n❗️ Требования:\n1. Рисовка приближена к аниме.\n2. Хорошее качество.\n3. Без лишнего текста.", parse_mode="HTML")
+    text = (
+        "🖼 <b>Предложка артов</b>\n\n"
+        "Отправьте <b>одну</b> красивую фотографию (арт), которую хотите предложить в нашу галерею.\n\n"
+        "❗️ <b>Требования:</b>\n"
+        "1. Рисовка качественная и приближена к аниме.\n"
+        "2. Без вотермарок на пол-экрана и лишнего текста.\n"
+        "3. Соответствие тематике Roshidere.\n\n"
+        "<i>Все арты проходят ручную проверку администрацией.</i>"
+    )
+    await message.answer(text, parse_mode="HTML")
 
 @dp.message(ArtSuggest.waiting_for_photo, F.photo)
 async def process_suggested_art(message: types.Message, state: FSMContext):
@@ -2606,13 +3500,45 @@ class StatsMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, types.Message) and event.from_user:
             user_id = event.from_user.id
+            chat_id = event.chat.id
+            is_group = event.chat.type in ["group", "supergroup"]
+            
+            # --- Логика дропов (Chat Drops) ---
+            if is_group and chat_id not in ACTIVE_DROPS:
+                if random.random() < 0.02: # 2% шанс на сообщение
+                    reward = random.randint(50, 200)
+                    ACTIVE_DROPS[chat_id] = reward
+                    
+                    kb = InlineKeyboardBuilder()
+                    kb.button(text="🎁 Забрать монеты!", callback_data="claim_drop")
+                    
+                    await event.answer(
+                        "💰 <b>ОЙ! В ЧАТЕ УПАЛ МЕШОК МОНЕТ!</b>\n"
+                        "Успей нажать на кнопку первым, чтобы забрать награду!",
+                        parse_mode="HTML",
+                        reply_markup=kb.as_markup()
+                    )
+            # ----------------------------------
+            
             try:
                 async with aiosqlite.connect('manga.db') as db:
                     await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
                     if getattr(event, 'sticker', None):
                         await db.execute('UPDATE users_stats SET stickers_count = stickers_count + 1 WHERE user_id = ?', (user_id,))
                     elif getattr(event, 'text', None) or getattr(event, 'caption', None):
-                        await db.execute('UPDATE users_stats SET messages_count = messages_count + 1 WHERE user_id = ?', (user_id,))
+                        await db.execute('UPDATE users_stats SET messages_count = messages_count + 1, balance = balance + 1, xp = xp + 1 WHERE user_id = ?', (user_id,))
+                        
+                        # --- Level-up System ---
+                        async with db.execute('SELECT xp, level FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
+                            res = await cursor.fetchone()
+                            if res:
+                                curr_xp, curr_level = res
+                                if curr_xp >= curr_level * 20:
+                                    new_level = curr_level + 1
+                                    await db.execute('UPDATE users_stats SET level = ?, balance = balance + 500 WHERE user_id = ?', (new_level, user_id))
+                                    user_name = event.from_user.first_name
+                                    await event.answer(f"🎉 <b>Поздравляем!</b> {user_name} повысил(а) свой уровень до <b>{new_level}</b>! Награда: 500 монет 💰", parse_mode="HTML")
+                        # -----------------------
                     await db.commit()
             except Exception as e:
                 logging.error(f"StatsMiddleware error: {e}")

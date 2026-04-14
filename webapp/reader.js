@@ -41,24 +41,24 @@ function renameItem(objId) {
 }
 
 async function resetCustomName(objId) {
-    if (!API_URL) return alert('Сброс доступен только через прямое подключение (не GitHub Pages).');
+    if (!API_URL) return showToast('Сброс доступен только через прямое подключение (не GitHub Pages).');
     if (!confirm(`Сбросить кастомное имя "${objId}" на дефолт?`)) return;
     try {
         const resp = await apiFetch(`${API_URL}/api/rename`, {
             method: 'DELETE',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ obj_id: objId })
         });
         const result = await resp.json();
         if (result.ok) {
             // Перезагружаем данные чтобы увидеть обновлённые имена
             await loadData();
-            alert('✅ Имя сброшено на дефолт.');
+            showToast('✅ Имя сброшено на дефолт.');
         } else {
-            alert('Ошибка: ' + (result.error || 'неизвестная'));
+            showToast('Ошибка: ' + (result.error || 'неизвестная'));
         }
     } catch (e) {
-        alert('Ошибка сети: ' + e.message);
+        showToast('Ошибка сети: ' + e.message);
     }
 }
 
@@ -102,12 +102,12 @@ function saveScrollPosition() {
     const pct = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
     localStorage.setItem(key, JSON.stringify({ pct, ts: Date.now() }));
     saveLastRead();
-    
+
     // Синхронизация с сервером
     if (API_URL && userId && currentSeries && currentVolume && currentChapters[currentChapterIdx]) {
         apiFetch(API_URL + '/api/progress', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 series_id: currentSeries.id,
                 volume_id: currentVolume.volume,
@@ -122,13 +122,13 @@ function restoreScrollPosition() {
     // 1. Пробуем серверную
     const chIdx = currentChapters[currentChapterIdx];
     if (!chIdx) return;
-    
+
     let pctToRestore = null;
     const serverBm = serverBookmarks.find(b => b.series_id === currentSeries.id);
     if (serverBm && String(serverBm.volume_id) === String(currentVolume.volume) && String(serverBm.chapter_key) === String(chIdx.chapter)) {
         pctToRestore = serverBm.scroll_pos;
     }
-    
+
     // 2. Иначе локальную
     if (pctToRestore === null) {
         const key = getScrollKey();
@@ -137,11 +137,11 @@ function restoreScrollPosition() {
             if (saved) pctToRestore = saved.pct;
         }
     }
-    
+
     if (pctToRestore === null) return;
     const el = document.getElementById('reader-content');
     if (!el) return;
-    
+
     setTimeout(() => {
         const maxScroll = el.scrollHeight - el.clientHeight;
         el.scrollTop = pctToRestore * maxScroll;
@@ -167,7 +167,7 @@ function saveLastRead() {
 function getLastRead(seriesId) {
     const all = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
     const local = all[seriesId];
-    
+
     const serverBm = serverBookmarks.find(b => String(b.series_id) === String(seriesId));
     if (serverBm) {
         return {
@@ -177,7 +177,7 @@ function getLastRead(seriesId) {
             isServer: true
         };
     }
-    
+
     return local || null;
 }
 
@@ -268,7 +268,7 @@ function showEmptyState() {
 
 function renderSeriesList() {
     const container = document.getElementById('series-list');
-    
+
     if (!allData.series || allData.series.length === 0) {
         showEmptyState();
         return;
@@ -280,7 +280,7 @@ function renderSeriesList() {
             return sum + v.chapters.filter(c => isRead(s.id, v.volume, c.chapter)).length;
         }, 0);
         const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
-        
+
         // Бейдж «Продолжить»
         const lastRead = getLastRead(s.id);
         let continueBadge = '';
@@ -293,12 +293,12 @@ function renderSeriesList() {
             <button class="admin-reset-btn" title="Сброс имени" onclick="resetCustomName('series_${s.id}'); event.stopPropagation();">&#8635;</button>
         ` : '';
         const customBadge = isAdminMode ? `<span class="custom-name-badge">серия</span>` : '';
-        
+
         // Cover image support (Batch 3)
-        const coverEl = s.cover_url 
+        const coverEl = s.cover_url
             ? `<img src="${s.cover_url}" class="series-cover-img" alt="${s.title}" loading="lazy">`
             : `<div class="series-icon">${['📖', '📕', '📗', '📘', '📙'][i % 5]}</div>`;
-        
+
         return `
         <div class="series-card" onclick="selectSeries('${s.id}')">
             ${coverEl}
@@ -315,10 +315,10 @@ function renderSeriesList() {
 function selectSeries(seriesId) {
     currentSeries = allData.series.find(s => s.id === seriesId);
     if (!currentSeries) return;
-    
+
     document.getElementById('chapters-title').textContent = currentSeries.title;
     renderVolumeTabs();
-    
+
     // Восстанавливаем последнюю читаемую главу или первый том
     const lastRead = getLastRead(seriesId);
     if (lastRead) {
@@ -329,22 +329,22 @@ function selectSeries(seriesId) {
             return;
         }
     }
-    
+
     if (currentSeries.volumes.length > 0) {
         selectVolume(currentSeries.volumes[0].volume);
     }
-    
+
     showScreen('chapters');
 }
 
 function renderVolumeTabs() {
     const tabs = document.getElementById('volume-tabs');
-    
+
     if (currentSeries.volumes.length <= 1) {
         tabs.style.display = 'none';
         return;
     }
-    
+
     tabs.style.display = 'flex';
     tabs.innerHTML = currentSeries.volumes.map(v => {
         const volName = v.custom_name || `Том ${v.volume}`;
@@ -363,18 +363,18 @@ function renderVolumeTabs() {
 function selectVolume(volNum) {
     currentVolume = currentSeries.volumes.find(v => v.volume === volNum);
     if (!currentVolume) return;
-    
+
     document.querySelectorAll('.vol-tab').forEach(t => {
         t.classList.toggle('active', parseInt(t.dataset.vol) === volNum);
     });
-    
+
     renderChaptersList();
 }
 
 function renderChaptersList() {
     const container = document.getElementById('chapters-list');
     currentChapters = currentVolume.chapters;
-    
+
     if (currentChapters.length === 0) {
         container.innerHTML = `
             <div class="empty-state">
@@ -384,11 +384,11 @@ function renderChaptersList() {
             </div>`;
         return;
     }
-    
+
     // Определяем последнюю читаемую главу для подсветки
     const lastRead = getLastRead(currentSeries.id);
     const lastChapter = lastRead?.volume === currentVolume.volume ? lastRead.chapter : null;
-    
+
     container.innerHTML = currentChapters.map((ch, idx) => {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
         const chapName = ch.custom_name || `Глава ${ch.chapter}`;
@@ -400,7 +400,7 @@ function renderChaptersList() {
         ` : '';
         const customBadge = (isAdminMode && hasCustom) ? '<span class="custom-name-badge">кастом</span>' : '';
         const isCurrent = lastChapter && String(ch.chapter) === String(lastChapter);
-        
+
         return `
         <div class="chapter-item ${readClass}${isCurrent ? ' current-chapter' : ''}" data-chapter-idx="${idx}" ${isAdminMode ? 'draggable="true"' : ''} onclick="openChapter(${idx})">
             ${isAdminMode ? '<div class="drag-handle" title="Перетащить">⠿</div>' : ''}
@@ -426,21 +426,21 @@ function renderChaptersList() {
 // ЧТЕНИЕ
 // ==========================================================================
 
-function openChapter(idx) {
+function openChapter(idx, usePrefetch = false) {
     currentChapterIdx = idx;
     const chapter = currentChapters[idx];
     if (!chapter) return;
-    
+
     document.getElementById('reader-title').textContent = chapter.custom_name || `Глава ${chapter.chapter}`;
     updateNavButtons();
     markAsRead(currentSeries.id, currentVolume.volume, chapter.chapter);
-    loadChapterContent(chapter);
-    
+    loadChapterContent(chapter, usePrefetch);
+
     initProgressBar();
     if (progressBarEl) progressBarEl.style.width = '0%';
-    
+
     showScreen('reader');
-    
+
     // Загружаем лайки и комментарии (для API)
     if (API_URL) {
         loadLikes();
@@ -451,20 +451,53 @@ function openChapter(idx) {
     }
 }
 
-function loadChapterContent(chapter) {
+// === Prefetch cache ===
+let prefetchedChapter = { idx: -1, html: null };
+
+function loadChapterContent(chapter, usePrefetch = false) {
     const container = document.getElementById('reader-text');
-    
+
+    // Check if we have prefetched content for this chapter
+    if (usePrefetch && prefetchedChapter.idx === currentChapterIdx && prefetchedChapter.html) {
+        renderLoadedContent(container, prefetchedChapter.html, chapter);
+        prefetchedChapter = { idx: -1, html: null };
+        return;
+    }
+
     let urlsToLoad = [];
     if (chapter.urls && chapter.urls.length > 0) {
-        urlsToLoad = chapter.urls;
+        urlsToLoad = [...chapter.urls];
     } else if (chapter.url) {
         urlsToLoad = [chapter.url];
     }
-    
+
+    // ★ ГОРЯЧИЙ ФИКС: Если есть Teletype — берём ТОЛЬКО его (убираем дубли Telegraph)
+    const teletypeUrls = urlsToLoad.filter(u => u.includes('teletype.in'));
+    if (teletypeUrls.length > 0) {
+        urlsToLoad = teletypeUrls;
+    }
+
     if (urlsToLoad.length > 0) {
-        container.innerHTML = `<div class="loading-spinner"><div class="spinner"></div><p>Загрузка...</p></div>`;
-        
+        // ★ Skeleton Loader
+        container.innerHTML = `
+            <div class="skeleton-loader">
+                <div class="skeleton-line" style="width:100%"></div>
+                <div class="skeleton-line" style="width:95%"></div>
+                <div class="skeleton-line" style="width:85%"></div>
+                <div class="skeleton-line" style="width:90%"></div>
+                <div class="skeleton-line" style="width:75%"></div>
+                <div class="skeleton-line" style="width:98%"></div>
+                <div class="skeleton-line" style="width:92%"></div>
+            </div>
+        `;
+
         const loadPromises = urlsToLoad.map(async (u) => {
+            // Teletype — используем iframe
+            if (u.includes('teletype.in')) {
+                const isDark = settings.theme === 'dark' || settings.theme === 'amoled';
+                const filterStyle = isDark ? 'filter: invert(1) hue-rotate(180deg);' : '';
+                return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;${filterStyle}" loading="lazy"></iframe>`;
+            }
             const telegraphMatch = u.match(/telegra\.ph\/(.+)/);
             if (telegraphMatch) {
                 try {
@@ -479,34 +512,51 @@ function loadChapterContent(chapter) {
             }
             return `<iframe src="${u}" frameborder="0" style="width:100%;min-height:80vh;border:none;border-radius:8px;margin-bottom:20px;"></iframe>`;
         });
-        
+
         Promise.all(loadPromises).then(results => {
-            container.innerHTML = results.join('');
-            
-            // Инициализируем Lightbox и ToC после загрузки контента
-            initLightbox();
-            buildToC();
-            
-            if (!container.innerHTML.includes('<iframe')) {
-                container.innerHTML += `
-                <div class="channel-banner">
-                    <div class="channel-content">
-                        <h3>🌸 Присоединяйся к нам!</h3>
-                        <p>Все свежие переводы, новости и общение — в нашем Telegram-канале.</p>
-                        <a href="https://t.me/alya_novel" target="_blank" class="channel-btn">
-                            Подписаться на канал
-                        </a>
-                    </div>
-                </div>`;
-            }
-            
-            // Восстанавливаем позицию скролла
-            restoreScrollPosition();
+            renderLoadedContent(container, results.join(''), chapter);
         });
     } else if (chapter.text) {
         const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
-        container.innerHTML = paragraphs;
-        
+        renderLoadedContent(container, paragraphs, chapter);
+    } else {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon">📄</div>
+                <h3>Контент недоступен</h3>
+                <p>Эта глава ещё не добавлена.</p>
+            </div>`;
+    }
+
+    document.getElementById('reader-content').scrollTop = 0;
+}
+
+function renderLoadedContent(container, html, chapter) {
+    container.innerHTML = html;
+
+    // --- Расчет примерного времени чтения ---
+    const textContent = container.innerText;
+    onst wordCount = textContent.split(/\s+/).filter(w => w.length > 0).length;
+    if (wordCount > 50) {
+        const readingTimeMins = Math.max(1, Math.ceil(wordCount / 200)); // В среднем 200 слов в минуту
+        const timeBadge = document.createElement('div');
+        timeBadge.className = 'reading-time-badge';
+        timeBadge.innerHTML = `<svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px; margin-right:4px;"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><polyline points="12 6 12 12 16 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>~${readingTimeMins} мин. чтения`;
+        container.insertBefore(timeBadge, container.firstChild);
+    }
+    // ----------------------------------------
+
+    // Инициализируем Lightbox и ToC после загрузки контента
+    initLightbox();
+    buildToC();
+
+    // ★ Fade-in для изображений
+    initImageFadeIn(container);
+
+    // ★ Smart Dark Mode для iframe Teletype
+    applyIframeDarkMode();
+
+    if (!container.innerHTML.includes('<iframe')) {
         container.innerHTML += `
         <div class="channel-banner">
             <div class="channel-content">
@@ -517,18 +567,94 @@ function loadChapterContent(chapter) {
                 </a>
             </div>
         </div>`;
-        
-        restoreScrollPosition();
-    } else {
-        container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📄</div>
-                <h3>Контент недоступен</h3>
-                <p>Эта глава ещё не добавлена.</p>
-            </div>`;
     }
-    
-    document.getElementById('reader-content').scrollTop = 0;
+
+    // Восстанавливаем позицию скролла
+    restoreScrollPosition();
+}
+
+// ★ Skeleton Loader (пункт 5)
+function buildSkeletonLoader() {
+    let lines = '';
+    const widths = [100, 92, 85, 95, 70, 88, 96, 80, 60, 90, 100, 75, 88, 50];
+    for (let i = 0; i < widths.length; i++) {
+        lines += `<div class="skeleton-line" style="width:${widths[i]}%;animation-delay:${i * 0.05}s"></div>`;
+    }
+    return `<div class="skeleton-loader">${lines}</div>`;
+}
+
+// ★ Image Fade-in (пункт 6)
+function initImageFadeIn(container) {
+    const imgs = container.querySelectorAll('img');
+    imgs.forEach(img => {
+        if (img.complete) {
+            img.classList.add('img-loaded');
+        } else {
+            img.classList.add('img-loading');
+            img.addEventListener('load', () => {
+                img.classList.remove('img-loading');
+                img.classList.add('img-loaded');
+            }, { once: true });
+        }
+    });
+}
+
+// ★ Smart Dark Mode для Teletype iframes (пункт 7)
+function applyIframeDarkMode() {
+    const isDark = settings.theme === 'dark' || settings.theme === 'amoled';
+    document.querySelectorAll('.teletype-iframe').forEach(iframe => {
+        iframe.style.filter = isDark ? 'invert(1) hue-rotate(180deg)' : 'none';
+    });
+}
+
+// ★ Silent Prefetch следующей главы (пункт 4)
+function prefetchNextChapter() {
+    const nextIdx = currentChapterIdx + 1;
+    if (nextIdx >= currentChapters.length) return;
+    if (prefetchedChapter.idx === nextIdx) return; // уже загружено
+
+    const chapter = currentChapters[nextIdx];
+    if (!chapter) return;
+
+    let urlsToLoad = [];
+    if (chapter.urls && chapter.urls.length > 0) {
+        urlsToLoad = [...chapter.urls];
+    } else if (chapter.url) {
+        urlsToLoad = [chapter.url];
+    }
+
+    const teletypeUrls = urlsToLoad.filter(u => u.includes('teletype.in'));
+    if (teletypeUrls.length > 0) urlsToLoad = teletypeUrls;
+
+    if (urlsToLoad.length > 0) {
+        const loadPromises = urlsToLoad.map(async (u) => {
+            if (u.includes('teletype.in')) {
+                const isDark = settings.theme === 'dark' || settings.theme === 'amoled';
+                const filterStyle = isDark ? 'filter: invert(1) hue-rotate(180deg);' : '';
+                return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;${filterStyle}" loading="lazy"></iframe>`;
+            }
+            const telegraphMatch = u.match(/telegra\.ph\/(.+)/);
+            if (telegraphMatch) {
+                try {
+                    const resp = await fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`);
+                    const data = await resp.json();
+                    if (data.ok && data.result && data.result.content) {
+                        return renderTelegraphContent(data.result.content);
+                    }
+                } catch (e) {
+                    console.warn('Prefetch Telegraph err', e);
+                }
+            }
+            return '';
+        });
+        Promise.all(loadPromises).then(results => {
+            prefetchedChapter = { idx: nextIdx, html: results.join('') };
+            console.log('✅ Prefetched chapter', nextIdx + 1);
+        }).catch(() => { });
+    } else if (chapter.text) {
+        const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
+        prefetchedChapter = { idx: nextIdx, html: paragraphs };
+    }
 }
 
 function renderTelegraphContent(nodes) {
@@ -536,10 +662,10 @@ function renderTelegraphContent(nodes) {
     return nodes.map(node => {
         if (typeof node === 'string') return node;
         if (!node.tag) return '';
-        
+
         const children = node.children ? renderTelegraphContent(node.children) : '';
         const attrs = node.attrs ? Object.entries(node.attrs).map(([k, v]) => `${k}="${v}"`).join(' ') : '';
-        
+
         if (node.tag === 'img' || node.tag === 'figure') {
             if (node.tag === 'img') {
                 const src = node.attrs?.src || '';
@@ -548,7 +674,7 @@ function renderTelegraphContent(nodes) {
             }
             return `<figure>${children}</figure>`;
         }
-        
+
         return `<${node.tag}${attrs ? ' ' + attrs : ''}>${children}</${node.tag}>`;
     }).join('');
 }
@@ -558,11 +684,27 @@ function navigateChapter(delta) {
     saveScrollPosition();
     const newIdx = currentChapterIdx + delta;
     if (newIdx >= 0 && newIdx < currentChapters.length) {
-        openChapter(newIdx);
+        // ★ Haptic feedback (пункт 8)
+        haptic('medium');
+        // ★ Slide transition (пункт 3)
+        const container = document.getElementById('reader-text');
+        const direction = delta > 0 ? 'left' : 'right';
+        container.classList.add(`slide-out-${direction}`);
+        setTimeout(() => {
+            container.classList.remove(`slide-out-${direction}`);
+            container.classList.add(`slide-in-${direction === 'left' ? 'right' : 'left'}`);
+            openChapter(newIdx, true);
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    container.classList.remove(`slide-in-${direction === 'left' ? 'right' : 'left'}`);
+                });
+            });
+        }, 200);
     }
 }
 
 function backFromReader() {
+    haptic('light');
     saveScrollPosition();
     showScreen('chapters');
     // Обновляем список глав чтобы показать прогресс
@@ -578,6 +720,27 @@ function updateNavButtons() {
 // ==========================================================================
 // ЛАЙКИ
 // ==========================================================================
+
+function spawnFloatingHearts() {
+    const btn = document.getElementById('like-btn');
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+
+    for (let i = 0; i < 6; i++) {
+        const heart = document.createElement('div');
+        heart.className = 'floating-heart';
+        heart.innerHTML = '❤️';
+        heart.style.left = `${rect.left + rect.width / 2 + (Math.random() * 40 - 20)}px`;
+        heart.style.top = `${rect.top}px`;
+        heart.style.setProperty('--tx', `${Math.random() * 80 - 40}px`);
+        heart.style.setProperty('--ty', `-${Math.random() * 120 + 80}px`);
+        heart.style.setProperty('--r', `${Math.random() * 60 - 30}deg`);
+        heart.style.animationDelay = `${Math.random() * 0.15}s`;
+
+        document.body.appendChild(heart);
+        setTimeout(() => heart.remove(), 1000);
+    }
+}
 
 function getChapterKey() {
     if (!currentSeries || !currentVolume) return '';
@@ -608,11 +771,14 @@ async function toggleLike() {
             body: JSON.stringify({ chapter_key: key })
         });
         const data = await resp.json();
-        
+
         const btn = document.getElementById('like-btn');
-        if (data.liked) btn.classList.add('just-liked');
+        if (data.liked) {
+            btn.classList.add('just-liked');
+            spawnFloatingHearts();
+        }
         setTimeout(() => btn.classList.remove('just-liked'), 500);
-        
+
         updateLikeUI(data.count, data.liked);
     } catch (e) {
         console.warn('Like toggle error:', e);
@@ -623,7 +789,7 @@ function updateLikeUI(count, liked) {
     const btn = document.getElementById('like-btn');
     const icon = document.getElementById('like-icon');
     const countEl = document.getElementById('like-count');
-    
+
     btn.classList.toggle('liked', liked);
     icon.textContent = liked ? '❤️' : '🤍';
     countEl.textContent = count > 0 ? count : '';
@@ -665,12 +831,12 @@ function renderComments(comments) {
     const list = document.getElementById('comments-list');
     const badge = document.getElementById('comments-count-badge');
     badge.textContent = comments.length > 0 ? `(${comments.length})` : '';
-    
+
     if (comments.length === 0) {
         list.innerHTML = '<div class="no-comments">Пока нет комментариев. Будьте первым! ✨</div>';
         return;
     }
-    
+
     // Строим дерево
     const commentMap = {};
     const topLevel = [];
@@ -678,7 +844,7 @@ function renderComments(comments) {
         c.children = [];
         commentMap[c.id] = c;
     });
-    
+
     comments.forEach(c => {
         if (c.parent_id && commentMap[c.parent_id]) {
             commentMap[c.parent_id].children.push(c);
@@ -693,7 +859,7 @@ function renderComments(comments) {
         const isOwn = String(c.user_id) === userId;
         const deleteBtn = isOwn ? `<button class="comment-delete-btn" onclick="deleteComment(${c.id})">🗑</button>` : '';
         const replyBtn = !isChild ? `<button class="comment-reply-btn" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')">↩ Ответить</button>` : '';
-        
+
         let html = `
         <div class="comment-item ${isChild ? 'comment-reply' : ''}" id="comment-${c.id}">
             <div class="comment-header">
@@ -707,15 +873,15 @@ function renderComments(comments) {
             </div>
             <div class="comment-text">${escapeHtml(c.text)}</div>
         `;
-        
+
         if (c.children && c.children.length > 0) {
             html += `<div class="comment-children">` + c.children.map(child => renderNode(child, true)).join('') + `</div>`;
         }
-        
+
         html += `</div>`;
         return html;
     }
-    
+
     list.innerHTML = topLevel.map(c => renderNode(c, false)).join('');
 }
 
@@ -724,13 +890,13 @@ async function postComment() {
     const input = document.getElementById('comment-input');
     const text = input.value.trim();
     if (!text) return;
-    
+
     const key = getChapterKey();
     if (!key) return;
-    
+
     const btn = document.querySelector('.comment-submit-btn');
     btn.disabled = true;
-    
+
     try {
         await apiFetch(API_URL + '/api/comments', {
             method: 'POST',
@@ -807,7 +973,7 @@ function showScreen(name) {
     screens.forEach(s => {
         s.classList.remove('active', 'slide-left');
     });
-    
+
     document.getElementById(`screen-${name}`).classList.add('active');
 
     // Update bottom nav
@@ -922,32 +1088,38 @@ function applySettings() {
     if (settings.theme !== 'light') {
         document.body.classList.add(`theme-${settings.theme}`);
     }
-    
+
     // Шрифт и размер
     const readerText = document.getElementById('reader-text');
     if (readerText) {
         readerText.style.fontSize = settings.fontSize + 'px';
         readerText.style.maxWidth = settings.textWidth + '%';
         readerText.style.lineHeight = settings.lineHeight;
-        
+
         // Шрифт
         readerText.classList.remove('font-sans', 'font-slab');
         if (settings.font === 'sans') readerText.classList.add('font-sans');
         if (settings.font === 'slab') readerText.classList.add('font-slab');
-        
+
         // Выравнивание
         readerText.classList.toggle('align-justify', settings.textAlign === 'justify');
-        
+
         // Отступы
         readerText.classList.toggle('indent-on', settings.indent);
     }
-    
+
     // Social section width
     const socialSection = document.getElementById('social-section');
     if (socialSection) {
         socialSection.style.maxWidth = settings.textWidth + '%';
     }
-    
+
+    // ★ Smart Dark Mode для Teletype iframes (пункт 7)
+    applyIframeDarkMode();
+
+    // ★ Haptic feedback при смене настроек (пункт 8)
+    haptic('light');
+
     // Telegram header
     try {
         const colors = {
@@ -955,7 +1127,7 @@ function applySettings() {
             dark: '#1a1a2e', amoled: '#000000'
         };
         tg.setHeaderColor(colors[settings.theme] || '#ffffff');
-    } catch (e) {}
+    } catch (e) { }
 }
 
 function saveSettings() {
@@ -979,10 +1151,10 @@ function restoreSettings() {
         b.classList.toggle('active', b.dataset.align === settings.textAlign);
     });
     document.getElementById('width-slider').value = settings.textWidth;
-    
+
     const indentToggle = document.getElementById('indent-toggle');
     if (indentToggle) indentToggle.checked = settings.indent;
-    
+
     applySettings();
 }
 
@@ -991,6 +1163,8 @@ function restoreSettings() {
 // ==========================================================================
 
 let scrollSaveTimer = null;
+let lastScrollY = 0;
+let uiHidden = false;
 
 document.addEventListener('DOMContentLoaded', () => {
     const readerContent = document.getElementById('reader-content');
@@ -998,11 +1172,75 @@ document.addEventListener('DOMContentLoaded', () => {
         readerContent.addEventListener('scroll', () => {
             updateProgressBar();
 
+            // ★ Auto-hide UI на скролле (пункт 1)
+            const currentScroll = readerContent.scrollTop;
+            const topBar = document.getElementById('reader-top-bar');
+            const bottomBar = document.getElementById('reader-bottom-bar');
+
+            if (topBar && bottomBar) {
+                if (currentScroll > lastScrollY + 8 && currentScroll > 100) {
+                    // Скролл вниз — прячем
+                    if (!uiHidden) {
+                        topBar.classList.add('bars-hidden');
+                        bottomBar.classList.add('bars-hidden');
+                        uiHidden = true;
+
+                        // Закрываем FAB-меню при скролле вниз
+                        const menu = document.getElementById('fab-menu');
+                        if (menu && !menu.classList.contains('hidden')) toggleFab();
+                    }
+                } else if (currentScroll < lastScrollY - 5) {
+                    // Скролл вверх — показываем
+                    if (uiHidden) {
+                        topBar.classList.remove('bars-hidden');
+                        bottomBar.classList.remove('bars-hidden');
+                        uiHidden = false;
+                    }
+                }
+                lastScrollY = currentScroll;
+            }
+
             // Автосохранение позиции (debounced)
             clearTimeout(scrollSaveTimer);
             scrollSaveTimer = setTimeout(() => {
                 saveScrollPosition();
             }, 800);
+
+            // ★ Prefetch следующей главы при 80% прокрутки (пункт 4)
+            const scrollPct = readerContent.scrollTop / Math.max(1, readerContent.scrollHeight - readerContent.clientHeight);
+            if (scrollPct > 0.8) {
+                prefetchNextChapter();
+            }
+        });
+
+        // ★ Tap-to-Scroll zones (пункт 2)
+        readerContent.addEventListener('click', (e) => {
+            // Игнорируем клики по ссылкам, кнопкам, изображениям, textarea, input
+            if (e.target.closest('a, button, img, textarea, input, .social-section, .comment-form, iframe')) return;
+
+            const rect = readerContent.getBoundingClientRect();
+            const relativeY = (e.clientY - rect.top) / rect.height;
+            const pageHeight = readerContent.clientHeight * 0.85;
+
+            if (relativeY < 0.3) {
+                // Верхняя треть — Page Up
+                readerContent.scrollBy({ top: -pageHeight, behavior: 'smooth' });
+                haptic('light');
+            } else if (relativeY > 0.7) {
+                // Нижняя треть — Page Down
+                readerContent.scrollBy({ top: pageHeight, behavior: 'smooth' });
+                haptic('light');
+            } else {
+                // Центр — Toggle UI
+                const topBar = document.getElementById('reader-top-bar');
+                const bottomBar = document.getElementById('reader-bottom-bar');
+                if (topBar && bottomBar) {
+                    topBar.classList.toggle('bars-hidden');
+                    bottomBar.classList.toggle('bars-hidden');
+                    uiHidden = !uiHidden;
+                    haptic('light');
+                }
+            }
         });
     }
 });
@@ -1019,10 +1257,10 @@ window.addEventListener('beforeunload', () => {
 function renderContinueReading() {
     const container = document.getElementById('continue-reading-container');
     if (!container) return;
-    
+
     let latestBm = null;
     if (serverBookmarks.length > 0) {
-        latestBm = serverBookmarks[0]; 
+        latestBm = serverBookmarks[0];
     } else {
         const allLocal = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
         let latestLocal = null;
@@ -1036,15 +1274,15 @@ function renderContinueReading() {
         if (latestLocal) Object.assign(latestLocal, { series_id: latestLocal.seriesId, volume_id: latestLocal.volume, chapter_key: latestLocal.chapter });
         latestBm = latestLocal;
     }
-    
+
     if (!latestBm || !allData.series) {
         container.style.display = 'none';
         return;
     }
-    
+
     const series = allData.series.find(s => String(s.id) === String(latestBm.series_id));
     if (!series) return;
-    
+
     const vol = series.volumes.find(v => String(v.volume) === String(latestBm.volume_id));
     let chTitle = "Глава " + latestBm.chapter_key;
     if (vol) {
@@ -1052,7 +1290,7 @@ function renderContinueReading() {
         if (chAttr && chAttr.custom_name) chTitle = chAttr.custom_name;
     }
     const volTitle = vol && vol.custom_name ? vol.custom_name : "Том " + latestBm.volume_id;
-    
+
     container.style.display = 'block';
     container.innerHTML = `
         <div class="continue-reading-card" onclick="selectSeries('${series.id}')">
@@ -1081,7 +1319,7 @@ function initLightbox() {
     if (!container) return;
     const imgs = container.querySelectorAll('img');
     lightboxImages = Array.from(imgs);
-    
+
     imgs.forEach((img, i) => {
         img.style.cursor = 'zoom-in';
         img.onclick = (e) => {
@@ -1140,16 +1378,59 @@ function updateLightboxNav() {
     }
 }
 
-// Toggle zoom on click
+// Toggle zoom on click + ★ Swipe-to-close (пункт 10)
+let lbTouchStartY = 0;
+let lbTouchDeltaY = 0;
+let lbSwiping = false;
+
 document.addEventListener('DOMContentLoaded', () => {
     const lbImg = document.getElementById('lightbox-img');
+    const lbWrapper = document.getElementById('lightbox-image-wrapper');
+
     if (lbImg) {
         lbImg.addEventListener('click', () => {
+            if (lbSwiping) return; // Не зумить после свайпа
             lightboxZoomed = !lightboxZoomed;
             lbImg.classList.toggle('zoomed', lightboxZoomed);
             lbImg.style.transform = lightboxZoomed ? 'scale(2)' : '';
         });
     }
+
+    if (lbWrapper) {
+        // ★ Свайп вниз для закрытия Lightbox
+        lbWrapper.addEventListener('touchstart', (e) => {
+            if (lightboxZoomed) return;
+            lbTouchStartY = e.touches[0].clientY;
+            lbSwiping = false;
+            lbWrapper.style.transition = 'none';
+        }, { passive: true });
+
+        lbWrapper.addEventListener('touchmove', (e) => {
+            if (lightboxZoomed) return;
+            lbTouchDeltaY = e.touches[0].clientY - lbTouchStartY;
+            if (Math.abs(lbTouchDeltaY) > 10) {
+                lbSwiping = true;
+                const opacity = Math.max(0, 1 - Math.abs(lbTouchDeltaY) / 300);
+                lbWrapper.style.transform = `translateY(${lbTouchDeltaY}px)`;
+                document.getElementById('lightbox-overlay').style.background = `rgba(0,0,0,${0.95 * opacity})`;
+            }
+        }, { passive: true });
+
+        lbWrapper.addEventListener('touchend', () => {
+            if (lightboxZoomed) return;
+            lbWrapper.style.transition = '';
+            if (Math.abs(lbTouchDeltaY) > 120) {
+                // Порог — закрыть
+                haptic('light');
+                closeLightbox();
+            }
+            lbWrapper.style.transform = '';
+            document.getElementById('lightbox-overlay').style.background = '';
+            setTimeout(() => { lbSwiping = false; }, 100);
+            lbTouchDeltaY = 0;
+        }, { passive: true });
+    }
+
     // Close on Escape
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') closeLightbox();
@@ -1170,27 +1451,27 @@ function buildToC() {
     const tocList = document.getElementById('toc-list');
     const tocBtn = document.getElementById('toc-toggle-btn');
     if (!container || !tocList || !tocBtn) return;
-    
+
     const headings = container.querySelectorAll('h2, h3, h4');
     tocItems = Array.from(headings);
-    
+
     if (tocItems.length === 0) {
         tocBtn.style.display = 'none';
         return;
     }
-    
+
     tocBtn.style.display = 'flex';
     // Assign IDs to headings
     tocItems.forEach((h, i) => {
         if (!h.id) h.id = `toc-heading-${i}`;
     });
-    
+
     tocList.innerHTML = tocItems.map((h, i) => {
         const level = h.tagName.toLowerCase();
         const cssClass = level === 'h3' ? 'toc-h3' : level === 'h4' ? 'toc-h4' : '';
         return `<div class="toc-item ${cssClass}" data-toc-idx="${i}" onclick="scrollToHeading(${i})">${h.textContent}</div>`;
     }).join('');
-    
+
     // IntersectionObserver for active heading
     if (tocObserver) tocObserver.disconnect();
     tocObserver = new IntersectionObserver((entries) => {
@@ -1201,7 +1482,7 @@ function buildToC() {
             }
         });
     }, { root: document.getElementById('reader-content'), rootMargin: '-10% 0px -70% 0px', threshold: 0.1 });
-    
+
     tocItems.forEach(h => tocObserver.observe(h));
 }
 
@@ -1261,7 +1542,7 @@ function startAutoscroll() {
     }
     const el = document.getElementById('reader-content');
     if (!el) return;
-    
+
     let lastTime = null;
     function step(ts) {
         if (!autoscrollActive) return;
@@ -1331,12 +1612,12 @@ async function saveEditUrl() {
     if (editUrlChapterIdx === null || !API_URL) return;
     const ch = currentChapters[editUrlChapterIdx];
     const newUrl = document.getElementById('edit-url-input').value.trim();
-    if (!newUrl) return alert('Введите ссылку');
-    
+    if (!newUrl) return showToast('Введите ссылку');
+
     const saveBtn = document.getElementById('edit-url-save');
     saveBtn.disabled = true;
     saveBtn.textContent = 'Сохранение...';
-    
+
     try {
         const resp = await apiFetch(API_URL + '/api/chapters', {
             method: 'PUT',
@@ -1354,12 +1635,12 @@ async function saveEditUrl() {
             if (ch.urls) ch.urls = [newUrl];
             else ch.url = newUrl;
             closeEditUrlModal();
-            alert('✅ Ссылка обновлена!');
+            showToast('✅ Ссылка обновлена!');
         } else {
-            alert('Ошибка: ' + (result.error || 'неизвестная'));
+            showToast('Ошибка: ' + (result.error || 'неизвестная'));
         }
     } catch (e) {
-        alert('Ошибка сети: ' + e.message);
+        showToast('Ошибка сети: ' + e.message);
     } finally {
         saveBtn.disabled = false;
         saveBtn.textContent = '💾 Сохранить';
@@ -1385,19 +1666,19 @@ function closeBulkModal() {
 async function executeBulkUpload() {
     if (!API_URL || !currentSeries || !currentVolume) return;
     const raw = document.getElementById('bulk-upload-input').value.trim();
-    if (!raw) return alert('Вставьте ссылки');
-    
+    if (!raw) return showToast('Вставьте ссылки');
+
     const urls = raw.split('\n').map(u => u.trim()).filter(u => u.length > 0);
-    if (urls.length === 0) return alert('Нет валидных ссылок');
-    
-    const lastChNum = currentChapters.length > 0 
-        ? Math.max(...currentChapters.map(c => parseInt(c.chapter) || 0)) 
+    if (urls.length === 0) return showToast('Нет валидных ссылок');
+
+    const lastChNum = currentChapters.length > 0
+        ? Math.max(...currentChapters.map(c => parseInt(c.chapter) || 0))
         : 0;
-    
+
     const saveBtn = document.getElementById('bulk-upload-save');
     saveBtn.disabled = true;
     saveBtn.textContent = `Добавление ${urls.length} глав...`;
-    
+
     try {
         const resp = await apiFetch(API_URL + '/api/chapters/bulk', {
             method: 'POST',
@@ -1412,13 +1693,13 @@ async function executeBulkUpload() {
         const result = await resp.json();
         if (result.ok) {
             closeBulkModal();
-            alert(`✅ Добавлено ${result.added} глав!`);
+            showToast(`✅ Добавлено ${result.added} глав!`);
             await loadData(); // Reload
         } else {
-            alert('Ошибка: ' + (result.error || 'неизвестная'));
+            showToast('Ошибка: ' + (result.error || 'неизвестная'));
         }
     } catch (e) {
-        alert('Ошибка сети: ' + e.message);
+        showToast('Ошибка сети: ' + e.message);
     } finally {
         saveBtn.disabled = false;
         saveBtn.textContent = '📤 Добавить';
@@ -1446,7 +1727,7 @@ function updateLibraryStats() {
     const timeEl = document.getElementById('stat-time');
     const chEl = document.getElementById('stat-chapters');
     if (!timeEl || !chEl) return;
-    
+
     // Total Chapters Read
     const totalChaptersRead = Object.keys(readChapters).length;
     chEl.textContent = totalChaptersRead;
@@ -1455,7 +1736,7 @@ function updateLibraryStats() {
     const totalMinutes = Math.floor(readingStats.timeSpentSeconds / 60);
     const hours = Math.floor(totalMinutes / 60);
     const mins = totalMinutes % 60;
-    
+
     if (hours > 0) {
         timeEl.textContent = `${hours} ч ${mins} м`;
     } else {
@@ -1480,7 +1761,7 @@ function renderLibraryTab() {
 
     // Get last read data
     const allLocal = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
-    
+
     // Combine local with server bookmarks if missing
     serverBookmarks.forEach(bm => {
         if (!allLocal[bm.series_id]) {
@@ -1511,7 +1792,7 @@ function renderLibraryTab() {
         const bm = allLocal[key];
         const s = allData.series.find(x => String(x.id) === String(bm.seriesId || key));
         if (!s) return '';
-        
+
         let chTitle = "Глава " + bm.chapter;
         const v = s.volumes.find(v => String(v.volume) === String(bm.volume));
         if (v) {
@@ -1542,7 +1823,7 @@ function renderLibraryTab() {
             <span class="series-arrow">&rsaquo;</span>
         </div>`;
     }).join('');
-    
+
     list.innerHTML = itemsHtml;
 }
 
@@ -1555,7 +1836,7 @@ let dragSrcIdx = null;
 function initChapterDnD() {
     const container = document.getElementById('chapters-list');
     if (!container) return;
-    
+
     const items = container.querySelectorAll('.chapter-item[draggable="true"]');
     items.forEach(item => {
         item.addEventListener('dragstart', handleDragStart);
@@ -1565,7 +1846,7 @@ function initChapterDnD() {
         item.addEventListener('dragenter', handleDragEnter);
         item.addEventListener('dragleave', handleDragLeave);
     });
-    
+
     // Mobile touch DnD polyfill
     items.forEach(item => {
         const handle = item.querySelector('.drag-handle');
@@ -1620,13 +1901,13 @@ function touchDragStart(e) {
     e.preventDefault();
     const item = e.target.closest('.chapter-item');
     if (!item) return;
-    
+
     touchDragItem = item;
     dragSrcIdx = parseInt(item.dataset.chapterIdx);
     touchStartY = e.touches[0].clientY;
-    
+
     item.classList.add('dragging');
-    
+
     document.addEventListener('touchmove', touchDragMove, { passive: false });
     document.addEventListener('touchend', touchDragEnd);
 }
@@ -1636,7 +1917,7 @@ function touchDragMove(e) {
     const touch = e.touches[0];
     const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
     const target = elements.find(el => el.classList.contains('chapter-item') && el !== touchDragItem);
-    
+
     document.querySelectorAll('.chapter-item').forEach(item => item.classList.remove('drag-over'));
     if (target) target.classList.add('drag-over');
 }
@@ -1644,18 +1925,18 @@ function touchDragMove(e) {
 function touchDragEnd(e) {
     document.removeEventListener('touchmove', touchDragMove);
     document.removeEventListener('touchend', touchDragEnd);
-    
+
     const touch = e.changedTouches[0];
     const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
     const target = elements.find(el => el.classList.contains('chapter-item') && el !== touchDragItem);
-    
+
     if (target && dragSrcIdx !== null) {
         const destIdx = parseInt(target.dataset.chapterIdx);
         if (dragSrcIdx !== destIdx) {
             reorderChapters(dragSrcIdx, destIdx);
         }
     }
-    
+
     document.querySelectorAll('.chapter-item').forEach(item => {
         item.classList.remove('dragging', 'drag-over');
     });
@@ -1667,13 +1948,13 @@ async function reorderChapters(fromIdx, toIdx) {
     // Reorder locally
     const [moved] = currentChapters.splice(fromIdx, 1);
     currentChapters.splice(toIdx, 0, moved);
-    
+
     // Re-render
     renderChaptersList();
-    
+
     // Sync with server if available
     if (!API_URL) return;
-    
+
     const order = currentChapters.map(c => c.chapter);
     try {
         await apiFetch(API_URL + '/api/sort', {
@@ -1742,7 +2023,7 @@ function handleSelection() {
 
     const range = selection.getRangeAt(0);
     const selectedText = selection.toString().trim();
-    
+
     // Проверяем, что выделение внутри reader-content
     const readerContent = document.getElementById('reader-content');
     if (!readerContent.contains(range.commonAncestorContainer)) {
@@ -1758,7 +2039,7 @@ function handleSelection() {
 
     typoSelectedText = selectedText;
     typoSelectionRange = range.cloneRange();
-    
+
     // Получаем контекст (текст вокруг)
     const container = range.commonAncestorContainer.parentElement;
     const fullText = container.innerText;
@@ -1780,22 +2061,22 @@ function showTypoModal() {
     const overlay = document.getElementById('typo-modal-overlay');
     const contextEl = document.getElementById('typo-modal-context');
     const tooltip = document.getElementById('typo-tooltip');
-    
+
     if (tooltip) tooltip.classList.remove('visible');
 
     // Подсвечиваем опечатку в контексте для модалки
     const escapedSelected = typoSelectedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const highlightedContext = typoContextText.replace(
-        new RegExp(escapedSelected, 'g'), 
+        new RegExp(escapedSelected, 'g'),
         `<span class="typo-modal-selected">${typoSelectedText}</span>`
     );
-    
+
     contextEl.innerHTML = `"...${highlightedContext}..."`;
     document.getElementById('typo-comment').value = '';
 
     modal.classList.remove('hidden');
     overlay.classList.remove('hidden');
-    
+
     // Снимаем выделение в тексте
     window.getSelection().removeAllRanges();
 }
@@ -1807,7 +2088,7 @@ function closeTypoModal() {
 
 async function submitTypoReport() {
     if (!API_URL) {
-        alert('Репорты доступны только в онлайн-режиме.');
+        showToast('Репорты доступны только в онлайн-режиме.');
         return;
     }
 
@@ -1817,7 +2098,7 @@ async function submitTypoReport() {
 
     const chapter = currentChapters[currentChapterIdx];
     if (!chapter) return;
-    
+
     const chapter_key = `${currentSeries.id}_v${currentVolume.volume}_ch${chapter.chapter}`;
 
     try {
@@ -1826,7 +2107,7 @@ async function submitTypoReport() {
 
         const resp = await apiFetch(`${API_URL}/api/typo`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 chapter_key,
                 selected_text: typoSelectedText,
@@ -1838,17 +2119,170 @@ async function submitTypoReport() {
         const result = await resp.json();
         if (result.ok) {
             tg.HapticFeedback.notificationOccurred('success');
-            alert('✅ Спасибо! Репорт об опечатке отправлен.');
+            showToast('✅ Спасибо! Репорт об опечатке отправлен.');
             closeTypoModal();
         } else {
-            alert('Ошибка: ' + (result.error || 'неизвестная'));
+            showToast('Ошибка: ' + (result.error || 'неизвестная'));
         }
     } catch (e) {
-        alert('Ошибка сети: ' + e.message);
+        showToast('Ошибка сети: ' + e.message);
     } finally {
         btn.disabled = false;
         btn.innerText = originalText;
     }
+}
+
+// ==========================================================================
+// ★ HAPTIC FEEDBACK HELPER (пункт 8)
+// ==========================================================================
+
+function haptic(style = 'light') {
+    try {
+        if (tg && tg.HapticFeedback) {
+            if (style === 'success') tg.HapticFeedback.notificationOccurred('success');
+            else if (style === 'error') tg.HapticFeedback.notificationOccurred('error');
+            else tg.HapticFeedback.impactOccurred(style);
+        }
+    } catch (e) { }
+}
+
+// === Custom Toasts ===
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+
+    let icon = '';
+    if (type === 'success') icon = '<svg class="icon-sm" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="22 4 12 14.01 9 11.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    else if (type === 'error') icon = '<svg class="icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><line x1="15" y1="9" x2="9" y2="15" fill="none" stroke="currentColor" stroke-width="2"/><line x1="9" y1="9" x2="15" y2="15" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+    else icon = '<svg class="icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><line x1="12" y1="16" x2="12" y2="12" fill="none" stroke="currentColor" stroke-width="2"/><line x1="12" y1="8" x2="12.01" y2="8" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+
+    toast.innerHTML = `${icon}<span>${message}</span>`;
+    container.appendChild(toast);
+
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 400);
+    }, 3000);
+}
+
+// === Fab Menu ===
+function toggleFab() {
+    const container = document.getElementById('fab-container');
+    const menu = document.getElementById('fab-menu');
+    const plus = document.getElementById('fab-icon-plus');
+    const close = document.getElementById('fab-icon-close');
+
+    if (!container || !menu) return;
+
+    const isOpening = menu.classList.contains('hidden');
+    haptic('medium');
+
+    if (isOpening) {
+        container.classList.add('active');
+        menu.classList.remove('hidden');
+        plus.classList.add('hidden');
+        close.classList.remove('hidden');
+    } else {
+        container.classList.remove('active');
+        menu.classList.add('hidden');
+        plus.classList.remove('hidden');
+        close.classList.add('hidden');
+    }
+}
+
+function fabAction(action) {
+    toggleFab(); // Close first
+    if (action === 'toc') toggleToC();
+    else if (action === 'autoscroll') {
+        const toggle = document.getElementById('autoscroll-toggle');
+        if (toggle) {
+            toggle.click(); // This will trigger the existing toggleAutoscrollSetting logic
+            showToast(toggle.checked ? 'Автоскролл включен' : 'Автоскролл выключен');
+        }
+    } else if (action === 'comments') {
+        const social = document.getElementById('social-section');
+        if (social) {
+            social.scrollIntoView({ behavior: 'smooth' });
+        }
+    }
+}
+
+// === Gestures: Swipe Back & Pull to Next ===
+let touchStartX = 0;
+let touchStartY = 0;
+let isSwipeActive = false;
+let isPullingNext = false;
+
+function initGestures() {
+    const reader = document.getElementById('screen-reader');
+    const content = document.getElementById('reader-content');
+    const indicator = document.getElementById('swipe-back-indicator');
+    const pullNext = document.getElementById('pull-next-indicator');
+
+    if (!reader || !content || !indicator || !pullNext) return;
+
+    reader.addEventListener('touchstart', (e) => {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+        isSwipeActive = touchStartX < 35; // edge detection
+    }, { passive: true });
+
+    reader.addEventListener('touchmove', (e) => {
+        if (!isSwipeActive) return;
+        let deltaX = e.touches[0].clientX - touchStartX;
+        let deltaY = Math.abs(e.touches[0].clientY - touchStartY);
+
+        if (deltaX > 0 && deltaY < 50) {
+            indicator.style.opacity = Math.min(deltaX / 100, 1);
+            indicator.style.transform = `scaleY(${Math.min(0.5 + deltaX / 200, 1)}) translateX(${deltaX / 2}px)`;
+        }
+    }, { passive: true });
+
+    reader.addEventListener('touchend', (e) => {
+        let deltaX = e.changedTouches[0].clientX - touchStartX;
+        indicator.style.opacity = 0;
+        indicator.style.transform = ''; // Сброс трансформации (Баг 3)
+
+        if (isSwipeActive && deltaX > 85) {
+            haptic('medium');
+            backFromReader();
+        }
+        isSwipeActive = false;
+    }, { passive: true });
+
+    // Pull-to-next logic at bottom
+    content.addEventListener('scroll', () => {
+        const bottomOffset = content.scrollHeight - content.scrollTop - content.clientHeight;
+        if (bottomOffset < 60 && currentChapterIdx < currentChapters.length - 1) {
+            pullNext.style.display = 'flex';
+            pullNext.style.opacity = Math.min(1, 1 - (bottomOffset / 60));
+            isPullingNext = bottomOffset <= 10;
+        } else {
+            pullNext.style.display = 'none';
+            isPullingNext = false;
+        }
+    }, { passive: true });
+
+    content.addEventListener('touchend', () => {
+        if (isPullingNext) {
+            haptic('medium');
+            navigateChapter(1);
+            isPullingNext = false;
+            pullNext.style.display = 'none';
+        }
+    }, { passive: true });
+}
+
+function haptic(style = 'light') {
+    try {
+        if (tg && tg.HapticFeedback) {
+            tg.HapticFeedback.impactOccurred(style);
+        }
+    } catch (e) { }
 }
 
 // ==========================================================================
@@ -1858,4 +2292,4 @@ async function submitTypoReport() {
 restoreSettings();
 loadData();
 initTypoReporter();
-
+initGestures();

@@ -26,6 +26,47 @@ async def init_db():
             await db.execute('ALTER TABLE users_stats ADD COLUMN stickers_count INTEGER DEFAULT 0')
         except Exception:
             pass
+            
+        try:
+            await db.execute('ALTER TABLE users_stats ADD COLUMN balance INTEGER DEFAULT 0')
+            await db.execute('ALTER TABLE users_stats ADD COLUMN custom_title TEXT DEFAULT NULL')
+            await db.execute('ALTER TABLE users_stats ADD COLUMN is_hidden INTEGER DEFAULT 0')
+            await db.execute('ALTER TABLE marriages ADD COLUMN love_level INTEGER DEFAULT 0')
+        except Exception:
+            pass
+
+        try:
+            await db.execute('ALTER TABLE users_stats ADD COLUMN casino_played INTEGER DEFAULT 0')
+            await db.execute('ALTER TABLE users_stats ADD COLUMN divorces_count INTEGER DEFAULT 0')
+        except Exception:
+            pass
+            
+        try:
+            await db.execute('ALTER TABLE users_stats ADD COLUMN xp INTEGER DEFAULT 0')
+            await db.execute('ALTER TABLE users_stats ADD COLUMN level INTEGER DEFAULT 1')
+        except Exception:
+            pass
+
+        try:
+            await db.execute('ALTER TABLE users_stats ADD COLUMN last_daily TEXT DEFAULT NULL')
+            await db.execute('ALTER TABLE users_stats ADD COLUMN daily_streak INTEGER DEFAULT 0')
+        except Exception:
+            pass
+            
+        try:
+            await db.execute('ALTER TABLE users_stats ADD COLUMN referred_by INTEGER DEFAULT 0')
+        except Exception:
+            pass
+            
+        await db.execute('''CREATE TABLE IF NOT EXISTS referrals 
+                         (referrer_id INTEGER, referred_id INTEGER, timestamp TEXT)''')
+            
+        await db.execute('CREATE TABLE IF NOT EXISTS harems (owner_id INTEGER, member_id INTEGER, member_name TEXT, PRIMARY KEY (owner_id, member_id))')
+        try:
+            await db.execute('ALTER TABLE harems ADD COLUMN loyalty_level INTEGER DEFAULT 0')
+        except Exception:
+            pass
+        await db.execute('CREATE TABLE IF NOT EXISTS user_inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, item_type TEXT, item_data TEXT)')
 
         await db.execute('CREATE TABLE IF NOT EXISTS ai_disabled_groups (chat_id INTEGER PRIMARY KEY)')
         await db.execute('CREATE TABLE IF NOT EXISTS alya_settings (bot_id INTEGER PRIMARY KEY, mode TEXT DEFAULT "normal")')
@@ -123,6 +164,13 @@ async def get_chat_ai_provider(chat_id: int) -> str:
             row = await cursor.fetchone()
             return row[0] if row else "groq"
 
+async def get_users_with_bookmark(series_id: str):
+    """Возвращает список user_id, у которых этот тайтл в закладках."""
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT user_id FROM user_bookmarks WHERE series_id = ?', (series_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [int(row[0]) for row in rows]
+
 async def set_chat_ai_provider(chat_id: int, provider: str):
     """Устанавливает провайдера ИИ для чата."""
     async with aiosqlite.connect('manga.db') as db:
@@ -218,9 +266,28 @@ async def update_rp_stat(user_id: int, stat_name: str):
 
 async def get_user_stats(user_id: int):
     async with aiosqlite.connect('manga.db') as db:
-        async with db.execute('SELECT hugs, kisses, bites, slaps, pats, messages_count, stickers_count FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
+        async with db.execute('''SELECT 
+            hugs, kisses, bites, slaps, pats, 
+            messages_count, stickers_count, balance, 
+            custom_title, is_hidden, casino_played, 
+            divorces_count, last_daily, daily_streak, 
+            referred_by, xp, level 
+            FROM users_stats WHERE user_id = ?''', (user_id,)) as cursor:
             row = await cursor.fetchone()
-            return tuple(x or 0 for x in row) if row else (0, 0, 0, 0, 0, 0, 0)
+            if not row:
+                # user_id, hugs, kisses, bites, slaps, pats, msg, stick, bal, title, hidden, casino, divorce, daily, streak, ref, xp, level
+                return (0, 0, 0, 0, 0, 0, 0, 0, None, 0, 0, 0, None, 0, 0, 0, 1)
+            
+            res = list(row)
+            for i in range(len(res)):
+                if res[i] is None:
+                    if i in (8, 12):
+                        res[i] = None
+                    elif i == 16: # level
+                        res[i] = 1
+                    else:
+                        res[i] = 0
+            return tuple(res)
 
 async def get_admins():
     async with aiosqlite.connect('manga.db') as db:
@@ -270,7 +337,7 @@ async def get_all_users():
 
 async def get_user_marriage(chat_id: int, user_id: int):
     async with aiosqlite.connect('manga.db') as db:
-        async with db.execute('SELECT user1_id, user1_name, user2_id, user2_name, date FROM marriages WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)', (chat_id, user_id, user_id)) as cursor:
+        async with db.execute('SELECT user1_id, user1_name, user2_id, user2_name, date, love_level FROM marriages WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)', (chat_id, user_id, user_id)) as cursor:
             return await cursor.fetchone()
 
 async def get_akashic_volumes():
@@ -320,3 +387,71 @@ async def get_british_chapter_link(volume: int, chapter: str):
         async with db.execute('SELECT url FROM british_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter)) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None
+
+# --- Harem Functions ---
+async def add_to_harem(owner_id: int, member_id: int, member_name: str):
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute(
+            'INSERT OR REPLACE INTO harems (owner_id, member_id, member_name) VALUES (?, ?, ?)',
+            (owner_id, member_id, member_name)
+        )
+        await db.commit()
+
+async def remove_from_harem(owner_id: int, member_id: int):
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('DELETE FROM harems WHERE owner_id = ? AND member_id = ?', (owner_id, member_id))
+        await db.commit()
+
+async def get_user_harem(owner_id: int):
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT member_id, member_name, loyalty_level FROM harems WHERE owner_id = ?', (owner_id,)) as cursor:
+            return await cursor.fetchall()
+
+async def update_loyalty_level(owner_id: int, member_id: int, amount: int = 1):
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE harems SET loyalty_level = loyalty_level + ? WHERE owner_id = ? AND member_id = ?', (amount, owner_id, member_id))
+        await db.commit()
+
+# --- Inventory Functions ---
+async def add_to_inventory(user_id: int, item_type: str, item_data: str):
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute(
+            'INSERT INTO user_inventory (user_id, item_type, item_data) VALUES (?, ?, ?)',
+            (user_id, item_type, item_data)
+        )
+        await db.commit()
+
+async def get_user_inventory(user_id: int, item_type: str = None):
+    async with aiosqlite.connect('manga.db') as db:
+        query = 'SELECT item_type, item_data FROM user_inventory WHERE user_id = ?'
+        params = [user_id]
+        if item_type:
+            query += ' AND item_type = ?'
+            params.append(item_type)
+            
+        async with db.execute(query, tuple(params)) as cursor:
+            return await cursor.fetchall()
+
+# --- Referral Functions ---
+async def add_referral(referrer_id: int, referred_id: int):
+    async with aiosqlite.connect('manga.db') as db:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        await db.execute('INSERT INTO referrals (referrer_id, referred_id, timestamp) VALUES (?, ?, ?)',
+                         (referrer_id, referred_id, now))
+        await db.execute('UPDATE users_stats SET referred_by = ? WHERE user_id = ?', (referrer_id, referred_id))
+        await db.execute('UPDATE users_stats SET balance = balance + 1000, xp = xp + 3 WHERE user_id = ?', (referrer_id,))
+        await db.execute('UPDATE users_stats SET balance = balance + 500 WHERE user_id = ?', (referred_id,))
+        await db.commit()
+
+async def get_referral_stats(user_id: int):
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT COUNT(*) FROM referrals WHERE referrer_id = ?', (user_id,)) as cursor:
+            count = (await cursor.fetchone())[0]
+            return count
+
+async def get_user_referred_by(user_id: int):
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute('SELECT referred_by FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+

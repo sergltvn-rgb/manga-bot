@@ -99,7 +99,8 @@ body {
     flex-direction: column;
     transform: translateX(100%);
     opacity: 0;
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
+    /* ★ Spring Physics (пункт 4) */
+    transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
     pointer-events: none;
 }
 
@@ -144,7 +145,21 @@ body {
     text-overflow: ellipsis;
 }
 
-.header-icon { font-size: 22px; }
+/* ★ SVG Icon System (пункт 1) */
+.icon {
+    width: 22px;
+    height: 22px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    transition: color 0.2s, transform 0.2s;
+}
+.icon-sm { width: 18px; height: 18px; color: inherit; flex-shrink: 0; }
+.icon-xs { width: 14px; height: 14px; color: inherit; flex-shrink: 0; }
+.header-icon-svg {
+    width: 24px;
+    height: 24px;
+    color: var(--accent);
+}
 
 .back-btn {
     background: var(--accent-light);
@@ -157,20 +172,28 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: transform 0.15s;
+    /* ★ Spring feel */
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
     flex-shrink: 0;
 }
-
-.back-btn:active { transform: scale(0.9); }
+.back-btn .icon { color: var(--accent); }
+.back-btn:active { transform: scale(0.85); }
 
 .settings-btn {
     background: none;
     border: none;
-    font-size: 22px;
     cursor: pointer;
-    padding: 4px;
+    padding: 6px;
     flex-shrink: 0;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+.settings-btn .icon { color: var(--text-secondary); }
+.settings-btn:active { transform: scale(0.85); background: var(--accent-light); }
+.settings-btn:active .icon { color: var(--accent); }
 
 /* === ОБЛАСТИ КОНТЕНТА === */
 .content-area {
@@ -469,7 +492,8 @@ body {
     padding-bottom: max(24px, env(safe-area-inset-bottom));
     z-index: 100;
     transform: translateY(100%);
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s;
+    /* ★ Spring Physics (пункт 4) */
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s;
     box-shadow: 0 -4px 30px rgba(0,0,0,0.15);
     max-height: 75vh;
     overflow-y: auto;
@@ -1081,7 +1105,8 @@ input:checked + .slider:before { transform: translateX(20px); }
     background: var(--settings-bg);
     z-index: 85;
     transform: translateX(-100%);
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s;
+    /* ★ Spring Physics (пункт 4) */
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s;
     box-shadow: 4px 0 30px rgba(0,0,0,0.15);
     display: flex;
     flex-direction: column;
@@ -1206,7 +1231,8 @@ input:checked + .slider:before { transform: translateX(20px); }
     padding-bottom: max(24px, env(safe-area-inset-bottom));
     z-index: 100;
     transform: translateY(100%);
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    /* ★ Spring Physics (пункт 4) */
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
     box-shadow: 0 -4px 30px rgba(0,0,0,0.15);
 }
 .edit-url-modal:not(.hidden), .bulk-upload-modal:not(.hidden) {
@@ -1640,7 +1666,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     align-items: center;
     padding-bottom: env(safe-area-inset-bottom);
     z-index: 50;
-    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .nav-tab {
@@ -1655,25 +1681,28 @@ input:checked + .slider:before { transform: translateX(20px); }
     color: var(--text-secondary);
     gap: 4px;
     cursor: pointer;
-    transition: color 0.2s, transform 0.1s;
+    transition: color 0.2s, transform 0.15s;
     -webkit-tap-highlight-color: transparent;
 }
 
 .nav-tab:active {
-    transform: scale(0.95);
+    transform: scale(0.93);
 }
 
 .nav-tab.active {
     color: var(--accent);
 }
 
-.nav-tab .tab-icon {
-    font-size: 24px;
-    transition: transform 0.2s;
+/* ★ SVG icons in tab bar */
+.tab-icon-svg {
+    width: 24px;
+    height: 24px;
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.nav-tab.active .tab-icon {
-    transform: translateY(-2px);
+.nav-tab.active .tab-icon-svg {
+    transform: translateY(-2px) scale(1.05);
+    color: var(--accent);
 }
 
 .nav-tab .tab-label {
@@ -1681,8 +1710,6 @@ input:checked + .slider:before { transform: translateX(20px); }
     font-weight: 600;
 }
 
-/* Скрываем таббар в режиме читалки через JS (установка display: none) 
-   или добавляем отступ для экранов с таб баром */
 .screen:not(#screen-reader) .content-area {
     padding-bottom: calc(80px + env(safe-area-inset-bottom));
 }
@@ -1841,3 +1868,534 @@ input:checked + .slider:before { transform: translateX(20px); }
     border-radius: 6px;
     margin-top: 4px;
 }
+
+/* ==========================================================================
+   ★ READER 2.0: Auto-Hide UI Bars (Spring Physics)
+   ========================================================================== */
+
+.reader-top-bar,
+.reader-bottom-bar {
+    transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1),
+                opacity 0.25s ease,
+                background 0.3s;
+}
+
+.reader-top-bar.bars-hidden {
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+.reader-bottom-bar.bars-hidden {
+    transform: translateY(100%);
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   ★ READER 2.0: Skeleton Shimmer Loader (Enhanced)
+   ========================================================================== */
+
+.skeleton-loader {
+    padding: 24px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.skeleton-line {
+    height: 16px;
+    border-radius: 8px;
+    background: linear-gradient(
+        90deg,
+        var(--divider) 25%,
+        var(--card-hover) 37%,
+        var(--divider) 63%
+    );
+    background-size: 400% 100%;
+    animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+@keyframes skeleton-shimmer {
+    0% { background-position: 100% 50%; }
+    100% { background-position: 0 50%; }
+}
+
+/* ★ Skeleton Cards for Library/Series (пункт 3 — продвинутая загрузка) */
+.skeleton-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 0;
+}
+
+.skeleton-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+}
+
+.skeleton-cover {
+    width: 50px;
+    height: 68px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    background: linear-gradient(
+        90deg,
+        var(--divider) 25%,
+        var(--card-hover) 37%,
+        var(--divider) 63%
+    );
+    background-size: 400% 100%;
+    animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+.skeleton-card-lines {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ★ Skeleton for chapters list */
+.skeleton-chapters {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.skeleton-chapter {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--divider);
+}
+
+.skeleton-chapter-num {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    background: linear-gradient(
+        90deg,
+        var(--divider) 25%,
+        var(--card-hover) 37%,
+        var(--divider) 63%
+    );
+    background-size: 400% 100%;
+    animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+/* ==========================================================================
+   ★ READER 2.0: Slide Chapter Transitions (Spring)
+   ========================================================================== */
+
+.reader-text {
+    transition: font-size 0.2s, color 0.3s, max-width 0.3s, line-height 0.2s;
+}
+
+.reader-text.slide-out-left {
+    animation: slideOutLeft 0.22s ease forwards;
+}
+.reader-text.slide-out-right {
+    animation: slideOutRight 0.22s ease forwards;
+}
+.reader-text.slide-in-right {
+    animation: slideInRight 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.reader-text.slide-in-left {
+    animation: slideInLeft 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes slideOutLeft {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(-50px); }
+}
+@keyframes slideOutRight {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(50px); }
+}
+@keyframes slideInRight {
+    from { opacity: 0; transform: translateX(50px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideInLeft {
+    from { opacity: 0; transform: translateX(-50px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+
+/* ==========================================================================
+   ★ READER 2.0: Smart Image Fade-In with Blur Placeholder (пункт 6)
+   ========================================================================== */
+
+.reader-text img {
+    opacity: 0;
+    transition: opacity 0.5s ease, filter 0.5s ease;
+    filter: blur(8px);
+}
+
+.reader-text img.img-loaded {
+    opacity: 1;
+    filter: blur(0);
+}
+
+.reader-text img.img-loading {
+    opacity: 0.3;
+    filter: blur(12px);
+    background: linear-gradient(
+        90deg,
+        var(--divider) 25%,
+        var(--card-hover) 37%,
+        var(--divider) 63%
+    );
+    background-size: 400% 100%;
+    animation: skeleton-shimmer 1.4s ease infinite;
+    min-height: 120px;
+    border-radius: 8px;
+}
+
+/* ==========================================================================
+   ★ READER 2.0: Teletype iframe Dark Mode
+   ========================================================================== */
+
+.teletype-iframe {
+    transition: filter 0.3s ease;
+}
+
+/* ==========================================================================
+   ★ READER 2.0: Lightbox swipe gesture (Spring)
+   ========================================================================== */
+
+.lightbox-image-wrapper {
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.lightbox-overlay {
+    transition: opacity 0.3s ease, background 0.2s ease;
+}
+
+/* ==========================================================================
+   ★ ФАЗА 1: Toast Notifications (пункт 2)
+   ========================================================================== */
+
+.toast-container {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    pointer-events: none;
+    padding: 12px 16px;
+    gap: 8px;
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 20px;
+    background: var(--text);
+    color: var(--bg);
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: Inter, -apple-system, sans-serif;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    pointer-events: all;
+    transform: translateY(-120%) scale(0.9);
+    opacity: 0;
+    transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+                opacity 0.3s ease;
+    max-width: 340px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.toast.toast-visible {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+}
+
+.toast.toast-exit {
+    transform: translateY(-120%) scale(0.9);
+    opacity: 0;
+}
+
+.toast-icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.toast-success { background: #16a34a; color: #fff; }
+.toast-error   { background: #dc2626; color: #fff; }
+.toast-info    { background: var(--text); color: var(--bg); }
+.toast-warning { background: #f59e0b; color: #1a1a2e; }
+
+/* ==========================================================================
+   ★ ФАЗА 4: Morphing FAB Button (пункт 10)
+   ========================================================================== */
+
+.fab-container {
+    position: fixed;
+    bottom: 80px;
+    right: 16px;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 12px;
+}
+
+.fab-btn {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 6px 24px rgba(255, 107, 129, 0.45);
+    transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+                box-shadow 0.3s ease;
+    -webkit-tap-highlight-color: transparent;
+    z-index: 61;
+}
+
+.fab-btn:active {
+    transform: scale(0.88);
+}
+
+.fab-btn.fab-open {
+    background: var(--text);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+}
+
+.fab-icon {
+    width: 24px;
+    height: 24px;
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                opacity 0.2s ease;
+    position: absolute;
+}
+
+.fab-icon-plus {
+    opacity: 1;
+    transform: rotate(0);
+}
+
+.fab-open .fab-icon-plus {
+    opacity: 0;
+    transform: rotate(135deg);
+}
+
+.fab-icon-close {
+    opacity: 0;
+    transform: rotate(-135deg);
+}
+
+.fab-open .fab-icon-close {
+    opacity: 1;
+    transform: rotate(0);
+}
+
+.fab-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-end;
+    transform: translateY(20px) scale(0.85);
+    opacity: 0;
+    transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1),
+                opacity 0.25s ease;
+    pointer-events: none;
+}
+
+.fab-menu.fab-menu-visible {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    pointer-events: all;
+}
+
+.fab-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    background: var(--settings-bg);
+    border: 1px solid var(--divider);
+    border-radius: 28px;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    font-family: Inter, -apple-system, sans-serif;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.2s;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.fab-menu-item .icon-sm { color: var(--accent); }
+
+.fab-menu-item:active {
+    transform: scale(0.93);
+    background: var(--accent-light);
+}
+
+/* Staggered FAB menu animation */
+.fab-menu-visible .fab-menu-item:nth-child(1) { transition-delay: 0s; }
+.fab-menu-visible .fab-menu-item:nth-child(2) { transition-delay: 0.04s; }
+.fab-menu-visible .fab-menu-item:nth-child(3) { transition-delay: 0.08s; }
+
+/* ==========================================================================
+   ★ ФАЗА 4: Pull-to-Next Chapter Indicator (пункт 11)
+   ========================================================================== */
+
+.pull-next-indicator {
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px 48px;
+    color: var(--text-secondary);
+}
+
+.pull-next-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 0.7;
+    transition: opacity 0.3s, transform 0.3s;
+}
+
+.pull-next-arrow {
+    color: var(--accent);
+    animation: pullBounce 1.5s ease-in-out infinite;
+}
+
+@keyframes pullBounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(6px); }
+}
+
+.pull-next-content.pull-active {
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+.pull-next-content.pull-loading .pull-next-arrow {
+    animation: spin 0.8s linear infinite;
+}
+
+/* ==========================================================================
+   ★ ФАЗА 4: Swipe-to-Go-Back (пункт 12)
+   ========================================================================== */
+
+.swipe-back-indicator {
+    position: fixed;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%) translateX(-100%);
+    width: 28px;
+    height: 80px;
+    background: linear-gradient(90deg, var(--accent), transparent);
+    border-radius: 0 20px 20px 0;
+    z-index: 9000;
+    opacity: 0;
+    transition: opacity 0.2s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    pointer-events: none;
+}
+
+.swipe-back-indicator.swiping {
+    opacity: 0.6;
+    transform: translateY(-50%) translateX(0);
+}
+
+.swipe-back-indicator.swiping-commit {
+    opacity: 1;
+    transform: translateY(-50%) translateX(8px);
+}
+
+/* ==========================================================================
+   ★ ФАЗА 1: Content fade-in for loaded screens
+   ========================================================================== */
+
+@keyframes contentFadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.content-fade-in {
+    animation: contentFadeIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* ★ Liked heart SVG styling */
+.like-btn .like-icon {
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.2s;
+}
+
+.like-btn.liked .like-icon {
+    color: #ff6b81;
+    fill: #ff6b81;
+    transform: scale(1.2);
+}
+
+.like-btn.just-liked .like-icon {
+    animation: heartPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ★ Анимация летящих сердечек */
+.floating-heart {
+    position: fixed;
+    font-size: 24px;
+    pointer-events: none;
+    z-index: 9999;
+    animation: floatUp 1s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+    opacity: 0;
+}
+
+@keyframes floatUp {
+    0% { transform: translate(0, 0) scale(0.5) rotate(0deg); opacity: 1; }
+    100% { transform: translate(var(--tx), var(--ty)) scale(1.5) rotate(var(--r)); opacity: 0; }
+}
+
+/* ★ Индикатор времени чтения */
+.reading-time-badge {
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+    font-family: Inter, -apple-system, sans-serif;
+    opacity: 0.8;
+}
+
+@keyframes heartPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.45); }
+    100% { transform: scale(1.2); }
+}
+
+/* ★ Scrollbar styling for dark themes */
+.reader-content::-webkit-scrollbar { width: 4px; }
+.reader-content::-webkit-scrollbar-track { background: transparent; }
+.reader-content::-webkit-scrollbar-thumb {
+    background: var(--divider);
+    border-radius: 4px;
+}
+
+/* ★ Stat icons with SVG */
+.stat-icon .icon-sm { color: var(--accent); }
