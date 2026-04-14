@@ -2150,6 +2150,33 @@ input:checked + .slider:before { transform: translateX(20px); }
    ★ ФАЗА 4: Morphing FAB Button (пункт 10)
    ========================================================================== */
 
+.autoscroll-fab {
+    position: fixed;
+    bottom: 80px;
+    left: 16px;
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 15px rgba(255, 107, 129, 0.35);
+    z-index: 60;
+    transition: transform 0.2s, opacity 0.3s;
+    font-size: 18px;
+}
+
+.autoscroll-fab.hidden {
+    display: none;
+}
+
+.autoscroll-fab:active {
+    transform: scale(0.9);
+}
+
 .fab-container {
     position: fixed;
     bottom: 80px;

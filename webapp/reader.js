@@ -635,14 +635,17 @@ function buildSkeletonLoader() {
 function initImageFadeIn(container) {
     const imgs = container.querySelectorAll('img');
     imgs.forEach(img => {
-        if (img.complete) {
+        const handleLoad = () => {
+            img.classList.remove('img-loading');
             img.classList.add('img-loaded');
+        };
+        
+        if (img.complete) {
+            handleLoad();
         } else {
             img.classList.add('img-loading');
-            img.addEventListener('load', () => {
-                img.classList.remove('img-loading');
-                img.classList.add('img-loaded');
-            }, { once: true });
+            img.addEventListener('load', handleLoad, { once: true });
+            img.addEventListener('error', handleLoad, { once: true }); // Снимаем блюр даже если ошибка загрузки
         }
     });
 }
@@ -2231,12 +2234,19 @@ function showToast(message, type = 'info') {
 }
 
 // === Fab Menu ===
+let fabTimeout = null;
+
 function toggleFab() {
     const btn = document.getElementById('fab-btn');
     const menu = document.getElementById('fab-menu');
     const close = document.getElementById('fab-icon-close');
 
     if (!btn || !menu) return;
+
+    if (fabTimeout) {
+        clearTimeout(fabTimeout);
+        fabTimeout = null;
+    }
 
     const isOpening = !btn.classList.contains('fab-open');
     haptic('medium');
@@ -2253,7 +2263,7 @@ function toggleFab() {
     } else {
         btn.classList.remove('fab-open');
         menu.classList.remove('fab-menu-visible');
-        setTimeout(() => menu.classList.add('hidden'), 400);
+        fabTimeout = setTimeout(() => menu.classList.add('hidden'), 400);
     }
 }
 
