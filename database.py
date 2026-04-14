@@ -8,6 +8,8 @@ _VALID_STAT_COLUMNS = frozenset({"hugs", "kisses", "bites", "slaps", "pats"})
 
 async def init_db():
     async with aiosqlite.connect('manga.db') as db:
+        await db.execute('PRAGMA journal_mode=WAL;')
+        await db.execute('PRAGMA synchronous=NORMAL;')
         await db.execute('CREATE TABLE IF NOT EXISTS chapters_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))')
         await db.execute('CREATE TABLE IF NOT EXISTS ranobe_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))')
         await db.execute('CREATE TABLE IF NOT EXISTS akashic_ranobe (volume INTEGER, chapter TEXT, url TEXT, PRIMARY KEY (volume, chapter))')

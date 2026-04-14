@@ -606,6 +606,18 @@ input[type="range"]::-webkit-slider-thumb {
 .empty-state .empty-icon { font-size: 48px; margin-bottom: 16px; }
 .empty-state h3 { font-size: 17px; margin-bottom: 8px; color: var(--text); }
 .empty-state p { font-size: 14px; line-height: 1.5; }
+.retry-btn {
+    margin-top: 16px;
+    padding: 10px 24px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 15px;
+    cursor: pointer;
+    transition: transform 0.15s, opacity 0.15s;
+}
+.retry-btn:active { transform: scale(0.95); opacity: 0.85; }
 
 .hidden { display: none !important; }
 
@@ -2040,29 +2052,15 @@ input:checked + .slider:before { transform: translateX(20px); }
    ========================================================================== */
 
 .reader-text img {
-    opacity: 0;
-    transition: opacity 0.5s ease, filter 0.5s ease;
-    filter: blur(8px);
-}
-
-.reader-text img.img-loaded {
     opacity: 1;
-    filter: blur(0);
-}
-
-.reader-text img.img-loading {
-    opacity: 0.3;
-    filter: blur(12px);
-    background: linear-gradient(
-        90deg,
-        var(--divider) 25%,
-        var(--card-hover) 37%,
-        var(--divider) 63%
-    );
-    background-size: 400% 100%;
-    animation: skeleton-shimmer 1.4s ease infinite;
-    min-height: 120px;
+    filter: none;
+    max-width: 100%;
     border-radius: 8px;
+    margin: 12px 0;
+}
+.reader-text img.img-loading {
+    background: var(--card-hover);
+    min-height: 120px;
 }
 
 /* ==========================================================================

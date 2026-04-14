@@ -2551,12 +2551,17 @@ async def process_user_art_grid(callback: types.CallbackQuery, state: FSMContext
     all_ids = photo_ids + [control_msg.message_id]
     await state.update_data(user_grid_photos=all_ids)
 
-    async def auto_cleanup(chat_id: int, ids: list):
+    async def auto_cleanup(chat_id: int, ids: list, fsm_state: FSMContext):
         await asyncio.sleep(120)
+        # Проверяем, что текущие IDs в стейте совпадают — если нет, юзер перелистнул
+        data = await fsm_state.get_data()
+        current_ids = data.get('user_grid_photos', [])
+        if set(ids) != set(current_ids):
+            return  # Устаревшая таска, данные уже удалены при перелистывании
         for mid in ids:
             try: await bot.delete_message(chat_id, mid)
             except Exception: pass
-    asyncio.create_task(auto_cleanup(callback.message.chat.id, all_ids))
+    asyncio.create_task(auto_cleanup(callback.message.chat.id, all_ids, state))
 
 # --- Ввод номера страницы в сетке ---
 @dp.callback_query(F.data == "grid_page_input")
@@ -3143,13 +3148,18 @@ async def process_admin_art_grid(callback: types.CallbackQuery, state: FSMContex
     await state.update_data(grid_photos=photo_ids)
 
     # Функция автоочистки через 2 минуты
-    async def auto_cleanup(chat_id: int, ids: list):
+    async def auto_cleanup(chat_id: int, ids: list, fsm_state: FSMContext):
         await asyncio.sleep(120)
+        # Проверяем, что текущие IDs в стейте совпадают — если нет, админ перелистнул
+        data = await fsm_state.get_data()
+        current_ids = data.get('grid_photos', [])
+        if set(ids) != set(current_ids):
+            return  # Устаревшая таска, данные уже удалены при перелистывании
         for mid in ids:
             try: await bot.delete_message(chat_id, mid)
             except Exception: pass
 
-    asyncio.create_task(auto_cleanup(callback.message.chat.id, photo_ids + [control_msg.message_id]))
+    asyncio.create_task(auto_cleanup(callback.message.chat.id, photo_ids + [control_msg.message_id], state))
 
 @dp.callback_query(F.data == "admin_art_view_back")
 async def process_admin_art_view_back(callback: types.CallbackQuery, state: FSMContext):
