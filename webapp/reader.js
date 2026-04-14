@@ -209,46 +209,77 @@ function updateProgressBar() {
 let serverBookmarks = []; // Хранит загруженные закладки
 
 async function loadData() {
+    console.log("Starting loadData...");
+    
+    // Вспомогательная функция для таймаута, если AbortSignal.timeout не поддерживается
+    const getTimeoutSignal = (ms) => {
+        if (AbortSignal.timeout) return AbortSignal.timeout(ms);
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+    };
+
+    // 1. Пытаемся загрузить прогресс (если есть API)
     if (API_URL && userId) {
+        console.log("Fetching progress from API...");
         try {
-            const bResp = await apiFetch(API_URL + '/api/progress');
+            const bResp = await apiFetch(API_URL + '/api/progress', { signal: getTimeoutSignal(5000) });
             if (bResp.ok) {
                 const bData = await bResp.json();
                 serverBookmarks = bData.bookmarks || [];
+                console.log("Bookmarks loaded:", serverBookmarks.length);
+            } else {
+                console.warn("Progress API returned status:", bResp.status);
             }
         } catch (e) {
             console.warn('Bookmarks load warning:', e);
         }
     }
 
+    // 2. Пытаемся загрузить данные из API
     if (API_URL) {
+        console.log("Fetching reader data from API:", API_URL + '/api/reader');
         try {
-            const resp = await apiFetch(API_URL + '/api/reader', { signal: AbortSignal.timeout(8000) });
+            const resp = await apiFetch(API_URL + '/api/reader', { signal: getTimeoutSignal(10000) });
             if (resp.ok) {
                 allData = await resp.json();
+                console.log("Data loaded from API, series count:", allData.series?.length);
                 if (allData.series && allData.series.length > 0) {
                     renderSeriesList();
                     renderContinueReading();
                     return;
                 }
+                console.log("API returned empty series list, falling back to JSON...");
+            } else {
+                console.warn("Reader API returned status:", resp.status);
             }
         } catch (e) {
-            console.warn('API недоступен:', e);
+            console.warn('API fetch error or timeout:', e);
         }
+    } else {
+        console.log("No API_URL configured, skipping API fetch.");
     }
 
+    // 3. Фолбэк на статический JSON
+    console.log("Fetching fallback chapters_data.json...");
     try {
-        const resp = await fetch('chapters_data.json?v=' + Date.now());
+        const resp = await fetch('chapters_data.json?v=' + Date.now(), { signal: getTimeoutSignal(5000) });
         if (resp.ok) {
             allData = await resp.json();
-            renderSeriesList();
-            renderContinueReading();
-            return;
+            console.log("Data loaded from fallback JSON, series count:", allData.series?.length);
+            if (allData.series && allData.series.length > 0) {
+                renderSeriesList();
+                renderContinueReading();
+                return;
+            }
+        } else {
+            console.warn("Fallback JSON fetch failed with status:", resp.status);
         }
     } catch (e) {
-        console.warn('Статический JSON не найден:', e);
+        console.error('Fallback JSON fetch error:', e);
     }
 
+    console.log("All data sources failed or empty, showing empty state.");
     showEmptyState();
 }
 
