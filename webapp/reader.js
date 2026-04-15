@@ -36,7 +36,8 @@ function toggleAdminMode(enabled) {
 
 function renameItem(objId) {
     const bot_username = allData.bot_username || "Alyamangapage_bot";
-    tg.openTelegramLink('https://t.me/' + bot_username + '?start=rename_' + objId);
+    const encoded = btoa(unescape(encodeURIComponent(objId))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    tg.openTelegramLink('https://t.me/' + bot_username + '?start=ren_' + encoded);
     tg.close();
 }
 
@@ -1699,7 +1700,7 @@ function openEditUrlModal(chIdx) {
     const ch = currentChapters[chIdx];
     const chapName = ch.custom_name || `Глава ${ch.chapter}`;
     document.getElementById('edit-url-chapter-name').textContent = chapName;
-    const currentUrl = (ch.urls && ch.urls[0]) || ch.url || '';
+    const currentUrl = (ch.urls && ch.urls.length > 0) ? ch.urls.join('\n') : (ch.url || '');
     document.getElementById('edit-url-input').value = currentUrl;
     document.getElementById('edit-url-overlay').classList.remove('hidden');
     document.getElementById('edit-url-modal').classList.remove('hidden');
@@ -1716,7 +1717,6 @@ async function saveEditUrl() {
     if (editUrlChapterIdx === null || !API_URL) return;
     const ch = currentChapters[editUrlChapterIdx];
     const newUrl = document.getElementById('edit-url-input').value.trim();
-    if (!newUrl) return showToast('Введите ссылку');
 
     const saveBtn = document.getElementById('edit-url-save');
     saveBtn.disabled = true;
@@ -1736,8 +1736,9 @@ async function saveEditUrl() {
         const result = await resp.json();
         if (result.ok) {
             // Update local data
-            if (ch.urls) ch.urls = [newUrl];
-            else ch.url = newUrl;
+            const urlArr = newUrl.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+            ch.urls = urlArr;
+            ch.url = urlArr[0] || '';
             closeEditUrlModal();
             showToast('✅ Ссылка обновлена!');
         } else {

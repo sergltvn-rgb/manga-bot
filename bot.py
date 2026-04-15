@@ -650,6 +650,31 @@ async def cmd_start(message: types.Message, state: FSMContext):
             except (ValueError, IndexError):
                 pass
             
+    if deep_link and deep_link.startswith("ren_"):
+        admins = await get_admins()
+        if message.from_user.id not in admins:
+            return await message.answer("❌ У вас нет прав администратора.")
+            
+        encoded = deep_link[len("ren_"):]
+        padding = 4 - (len(encoded) % 4)
+        if padding != 4:
+            encoded += "=" * padding
+        try:
+            import base64
+            obj_id = base64.urlsafe_b64decode(encoded).decode('utf-8')
+        except Exception:
+            return await message.answer("❌ Ошибка декодирования ID.")
+            
+        await state.update_data(rename_id=obj_id)
+        await state.set_state(AdminRename.waiting_for_name)
+        from database import get_custom_name
+        current_name = await get_custom_name(obj_id)
+        cur_text = f"\nТекущее кастомное название: <b>{current_name}</b>" if current_name else "\nСейчас используется стандартное название."
+        return await message.answer(
+            f"✏️ <b>Режим редактора</b>\n\nВы хотите переименовать элемент: <code>{obj_id}</code>{cur_text}\n\nОтправьте в чат <b>НОВОЕ</b> текстовое название, которое вы хотите увидеть в WebApp (или отправьте <code>/cancel</code> для отмены):",
+            parse_mode="HTML"
+        )
+
     if deep_link and deep_link.startswith("rename_"):
         admins = await get_admins()
         if message.from_user.id not in admins:
@@ -3397,7 +3422,7 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
     ct = CONTENT_TYPES.get(ctype, CONTENT_TYPES['manga'])
     content_id = data.get('content_id', '')
     chapter = data.get('chapter', '')
-    text_input = message.text.strip()
+    text_input = message.html_text.strip()
 
     # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ
     links = _clean_urls(text_input)
@@ -4227,16 +4252,16 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
             await db.commit()
 
         # Уведомление админам
-        import html
+        def _esc(t): return str(t).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
         admins = await get_admins()
-        logging.info(f"Typo report received from {user_name} ({user_id}). Admins to notify: {admins}")
+        logging.info(f"Typo report received from {user_name} ({user_id}).")
         report_text = (
             f"🚨 <b>Новая опечатка!</b>\n"
-            f"От: {html.escape(user_name)} (ID: {user_id})\n"
-            f"Глава: <code>{html.escape(chapter_key)}</code>\n\n"
-            f"<b>Текст:</b> <code>{html.escape(selected_text)}</code>\n"
-            f"<b>Контекст:</b> <i>...{html.escape(context_text)}...</i>\n"
-            f"<b>Комментарий:</b> {html.escape(comment)}"
+            f"От: {_esc(user_name)} (ID: {user_id})\n"
+            f"Глава: <code>{_esc(chapter_key)}</code>\n\n"
+            f"<b>Текст:</b> <code>{_esc(selected_text)}</code>\n"
+            f"<b>Контекст:</b> <i>...{_esc(context_text)}...</i>\n"
+            f"<b>Комментарий:</b> {_esc(comment)}"
         )
         for admin_id in admins:
             try:
