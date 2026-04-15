@@ -139,14 +139,23 @@ function toggleImmersiveMode(force = null) {
 
 function toggleQuickSwitcher() {
     const switcher = document.getElementById('quick-switcher');
+    const overlay = document.getElementById('toc-overlay'); // Reusing toc-overlay for switcher
     if (!switcher) return;
-    const isHidden = switcher.classList.contains('hidden');
     
-    if (isHidden) {
+    const isActive = switcher.classList.contains('active');
+    
+    if (!isActive) {
         renderQuickSwitcherList();
-        switcher.classList.remove('hidden');
+        switcher.classList.add('active');
+        overlay?.classList.add('active');
+        haptic('light');
     } else {
-        switcher.classList.add('hidden');
+        switcher.classList.remove('active');
+        // Only hide overlay if ToC is also closed
+        const toc = document.getElementById('toc-panel');
+        if (!toc || !toc.classList.contains('active')) {
+            overlay?.classList.remove('active');
+        }
     }
 }
 
