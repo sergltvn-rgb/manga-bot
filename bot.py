@@ -41,7 +41,8 @@ from database import (
     get_chat_ai_provider, set_chat_ai_provider,
     add_to_harem, remove_from_harem, get_user_harem, update_loyalty_level,
     add_to_inventory, get_user_inventory, get_users_with_bookmark,
-    add_referral, get_referral_stats, get_user_referred_by
+    add_referral, get_referral_stats, get_user_referred_by,
+    get_setting, set_setting, get_custom_name
 )
 
 COOLDOWN_TIME = 30 
@@ -248,6 +249,54 @@ async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider
 # Обратная совместимость
 async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str:
     return await ask_ai(prompt, system_prompt, history, provider="groq")
+
+# --- СИСТЕМА TELEGRAPH (АВТО-КОНВЕРТАЦИЯ ТЕКСТА) ---
+async def get_telegraph_token():
+    token = await get_setting("telegraph_token")
+    if token: return token
+    
+    url = "https://api.telegra.ph/createAccount?short_name=AlyaBot&author_name=AlyaBot"
+    try:
+        session = await get_http_session()
+        async with session.get(url) as resp:
+            data = await resp.json()
+            if data.get("ok"):
+                token = data["result"]["access_token"]
+                await set_setting("telegraph_token", token)
+                return token
+    except Exception as e:
+        logging.error(f"Telegraph Token Error: {e}")
+    return None
+
+async def upload_to_telegraph(title, content):
+    token = await get_telegraph_token()
+    if not token: return None
+    
+    # Разбиваем текст на параграфы (Node format)
+    nodes = []
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line:
+            nodes.append({"tag": "br"})
+        else:
+            nodes.append({"tag": "p", "children": [line]})
+            
+    payload = {
+        "access_token": token,
+        "title": title,
+        "author_name": "AlyaBot",
+        "content": json.dumps(nodes),
+        "return_content": "false"
+    }
+    try:
+        session = await get_http_session()
+        async with session.post("https://api.telegra.ph/createPage", data=payload) as resp:
+            data = await resp.json()
+            if data.get("ok"):
+                return data["result"]["url"]
+    except Exception as e:
+        logging.error(f"Telegraph Upload Error: {e}")
+    return None
 
 # --- Команда /model удалена по запросу ---
 
@@ -2683,6 +2732,9 @@ async def cmd_admin(message: types.Message):
     builder.row(
         types.InlineKeyboardButton(text="🤖 Настройки ИИ", callback_data="admin_ai_settings")
     )
+    builder.row(
+        types.InlineKeyboardButton(text="🔔 Тест уведомлений", callback_data="admin_cmd_test_notification")
+    )
     
     text = "👑 <b>Панель управления:</b>\nВыберите действие:"
     await message.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
@@ -2699,6 +2751,9 @@ async def admin_menu_back(callback: types.CallbackQuery):
     )
     builder.row(
         types.InlineKeyboardButton(text="🤖 Настройки ИИ", callback_data="admin_ai_settings")
+    )
+    builder.row(
+        types.InlineKeyboardButton(text="🔔 Тест уведомлений", callback_data="admin_cmd_test_notification")
     )
     await callback.message.edit_text("👑 <b>Панель управления:</b>\nВыберите действие:", parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -2776,7 +2831,8 @@ async def admin_menu_commands(callback: types.CallbackQuery, state: FSMContext):
         "toggle_ai": cmd_toggle_ai,
         "alya_mode": cmd_alya_mode,
         "blacklist_ai": cmd_blacklist_ai,
-        "unblacklist_ai": cmd_unblacklist_ai
+        "unblacklist_ai": cmd_unblacklist_ai,
+        "test_notification": cmd_test_notification
     }
     
     if cmd in commands:
@@ -2882,6 +2938,48 @@ async def build_reader_data() -> dict:
                     "id": f"manga_{lang}", "title": custom_title, "cover_url": custom_names.get(f"cover_manga_{lang}", ""), "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}]
                 })
                 
+    # ДОПОЛНИТЕЛЬНО: Инъекция глав без ссылок, но с кастомными именами
+    # Это позволяет переименовывать главы, которых еще нет в БД ссылок.
+    for key, name in custom_names.items():
+        if not key.startswith("chap_"): continue
+        parts = key.split("_")
+        # chap_seriesId_vol_chapNum  -> parts: [chap, series, id, vol, chapNum]
+        # Но series_id может содержать подчеркивания (manga_ru), так что парсим аккуратнее.
+        if parts[1] == "akashic" and parts[2] == "records":
+            s_id, vol, chap = "akashic_records", parts[3], parts[4]
+        elif parts[1] == "british" and parts[2] == "belle":
+            s_id, vol, chap = "british_belle", parts[3], parts[4]
+        else:
+            s_id, vol, chap = f"{parts[1]}_{parts[2]}", parts[3], parts[4]
+            
+        # Ищем серию в результате
+        target_series = next((s for s in result["series"] if s["id"] == s_id), None)
+        if not target_series:
+            # Если серии нет, создаем "призрачную" серию?
+            # Лучше не надо, чтобы не захламлять. Только если база хоть что-то знает о серии.
+            continue
+            
+        # Ищем том
+        target_vol = next((v for v in target_series["volumes"] if str(v["volume"]) == str(vol)), None)
+        if not target_vol:
+            # Если тома нет, добавляем его
+            target_vol = {"volume": int(vol), "custom_name": custom_names.get(f"vol_{s_id}_{vol}") or f"Том {vol}", "chapters": []}
+            target_series["volumes"].append(target_vol)
+            target_series["volumes"].sort(key=lambda x: x["volume"])
+            
+        # Ищем главу
+        if not any(str(c["chapter"]) == str(chap) for c in target_vol["chapters"]):
+            target_vol["chapters"].append({
+                "chapter": chap,
+                "custom_name": name,
+                "url": "",
+                "urls": []
+            })
+            # Сортируем главы
+            try:
+                target_vol["chapters"].sort(key=lambda x: (float(x["chapter"]) if str(x["chapter"]).replace('.','',1).isdigit() else 0))
+            except: pass
+
     return result
 
 
@@ -3299,7 +3397,36 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
     ct = CONTENT_TYPES.get(ctype, CONTENT_TYPES['manga'])
     content_id = data.get('content_id', '')
     chapter = data.get('chapter', '')
-    link = message.text.strip()
+    text_input = message.text.strip()
+
+    # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ
+    links = _clean_urls(text_input)
+    has_telegraph = any("telegra.ph" in l for l in links)
+    
+    # Решаем: загружать ли в Telegraph?
+    # Если ссылок нет ВООБЩЕ или есть много текста без Telegraph ссылки
+    if not has_telegraph:
+        # Если в тексте есть ссылки, но нет телеграфа, и текста много (больше 100 символов помимо ссылок)
+        pure_text = text_input
+        for l in links: pure_text = pure_text.replace(l, "")
+        
+        if len(pure_text.strip()) > 30 or not links:
+            wait_msg = await message.answer("📝 <i>Готовлю страницу Telegraph...</i>", parse_mode="HTML")
+            id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
+            title = f"{ct['emoji']} {ct['name']} — {id_label}, Глава {chapter}"
+            new_link = await upload_to_telegraph(title, text_input)
+            if new_link:
+                link = new_link
+                await wait_msg.delete()
+            else:
+                await wait_msg.edit_text("⚠️ Не удалось загрузить в Телеграф, сохраняю как есть.")
+                link = text_input
+        else:
+            # Текста мало, просто объединяем ссылки
+            link = " ".join(links)
+    else:
+        # Телеграф уже есть или это просто ссылка(и) на него
+        link = " ".join(links)
 
     async with aiosqlite.connect('manga.db') as db:
         # Получаем текущий макс. sort_order для этого тайтла/тома
@@ -3808,11 +3935,51 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
         if not info:
             return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
 
-        table, col, where, params_fn = info
-        params = params_fn(volume, chapter)
+        # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ И ПРИОРИТЕТИЗИРУЕМ ТЕЛЕГРАФ
+        links = _clean_urls(new_url)
+        has_telegraph = any("telegra.ph" in l for l in links)
 
+        if not has_telegraph:
+            pure_text = new_url
+            for l in links: pure_text = pure_text.replace(l, "")
+            
+            if len(pure_text.strip()) > 30 or not links:
+                title = f"Глава {chapter}"
+                s_name = await get_custom_name(f"series_{series_id}") or series_id
+                title = f"{s_name} — Глава {chapter}"
+                telegraph_url = await upload_to_telegraph(title, new_url)
+                if telegraph_url:
+                    new_url = telegraph_url
+                elif links:
+                    new_url = " ".join(links)
+            else:
+                new_url = " ".join(links)
+        else:
+            new_url = " ".join(links)
+
+        table, _, _, _ = info
+        
         async with aiosqlite.connect('manga.db') as db:
-            await db.execute(f'UPDATE {table} SET url = ? WHERE {where}', (new_url,) + params)
+            if series_id in ('akashic_records', 'british_belle'):
+                # Получаем макс sort_order если это новая запись
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE volume=?", (volume,)) as cur:
+                    row = await cur.fetchone()
+                    next_order = (row[0] or 0) + 1
+                await db.execute(
+                    f'INSERT INTO {table} (volume, chapter, url, sort_order) VALUES (?, ?, ?, ?) '
+                    f'ON CONFLICT(volume, chapter) DO UPDATE SET url=excluded.url',
+                    (volume, chapter, new_url, next_order)
+                )
+            else:
+                lang = series_id.split('_', 1)[1] if '_' in series_id else 'ru'
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=?", (lang,)) as cur:
+                    row = await cur.fetchone()
+                    next_order = (row[0] or 0) + 1
+                await db.execute(
+                    f'INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?) '
+                    f'ON CONFLICT(chapter_number, lang) DO UPDATE SET url=excluded.url',
+                    (chapter, lang, new_url, next_order)
+                )
             await db.commit()
 
         # Пересобираем JSON и синхронизируем
@@ -4038,6 +4205,22 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 # --- Репорты об опечатках ---
 
+async def cmd_test_notification(message: types.Message):
+    admins = await get_admins()
+    if message.from_user.id not in admins: return
+    
+    await message.answer(f"🔔 <b>Тест уведомлений</b>\nСписок админов: <code>{admins}</code>\nТвой ID: <code>{message.from_user.id}</code>\n\nСейчас попробую отправить тестовое сообщение...", parse_mode="HTML")
+    
+    count = 0
+    for admin_id in admins:
+        try:
+            await bot.send_message(admin_id, "✅ Тестовое уведомление из системы репортов!")
+            count += 1
+        except Exception as e:
+            await message.answer(f"❌ Ошибка для {admin_id}: {e}")
+    
+    await message.answer(f"🏁 Тест завершен. Отправлено: {count}/{len(admins)}")
+
 async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Добавить репорт об опечатке."""
     try:
@@ -4065,6 +4248,7 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
 
         # Уведомление админам
         admins = await get_admins()
+        logging.info(f"Typo report received from {user_name} ({user_id}). Admins to notify: {admins}")
         report_text = (
             f"🚨 <b>Новая опечатка!</b>\n"
             f"От: {user_name} (ID: {user_id})\n"
@@ -4074,8 +4258,11 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
             f"<b>Комментарий:</b> {comment}"
         )
         for admin_id in admins:
-            try: await bot.send_message(admin_id, report_text, parse_mode="HTML")
-            except Exception: pass
+            try:
+                logging.info(f"Sending typo report to admin {admin_id}")
+                await bot.send_message(admin_id, report_text, parse_mode="HTML")
+            except Exception as e:
+                logging.error(f"Failed to notify admin {admin_id}: {e}")
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
