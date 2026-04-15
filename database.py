@@ -2,6 +2,7 @@
 import aiosqlite
 import sqlite3
 from datetime import datetime
+from config import ADMIN_IDS
 
 # Белый список допустимых колонок для update_rp_stat
 _VALID_STAT_COLUMNS = frozenset({"hugs", "kisses", "bites", "slaps", "pats"})
@@ -313,7 +314,7 @@ async def get_admins():
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT user_id FROM admins') as cursor:
             rows = await cursor.fetchall()
-            return [row[0] for row in rows] + [6210312655] 
+            return [row[0] for row in rows] + ADMIN_IDS
 
 async def add_admin(user_id: int):
     async with aiosqlite.connect('manga.db') as db:

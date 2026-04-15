@@ -27,7 +27,11 @@ from aiogram.types import (
     BotCommand, BotCommandScopeDefault
 )
 
+import uuid
 from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL, API_HOST
+
+# Кэш для коротких ссылок переименования (обход лимита 64 символа в deeplink)
+RENAME_CACHE = {}
 from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
@@ -655,15 +659,11 @@ async def cmd_start(message: types.Message, state: FSMContext):
         if message.from_user.id not in admins:
             return await message.answer("❌ У вас нет прав администратора.")
             
-        encoded = deep_link[len("ren_"):]
-        padding = 4 - (len(encoded) % 4)
-        if padding != 4:
-            encoded += "=" * padding
-        try:
-            import base64
-            obj_id = base64.urlsafe_b64decode(encoded).decode('utf-8')
-        except Exception:
-            return await message.answer("❌ Ошибка декодирования ID.")
+        short_id = deep_link[len("ren_"):]
+        if short_id not in RENAME_CACHE:
+            return await message.answer("❌ Ошибка: ссылка устарела или недействительна. Попробуйте еще раз из WebApp.")
+            
+        obj_id = RENAME_CACHE[short_id]
             
         await state.update_data(rename_id=obj_id)
         await state.set_state(AdminRename.waiting_for_name)
@@ -4252,16 +4252,16 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
             await db.commit()
 
         # Уведомление админам
-        def _esc(t): return str(t).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        def safe_html(t): return html.escape(str(t), quote=False)
         admins = await get_admins()
         logging.info(f"Typo report received from {user_name} ({user_id}).")
         report_text = (
             f"🚨 <b>Новая опечатка!</b>\n"
-            f"От: {_esc(user_name)} (ID: {user_id})\n"
-            f"Глава: <code>{_esc(chapter_key)}</code>\n\n"
-            f"<b>Текст:</b> <code>{_esc(selected_text)}</code>\n"
-            f"<b>Контекст:</b> <i>...{_esc(context_text)}...</i>\n"
-            f"<b>Комментарий:</b> {_esc(comment)}"
+            f"От: {safe_html(user_name)} (ID: <code>{user_id}</code>)\n"
+            f"Глава: <code>{safe_html(chapter_key)}</code>\n\n"
+            f"<b>Текст:</b> <code>{safe_html(selected_text)}</code>\n"
+            f"<b>Контекст:</b> <i>...{safe_html(context_text)}...</i>\n"
+            f"<b>Комментарий:</b> {safe_html(comment)}"
         )
         for admin_id in admins:
             try:
@@ -4273,6 +4273,20 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_rename_request(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Кэширует длинные ID глав и выдает короткий ID (обход лимита 64 символов в deeplink)."""
+    user = get_auth_user(request)
+    if not user:
+        return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+    data = await request.json()
+    obj_id = data.get('obj_id', '').strip()
+    if not obj_id:
+        return aiohttp.web.json_response({"error": "missing obj_id"}, status=400, headers=CORS_HEADERS)
+    
+    short_id = str(uuid.uuid4())[:8]
+    RENAME_CACHE[short_id] = obj_id
+    return aiohttp.web.json_response({"ok": True, "short_id": short_id}, headers=CORS_HEADERS)
 
 # --- Прогресс чтения (Закладки) ---
 
@@ -4447,6 +4461,9 @@ async def main():
     # Репорты об опечатках
     app.router.add_post("/api/typo", handle_typo_post)
     app.router.add_options("/api/typo", handle_cors_preflight)
+    # Создание короткой ссылки для переименования
+    app.router.add_post("/api/rename/request", handle_rename_request)
+    app.router.add_options("/api/rename/request", handle_cors_preflight)
     # Сортировка глав (Admin DnD)
     app.router.add_route("PUT", "/api/sort", handle_sort_chapters)
     app.router.add_options("/api/sort", handle_cors_preflight)

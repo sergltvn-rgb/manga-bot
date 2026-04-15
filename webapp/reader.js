@@ -34,11 +34,25 @@ function toggleAdminMode(enabled) {
     }
 }
 
-function renameItem(objId) {
-    const bot_username = allData.bot_username || "Alyamangapage_bot";
-    const encoded = btoa(unescape(encodeURIComponent(objId))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    tg.openTelegramLink('https://t.me/' + bot_username + '?start=ren_' + encoded);
-    tg.close();
+async function renameItem(objId) {
+    if (!API_URL) return showToast('Переименование доступно только при подключенном API.');
+    try {
+        const resp = await apiFetch(`${API_URL}/api/rename/request`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ obj_id: objId })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            const bot_username = allData.bot_username || "Alyamangapage_bot";
+            tg.openTelegramLink('https://t.me/' + bot_username + '?start=ren_' + data.short_id);
+            tg.close();
+        } else {
+            showToast('Ошибка: ' + (data.error || 'неизвестная'));
+        }
+    } catch (e) {
+        showToast('Ошибка сети: ' + e.message);
+    }
 }
 
 async function resetCustomName(objId) {
