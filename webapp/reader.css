@@ -2855,19 +2855,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 }
 
 /* ★ Анимация летящих сердечек */
-.floating-heart {
-    position: fixed;
-    font-size: 24px;
-    pointer-events: none;
-    z-index: 9999;
-    animation: floatUp 1s cubic-bezier(0.25, 1, 0.5, 1) forwards;
-    opacity: 0;
-}
-
-@keyframes floatUp {
-    0% { transform: translate(0, 0) scale(0.5) rotate(0deg); opacity: 1; }
-    100% { transform: translate(var(--tx), var(--ty)) scale(1.5) rotate(var(--r)); opacity: 0; }
-}
+/* Floating emojis consolidated in .floating-emoji */
 
 /* ★ Индикатор времени чтения */
 .reading-time-badge {
@@ -2879,11 +2867,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     opacity: 0.8;
 }
 
-@keyframes heartPop {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.45); }
-    100% { transform: scale(1.2); }
-}
+/* Animation replaced by reactionPop */
 
 /* ★ Scrollbar styling for dark themes */
 .reader-content::-webkit-scrollbar { width: 4px; }
