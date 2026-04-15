@@ -139,9 +139,13 @@ function toggleImmersiveMode(force = null) {
 
 function toggleQuickSwitcher() {
     const switcher = document.getElementById('quick-switcher');
-    const overlay = document.getElementById('toc-overlay'); // Reusing toc-overlay for switcher
+    const overlay = document.getElementById('toc-overlay');
     if (!switcher) return;
     
+    // Прячем меню FAB если открыто
+    const fabMenu = document.getElementById('fab-menu');
+    if (fabMenu && !fabMenu.classList.contains('hidden')) toggleFab();
+
     const isActive = switcher.classList.contains('active');
     
     if (!isActive) {
@@ -151,7 +155,6 @@ function toggleQuickSwitcher() {
         haptic('light');
     } else {
         switcher.classList.remove('active');
-        // Only hide overlay if ToC is also closed
         const toc = document.getElementById('toc-panel');
         if (!toc || !toc.classList.contains('active')) {
             overlay?.classList.remove('active');

@@ -77,33 +77,41 @@ body.theme-sepia {
     --tab-bg: #efe3ca;
     --settings-bg: #f4ead5;
     --input-bg: #efe3ca;
+    --accent: #6366f1; /* Royal Indigo */
+    --accent-light: rgba(99, 102, 241, 0.1);
+    --accent-hover: #4f46e5;
+    --badge-bg: rgba(99, 102, 241, 0.12);
+    --progress-gradient: linear-gradient(90deg, #6366f1, #a855f7);
 }
 
 body.theme-dark {
-    --bg: #1a1a2e;
+    --bg: #0f172a; /* Slate 950-ish */
     --text: #e2e8f0;
-    --text-primary: #f1f5f9;
+    --text-primary: #f8fafc;
     --text-secondary: #94a3b8;
-    --card-bg: #212140;
-    --card-border: rgba(99, 102, 241, 0.15);
-    --card-hover: rgba(99, 102, 241, 0.08);
-    --header-bg: rgba(26, 26, 46, 0.98);
-    --reader-bg: #1a1a2e;
+    --card-bg: #1e293b;
+    --card-border: rgba(99, 102, 241, 0.1);
+    --tab-active: #818cf8; /* Softer Indigo */
+    --accent: #818cf8;
+    --progress-gradient: linear-gradient(90deg, #818cf8, #c084fc);
+    --glass-bg: rgba(15, 23, 42, 0.95);
+    --overlay: rgba(0,0,0,0.8);
+    --reader-bg: #0f172a;
     --reader-text: #d4d4d4;
     --divider: rgba(255, 255, 255, 0.1);
     --shadow: 0 4px 15px rgba(0,0,0,0.4);
-    --tab-bg: #212140;
-    --tab-active: #6366f1;
-    --settings-bg: #1a1a2e;
+    --tab-bg: #1e293b;
+    --settings-bg: #0f172a;
     --input-bg: #16162a;
-    --overlay: rgba(0,0,0,0.7);
-    --glass-bg: rgba(26, 26, 46, 0.96);
     --glass-border: rgba(255, 255, 255, 0.1);
 }
 
 body.theme-amoled {
     --bg: #000000;
-    --text: #e2e8f0;
+    --text: #cbd5e1;
+    --tab-active: #818cf8;
+    --accent: #818cf8;
+    --glass-bg: rgba(0,0,0,0.98);
     --text-primary: #ffffff;
     --text-secondary: #888;
     --card-bg: #111;
@@ -112,14 +120,12 @@ body.theme-amoled {
     --header-bg: rgba(0, 0, 0, 0.98);
     --reader-bg: #000;
     --reader-text: #ccc;
-    --divider: rgba(255, 255, 255, 0.08);
+    --divider: rgba(255, 255, 255, 0.12);
     --shadow: none;
     --tab-bg: #111;
-    --tab-active: #6366f1;
     --settings-bg: #111;
     --input-bg: #0a0a0a;
     --overlay: rgba(0,0,0,0.8);
-    --glass-bg: rgba(0, 0, 0, 0.98);
     --glass-border: rgba(255, 255, 255, 0.12);
 }
 
@@ -520,22 +526,24 @@ body {
 .chapter-indicator { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
 
 /* --- Progress Bar --- */
+/* --- Unified Progress Bar (Single 2px Line) --- */
 .reading-progress-container {
     position: fixed;
-    top: 56px; /* Below header */
+    top: 56px; /* Below standard header */
     left: 0; right: 0;
-    height: 3px;
-    z-index: 25;
-    background: transparent;
+    height: 2px;
+    z-index: 1000;
+    background: rgba(0,0,0,0.05);
     pointer-events: none;
     transition: transform 0.3s ease;
 }
+
 .reading-progress-bar {
     height: 100%;
     width: 0%;
-    background: var(--progress-gradient);
-    box-shadow: 0 0 10px rgba(255, 107, 129, 0.4);
-    transition: width 0.1s linear;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    transition: width 0.2s ease-out;
 }
 
 /* Immersive state */
@@ -1165,17 +1173,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     font-size: 13px;
 }
 
-/* === Прогресс-бар чтения (позиция в главе) === */
-.reading-progress-bar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 3px;
-    background: var(--progress-gradient);
-    z-index: 999;
-    transition: width 0.15s ease-out;
-    border-radius: 0 2px 2px 0;
-}
+/* Deleted duplicate progress bar styles */
 
 /* === Карточка Продолжить чтение === */
 .continue-reading-card {
@@ -2967,23 +2965,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     transition: width 0.2s ease-out;
 }
 
-.reading-progress-container {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: 3px;
-    background: rgba(0, 0, 0, 0.05);
-    z-index: 9999;
-    pointer-events: none;
-}
-
-.reading-progress-bar {
-    height: 100%;
-    background: var(--accent);
-    width: 0%;
-    transition: width 0.2s ease-out;
-}
+/* Deleted duplicate progress bar styles */
 
 /* --- Categorized Settings Panel --- */
 .settings-tabs {
@@ -3158,7 +3140,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 }
 
 .quick-switcher {
-    position: fixed; /* Изменено с absolute на fixed для стабильности */
+    position: fixed;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%) scale(0.95);
@@ -3166,7 +3148,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     max-height: 70vh;
     overflow-y: auto;
     z-index: 21000;
-    background: var(--glass-bg); /* Используем оверлейную переменную */
+    background: var(--glass-bg);
     backdrop-filter: blur(30px) brightness(0.85);
     -webkit-backdrop-filter: blur(30px) brightness(0.85);
     box-shadow: 0 20px 60px rgba(0,0,0,0.6);
