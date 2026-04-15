@@ -132,6 +132,22 @@ async def init_db():
             status TEXT DEFAULT 'open',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
 
+        # Таблица реакций (WebApp Phase 3)
+        await db.execute('''CREATE TABLE IF NOT EXISTS chapter_reactions (
+            chapter_key TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            reaction TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (chapter_key, user_id))''')
+
+        # Таблица реакций на комментарии (WebApp MangaLib Style)
+        await db.execute('''CREATE TABLE IF NOT EXISTS comment_reactions (
+            comment_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            type TEXT NOT NULL, -- 'like' or 'dislike'
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (comment_id, user_id))''')
+
         # Инициализация режима Али по умолчанию (если пусто)
         await db.execute('INSERT OR IGNORE INTO alya_settings (bot_id, mode) VALUES (1, "normal")')
         
@@ -139,6 +155,7 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_comments_chapter ON chapter_comments(chapter_key)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_likes_chapter ON chapter_likes(chapter_key)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON user_bookmarks(user_id)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_reactions_chapter ON chapter_reactions(chapter_key)')
             
         await db.commit()
 
@@ -445,6 +462,11 @@ async def get_user_inventory(user_id: int, item_type: str = None):
 async def add_referral(referrer_id: int, referred_id: int):
     async with aiosqlite.connect('manga.db') as db:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Гарантируем наличие записей в users_stats
+        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (referred_id,))
+        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (referrer_id,))
+        
         await db.execute('INSERT INTO referrals (referrer_id, referred_id, timestamp) VALUES (?, ?, ?)',
                          (referrer_id, referred_id, now))
         await db.execute('UPDATE users_stats SET referred_by = ? WHERE user_id = ?', (referrer_id, referred_id))
@@ -457,6 +479,27 @@ async def get_referral_stats(user_id: int):
         async with db.execute('SELECT COUNT(*) FROM referrals WHERE referrer_id = ?', (user_id,)) as cursor:
             count = (await cursor.fetchone())[0]
             return count
+
+# --- Comment Reactions ---
+async def add_comment_reaction(comment_id: int, user_id: str, reaction_type: str):
+    """Добавляет или переключает реакцию (like/dislike) на комментарий."""
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute(
+            'SELECT type FROM comment_reactions WHERE comment_id = ? AND user_id = ?',
+            (comment_id, user_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            
+        if row:
+            if row[0] == reaction_type:
+                # Убираем, если нажали то же самое
+                await db.execute('DELETE FROM comment_reactions WHERE comment_id = ? AND user_id = ?', (comment_id, user_id))
+            else:
+                # Переключаем
+                await db.execute('UPDATE comment_reactions SET type = ? WHERE comment_id = ? AND user_id = ?', (reaction_type, comment_id, user_id))
+        else:
+            await db.execute('INSERT INTO comment_reactions (comment_id, user_id, type) VALUES (?, ?, ?)', (comment_id, user_id, reaction_type))
+        await db.commit()
 
 async def get_user_referred_by(user_id: int):
     async with aiosqlite.connect('manga.db') as db:

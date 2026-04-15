@@ -13,6 +13,8 @@ import random
 import aiosqlite
 import aiohttp
 import aiohttp.web
+import io
+import html
 from datetime import datetime
 from typing import Union
 
@@ -272,18 +274,71 @@ async def get_telegraph_token():
         logging.error(f"Telegraph Token Error: {e}")
     return None
 
-async def upload_to_telegraph(title, content):
+async def upload_to_telegraph(title, html_content):
     token = await get_telegraph_token()
     if not token: return None
     
-    # Разбиваем текст на параграфы (Node format)
-    nodes = []
-    for line in content.split("\n"):
-        line = line.strip()
-        if not line:
-            nodes.append({"tag": "br"})
-        else:
-            nodes.append({"tag": "p", "children": [line]})
+    # Рекурсивный парсер HTML в Telegraph Nodes
+    def html_to_nodes(html_text):
+        from html.parser import HTMLParser
+        
+        class TelegraParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.nodes = []
+                self.stack = []
+            
+            def handle_starttag(self, tag, attrs):
+                node = {"tag": tag, "children": []}
+                # Обработка атрибутов (href для a, src для img)
+                attr_dict = {k: v for k, v in attrs}
+                if tag == "a" and "href" in attr_dict:
+                    node["attrs"] = {"href": attr_dict["href"]}
+                elif tag == "img" and "src" in attr_dict:
+                    node["attrs"] = {"src": attr_dict["src"]}
+                
+                # Добавляем в дерево
+                if self.stack:
+                    self.stack[-1]["children"].append(node)
+                else:
+                    self.nodes.append(node)
+                
+                # Самозакрывающиеся теги не пушим в стек
+                if tag not in ["br", "img", "hr"]:
+                    self.stack.append(node)
+            
+            def handle_endtag(self, tag):
+                if tag in ["br", "img", "hr"]: return
+                if self.stack and self.stack[-1]["tag"] == tag:
+                    self.stack.pop()
+            
+            def handle_data(self, data):
+                if not data.strip() and not self.stack: return
+                if self.stack:
+                    self.stack[-1]["children"].append(data)
+                else:
+                    self.nodes.append(data)
+        
+        parser = TelegraParser()
+        parser.feed(html_text)
+        
+        # Telegraph API не принимает инлайновые элементы (a, b, i, s и т.д.) или "голые" строки
+        # в корне массива content. Все они должны быть обернуты в блочные элементы (обычно <p>).
+        BLOCK_TAGS = ["p", "h3", "h4", "ol", "ul", "blockquote", "aside", "figure", "img", "video", "iframe", "pre", "hr"]
+        wrapped_nodes = []
+        for n in parser.nodes:
+            if isinstance(n, str):
+                if n.strip():
+                    wrapped_nodes.append({"tag": "p", "children": [n]})
+            elif isinstance(n, dict) and n.get("tag") not in BLOCK_TAGS:
+                wrapped_nodes.append({"tag": "p", "children": [n]})
+            else:
+                wrapped_nodes.append(n)
+        return wrapped_nodes
+
+    nodes = html_to_nodes(html_content)
+    if not nodes:
+        nodes = [{"tag": "p", "children": ["(Пустая глава)"]}]
             
     payload = {
         "access_token": token,
@@ -298,6 +353,8 @@ async def upload_to_telegraph(title, content):
             data = await resp.json()
             if data.get("ok"):
                 return data["result"]["url"]
+            else:
+                logging.error(f"Telegraph API Error: {data}")
     except Exception as e:
         logging.error(f"Telegraph Upload Error: {e}")
     return None
@@ -3427,21 +3484,38 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
     # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ
     links = _clean_urls(text_input)
     
-    # Авто-конвертация только если нет ссылок ВООБЩЕ и текст достаточно большой
-    if not links and len(text_input) > 30:
+    # Если в тексте есть гиперссылки (через <a>), они УЖЕ в text_input
+    # Нам нужно решить: конвертировать в Telegraph или оставить ссылки?
+    
+    # ЛОГИКА: 
+    # 1. Если прислали просто набор ссылок (нет другого текста кроме ссылок и пробелов)
+    #    -> Сохраняем их списком.
+    # 2. Если прислали текст (с ссылками или без)
+    #    -> Конвертируем в ОДНУ страницу Telegraph.
+    
+    stripped_text = re.sub(r'https?://[^\s<"\'>]+', '', text_input).strip()
+    is_pure_links = not stripped_text
+    
+    if is_pure_links and links:
+        # Просто сохраняем список ссылок через пробел
+        link = " ".join(links)
+    elif len(text_input) > 20:
+        # Это текст (возможно с гиперссылками) -> в Telegraph
         wait_msg = await message.answer("📝 <i>Готовлю страницу Telegraph...</i>", parse_mode="HTML")
         id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
         title = f"{ct['emoji']} {ct['name']} — {id_label}, Глава {chapter}"
+        
+        # Передаем HTML как есть, upload_to_telegraph теперь умеет его парсить
         new_link = await upload_to_telegraph(title, text_input)
         if new_link:
             link = new_link
             await wait_msg.delete()
         else:
             await wait_msg.edit_text("⚠️ Не удалось загрузить в Телеграф, сохраняю как есть.")
-            link = text_input
+            link = text_input # Fallback
     else:
-        # Просто сохраняем всё сообщение со всеми ссылками (как прислали)
-        link = text_input
+        # Короткий текст или одна ссылка
+        link = " ".join(links) if links else text_input
 
     async with aiosqlite.connect('manga.db') as db:
         # Получаем текущий макс. sort_order для этого тайтла/тома
@@ -4133,17 +4207,65 @@ async def handle_likes_post(request: aiohttp.web.Request) -> aiohttp.web.Respons
 # --- Комментарии ---
 
 async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    """Получить комментарии к главе."""
+    """Получить комментарии к главе с лайками/дизлайками и аватарами."""
     chapter_key = request.query.get('chapter_key', '')
+    user = get_auth_user(request)
+    current_user_id = str(user.get("id", "")) if user else None
+    
     try:
         async with aiosqlite.connect('manga.db') as db:
-            async with db.execute(
-                'SELECT id, user_id, user_name, text, created_at, parent_id FROM chapter_comments WHERE chapter_key = ? ORDER BY created_at ASC',
-                (chapter_key,)
-            ) as c:
-                rows = await c.fetchall()
-        comments = [{"id": r[0], "user_id": r[1], "user_name": r[2], "text": r[3], "created_at": r[4], "parent_id": r[5]} for r in rows]
+            query = """
+                SELECT 
+                    c.id, c.user_id, c.user_name, c.text, c.created_at, c.parent_id,
+                    COUNT(CASE WHEN r.type = 'like' THEN 1 END) as likes,
+                    COUNT(CASE WHEN r.type = 'dislike' THEN 1 END) as dislikes,
+                    MAX(CASE WHEN r.user_id = ? THEN r.type ELSE NULL END) as user_reaction
+                FROM chapter_comments c
+                LEFT JOIN comment_reactions r ON c.id = r.comment_id
+                WHERE c.chapter_key = ?
+                GROUP BY c.id
+                ORDER BY c.created_at ASC
+            """
+            async with db.execute(query, (current_user_id, chapter_key)) as cursor:
+                rows = await cursor.fetchall()
+                
+        comments = [
+            {
+                "id": r[0], 
+                "user_id": r[1], 
+                "user_name": r[2], 
+                "text": r[3], 
+                "created_at": r[4], 
+                "parent_id": r[5],
+                "likes": r[6],
+                "dislikes": r[7],
+                "user_reaction": r[8]
+            } for r in rows
+        ]
         return aiohttp.web.json_response({"comments": comments}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Error in handle_comments_get: {e}")
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_comment_react_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Лайк/дизлайк комментария."""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+
+        data = await request.json()
+        comment_id = data.get('comment_id')
+        reaction_type = data.get('type') # 'like' or 'dislike'
+        
+        if not comment_id or reaction_type not in ['like', 'dislike']:
+            return aiohttp.web.json_response({"error": "invalid arguments"}, status=400, headers=CORS_HEADERS)
+
+        from database import add_comment_reaction
+        await add_comment_reaction(int(comment_id), user_id, reaction_type)
+        
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
@@ -4270,6 +4392,97 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
             except Exception as e:
                 logging.error(f"Failed to notify admin {admin_id}: {e}")
 
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+# --- Аватары и Реакции (Phase 3) ---
+
+async def handle_avatar_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Прокси для получения аватара пользователя Telegram."""
+    user_id = request.query.get('user_id', '')
+    if not user_id:
+        return aiohttp.web.Response(status=400, headers=CORS_HEADERS)
+    
+    try:
+        photos = await bot.get_user_profile_photos(int(user_id), limit=1)
+        if photos.total_count == 0:
+            return aiohttp.web.Response(status=404, headers=CORS_HEADERS)
+        
+        file = await bot.get_file(photos.photos[0][-1].file_id)
+        result = await bot.download_file(file.file_path)
+        
+        return aiohttp.web.Response(body=result.read(), content_type='image/jpeg', headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Avatar proxy error for {user_id}: {e}")
+        return aiohttp.web.Response(status=500, headers=CORS_HEADERS)
+
+async def handle_reactions_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Получить статистику реакций для главы."""
+    chapter_key = request.query.get('chapter_key', '')
+    user = get_auth_user(request)
+    user_id = str(user.get("id", "")) if user else None
+    
+    try:
+        async with aiosqlite.connect('manga.db') as db:
+            # Общее количество по каждой реакции
+            async with db.execute(
+                'SELECT reaction, COUNT(*) as count FROM chapter_reactions WHERE chapter_key = ? GROUP BY reaction',
+                (chapter_key,)
+            ) as c:
+                rows = await c.fetchall()
+            
+            reactions_data = {r[0]: r[1] for r in rows}
+            
+            # Реакция текущего пользователя
+            user_reaction = None
+            if user_id:
+                async with db.execute(
+                    'SELECT reaction FROM chapter_reactions WHERE chapter_key = ? AND user_id = ?',
+                    (chapter_key, user_id)
+                ) as c:
+                    row = await c.fetchone()
+                    if row: user_reaction = row[0]
+                    
+        return aiohttp.web.json_response({
+            "reactions": reactions_data,
+            "user_reaction": user_reaction
+        }, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_reactions_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Поставить/изменить реакцию."""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        
+        data = await request.json()
+        chapter_key = data.get('chapter_key', '')
+        reaction = data.get('reaction', '') # Например: "👍", "❤️", "🔥"
+        
+        if not chapter_key or not reaction:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+            
+        async with aiosqlite.connect('manga.db') as db:
+            # Если такая же реакция уже стоит - убираем (toggle)
+            async with db.execute(
+                'SELECT reaction FROM chapter_reactions WHERE chapter_key = ? AND user_id = ?',
+                (chapter_key, user_id)
+            ) as c:
+                existing = await c.fetchone()
+                
+            if existing and existing[0] == reaction:
+                await db.execute('DELETE FROM chapter_reactions WHERE chapter_key = ? AND user_id = ?', (chapter_key, user_id))
+            else:
+                await db.execute(
+                    'INSERT OR REPLACE INTO chapter_reactions (chapter_key, user_id, reaction) VALUES (?, ?, ?)',
+                    (chapter_key, user_id, reaction)
+                )
+            await db.commit()
+            
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
@@ -4415,6 +4628,10 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
+async def handle_root_redirect(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Перенаправляет с корня сайта сразу в читалку."""
+    raise aiohttp.web.HTTPFound('/webapp/reader.html')
+
 # ==============================================================================
 # БЛОК: ЗАПУСК БОТА
 # ==============================================================================
@@ -4441,6 +4658,8 @@ async def main():
     # === API сервер для WebApp читалки ===
     app = aiohttp.web.Application()
     app.router.add_get("/api/reader", handle_reader_data)
+    # Редирект с главной страницы на WebApp
+    app.router.add_get("/", handle_root_redirect)
     app.router.add_options("/api/reader", handle_cors_preflight)
     # Лайки
     app.router.add_get("/api/likes", handle_likes_get)
@@ -4449,8 +4668,17 @@ async def main():
     # Комментарии
     app.router.add_get("/api/comments", handle_comments_get)
     app.router.add_post("/api/comments", handle_comments_post)
+    app.router.add_post("/api/comments/react", handle_comment_react_post)
+    app.router.add_options("/api/comments/react", handle_cors_preflight)
     app.router.add_options("/api/comments", handle_cors_preflight)
     app.router.add_route("DELETE", "/api/comments", handle_comments_delete)
+    # Аватары
+    app.router.add_get("/api/avatar", handle_avatar_get)
+    app.router.add_options("/api/avatar", handle_cors_preflight)
+    # Реакции на главу
+    app.router.add_get("/api/reactions", handle_reactions_get)
+    app.router.add_post("/api/reactions", handle_reactions_post)
+    app.router.add_options("/api/reactions", handle_cors_preflight)
     # Переименование/сброс имён (режим редактора)
     app.router.add_route("DELETE", "/api/rename", handle_rename_delete)
     app.router.add_options("/api/rename", handle_cors_preflight)

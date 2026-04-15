@@ -19,6 +19,9 @@ let currentVolume = null;
 let currentChapterIdx = 0;
 let currentChapters = [];
 let isAdminMode = false;
+let currentCommentSort = 'top'; // Сортировка: 'top' или 'new'
+let allCommentsCache = []; // Кэш всех комментариев текущей главы
+let commentsData = []; // Список для рендеринга (отфильтрован/отсортирован)
 
 // === Typo Report State ===
 let typoSelectedText = '';
@@ -78,12 +81,13 @@ async function resetCustomName(objId) {
 }
 
 // === Настройки (из localStorage) ===
-const defaults = { fontSize: 17, theme: 'light', textWidth: 90, font: 'serif', lineHeight: 1.8, textAlign: 'left', indent: true };
+const defaults = { fontSize: 17, theme: 'light', textWidth: 90, font: 'serif', lineHeight: 1.8, textAlign: 'left', indent: true, paraSpacing: 20 };
 let settings = JSON.parse(localStorage.getItem('reader_settings') || 'null') || { ...defaults };
 // Миграция старых настроек
 if (!settings.lineHeight) settings.lineHeight = 1.8;
 if (!settings.textAlign) settings.textAlign = 'left';
 if (settings.indent === undefined) settings.indent = true;
+if (settings.paraSpacing === undefined) settings.paraSpacing = 20;
 
 let readChapters = JSON.parse(localStorage.getItem('reader_progress') || '{}');
 
@@ -91,7 +95,7 @@ let readChapters = JSON.parse(localStorage.getItem('reader_progress') || '{}');
 // Приоритет: 1) ?api=... из URL 2) window.location.origin (если бот и WebApp на одном хосте)
 // На GitHub Pages (без ?api=) остаётся '' — функции, зависящие от API, корректно отключаются
 const urlParams = new URLSearchParams(window.location.search);
-const API_URL = urlParams.get('api') || (window.location.hostname !== 'localhost' && !window.location.hostname.includes('github.io') ? window.location.origin : '');
+const API_URL = urlParams.get('api') || (window.location.hostname.includes('github.io') ? '' : window.location.origin);
 
 // === API Wrapper ===
 async function apiFetch(url, options = {}) {
@@ -103,10 +107,15 @@ async function apiFetch(url, options = {}) {
 }
 
 
-// === Сохранение позиции чтения ===
+function getChapterKey() {
+    if (!currentSeries || !currentVolume || !currentChapters[currentChapterIdx]) return '';
+    return `${currentSeries.id}_v${currentVolume.volume}_ch${currentChapters[currentChapterIdx].chapter}`;
+}
+
 function getScrollKey() {
-    if (!currentSeries || !currentVolume || !currentChapters[currentChapterIdx]) return null;
-    return `scroll_${currentSeries.id}_v${currentVolume.volume}_ch${currentChapters[currentChapterIdx].chapter}`;
+    const key = getChapterKey();
+    if (!key) return null;
+    return `scroll_${currentSeries.id}_v${currentVolume.volume}_ch${key}`;
 }
 
 let _progressSyncTimer = null;
@@ -292,6 +301,7 @@ async function loadData() {
                 if (allData.series && allData.series.length > 0) {
                     renderSeriesList();
                     renderContinueReading();
+                    handleStartParam(); // ★ Deep link handling (Phase 5)
                     return;
                 }
                 console.log("API returned empty series list, falling back to JSON...");
@@ -315,6 +325,7 @@ async function loadData() {
             if (allData.series && allData.series.length > 0) {
                 renderSeriesList();
                 renderContinueReading();
+                handleStartParam(); // ★ Deep link handling (Phase 5)
                 return;
             }
         } else {
@@ -336,6 +347,34 @@ function showEmptyState() {
             <p>Данные ещё не загружены. Добавьте главы через бота или разместите файл chapters_data.json в папке webapp.</p>
         </div>
     `;
+}
+
+function handleStartParam() {
+    const start = tg.initDataUnsafe?.start_param || urlParams.get('tgWebAppStartParam');
+    if (!start) return;
+
+    // chapter_{series_id}_{volume_num}_{chapter_num/key}
+    const match = start.match(/^chapter_([^_]+)_([^_]+)_([^_]+)$/);
+    if (match) {
+        const [, sId, vNum, cKey] = match;
+        const series = allData.series.find(s => String(s.id) === String(sId));
+        if (!series) return;
+        
+        currentSeries = series;
+        const vol = series.volumes.find(v => String(v.volume) === String(vNum));
+        if (!vol) return;
+        
+        currentVolume = vol;
+        currentChapters = vol.chapters || [];
+        const cIdx = currentChapters.findIndex(c => String(c.chapter) === String(cKey));
+        
+        if (cIdx !== -1) {
+            openChapter(cIdx);
+        } else {
+            // Fallback: if not found by number, maybe first chapter?
+            if (currentChapters.length > 0) openChapter(0);
+        }
+    }
 }
 
 // ==========================================================================
@@ -517,9 +556,10 @@ function openChapter(idx, usePrefetch = false) {
 
     showScreen('reader');
 
-    // Загружаем лайки и комментарии (для API)
+    // Загружаем лайки, реакции и комментарии (для API)
     if (API_URL) {
         loadLikes();
+        loadReactions();
         loadComments();
         document.getElementById('social-section').style.display = 'block';
     } else {
@@ -565,6 +605,7 @@ function loadChapterContent(chapter, usePrefetch = false) {
         }
     }
 
+    let signal;
     if (urlsToLoad.length > 0) {
         // ★ Skeleton Loader
         container.innerHTML = `
@@ -580,7 +621,7 @@ function loadChapterContent(chapter, usePrefetch = false) {
         `;
 
         _chapterAbortController = new AbortController();
-        const signal = _chapterAbortController.signal;
+        signal = _chapterAbortController.signal;
 
         const loadPromises = urlsToLoad.map(async (u) => {
             // Teletype — используем iframe
@@ -596,7 +637,7 @@ function loadChapterContent(chapter, usePrefetch = false) {
                         return renderTelegraphContent(data.result.content);
                     }
                 } catch (e) {
-                    if (e.name === 'AbortError') throw e; // Пробрасываем abort
+                    if (e.name === 'AbortError') throw e;
                     console.warn("Telegraph API err", e);
                 }
             }
@@ -604,10 +645,10 @@ function loadChapterContent(chapter, usePrefetch = false) {
         });
 
         Promise.all(loadPromises).then(results => {
-            if (signal.aborted) return; // Не рендерим если глава уже сменилась
+            if (signal.aborted) return;
             renderLoadedContent(container, results.join(''), chapter);
         }).catch(err => {
-            if (err.name === 'AbortError') return; // Тихо игнорируем отмену
+            if (err.name === 'AbortError') return;
             console.error('Chapter load failed:', err);
             container.innerHTML = `
                 <div class="empty-state">
@@ -617,16 +658,19 @@ function loadChapterContent(chapter, usePrefetch = false) {
                     <button class="retry-btn" onclick="loadChapterContent(currentChapters[currentChapterIdx])">🔄 Повторить попытку</button>
                 </div>`;
         });
+
     } else if (chapter.text) {
         const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
         renderLoadedContent(container, paragraphs, chapter);
     } else {
         container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📄</div>
-                <h3>Контент недоступен</h3>
-                <p>Эта глава ещё не добавлена.</p>
-            </div>`;
+            <div class="empty-state" style="margin-top:20vh;">
+                <div class="empty-icon" style="font-size:4rem;opacity:0.3;">⏳</div>
+                <h3 style="margin-top:1.5rem;font-weight:700;">Глава еще не загружена</h3>
+                <p style="opacity:0.6;max-width:300px;margin:1rem auto;">Эта часть главы еще находится в переводе или ожидает проверки администратором.</p>
+                ${isAdminMode ? `<button class="admin-primary-btn" style="margin-top:2rem;" onclick="openEditUrlModal(currentChapterIdx)">🔗 Добавить ссылку</button>` : ''}
+            </div>
+        `;
     }
 
     document.getElementById('reader-content').scrollTop = 0;
@@ -747,7 +791,10 @@ function prefetchNextChapter() {
                     const resp = await fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`);
                     const data = await resp.json();
                     if (data.ok && data.result && data.result.content) {
-                        return renderTelegraphContent(data.result.content);
+                        const html = renderTelegraphContent(data.result.content);
+                        // ★ Smart Image Pre-loading (Phase 4)
+                        preloadImagesFromHtml(html);
+                        return html;
                     }
                 } catch (e) {
                     console.warn('Prefetch Telegraph err', e);
@@ -757,12 +804,23 @@ function prefetchNextChapter() {
         });
         Promise.all(loadPromises).then(results => {
             prefetchedChapter = { idx: nextIdx, html: results.join('') };
-            console.log('✅ Prefetched chapter', nextIdx + 1);
+            console.log('✅ Prefetched chapter (with images)', nextIdx + 1);
         }).catch(() => { });
     } else if (chapter.text) {
         const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
         prefetchedChapter = { idx: nextIdx, html: paragraphs };
     }
+}
+
+// Helper for pre-loading images into browser cache
+function preloadImagesFromHtml(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const imgs = tmp.querySelectorAll('img');
+    imgs.forEach(img => {
+        const preloader = new Image();
+        preloader.src = img.src;
+    });
 }
 
 function renderTelegraphContent(nodes) {
@@ -829,31 +887,41 @@ function updateNavButtons() {
 // ЛАЙКИ
 // ==========================================================================
 
-function spawnFloatingHearts() {
-    const btn = document.getElementById('like-btn');
-    if (!btn) return;
-    const rect = btn.getBoundingClientRect();
+function spawnFloatingEmoji(emoji, targetEl) {
+    if (!targetEl) return;
+    const rect = targetEl.getBoundingClientRect();
+    const count = 6;
 
-    for (let i = 0; i < 6; i++) {
-        const heart = document.createElement('div');
-        heart.className = 'floating-heart';
-        heart.innerHTML = '❤️';
-        heart.style.left = `${rect.left + rect.width / 2 + (Math.random() * 40 - 20)}px`;
-        heart.style.top = `${rect.top}px`;
-        heart.style.setProperty('--tx', `${Math.random() * 80 - 40}px`);
-        heart.style.setProperty('--ty', `-${Math.random() * 120 + 80}px`);
-        heart.style.setProperty('--r', `${Math.random() * 60 - 30}deg`);
-        heart.style.animationDelay = `${Math.random() * 0.15}s`;
+    for (let i = 0; i < count; i++) {
+        const el = document.createElement('div');
+        el.className = 'floating-emoji';
+        el.innerHTML = emoji;
+        
+        // Random layout
+        const rx = (Math.random() * 60 - 30);
+        const ry = (Math.random() * 20 - 10);
+        
+        el.style.left = `${rect.left + rect.width / 2 + rx}px`;
+        el.style.top = `${rect.top + rect.height / 2 + ry}px`;
+        
+        // Custom properties for animation
+        el.style.setProperty('--tx', `${Math.random() * 100 - 50}px`);
+        el.style.setProperty('--ty', `-${Math.random() * 150 + 100}px`);
+        el.style.setProperty('--r', `${Math.random() * 90 - 45}deg`);
+        el.style.setProperty('--r0', `${Math.random() * 40 - 20}deg`);
+        el.style.animationDelay = `${Math.random() * 0.2}s`;
 
-        document.body.appendChild(heart);
-        setTimeout(() => heart.remove(), 1000);
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), 1000);
     }
 }
 
-function getChapterKey() {
-    if (!currentSeries || !currentVolume) return '';
-    return `${currentSeries.id}_v${currentVolume.volume}_ch${currentChapters[currentChapterIdx]?.chapter}`;
+function spawnFloatingHearts() {
+    const btn = document.getElementById('like-btn');
+    spawnFloatingEmoji('❤️', btn);
 }
+
+// duplicate removed
 
 async function loadLikes() {
     if (!API_URL) return;
@@ -947,20 +1015,33 @@ function renderComments(comments) {
     const badge = document.getElementById('comments-count-badge');
     badge.textContent = comments.length > 0 ? `(${comments.length})` : '';
 
+    const countBadge = document.getElementById('comments-count-badge');
+    if (countBadge) countBadge.innerText = comments.length > 0 ? `(${comments.length})` : '';
+
     if (comments.length === 0) {
-        list.innerHTML = '<div class="no-comments">Пока нет комментариев. Будьте первым! ✨</div>';
+        list.innerHTML = `<div class="no-comments">Пока нет комментариев. Будьте первым! ✨</div>`;
         return;
+    }
+
+    // ★ Фаза 5: Применяем сортировку
+    commentsData = [...comments];
+    if (currentCommentSort === 'top') {
+        // Сортировка по лайкам (интересные)
+        commentsData.sort((a, b) => ((b.likes || 0) - (b.dislikes || 0)) - ((a.likes || 0) - (a.dislikes || 0)));
+    } else {
+        // По дате (новые сверху)
+        commentsData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     }
 
     // Строим дерево
     const commentMap = {};
     const topLevel = [];
-    comments.forEach(c => {
+    commentsData.forEach(c => {
         c.children = [];
         commentMap[c.id] = c;
     });
 
-    comments.forEach(c => {
+    commentsData.forEach(c => {
         if (c.parent_id && commentMap[c.parent_id]) {
             commentMap[c.parent_id].children.push(c);
         } else {
@@ -968,36 +1049,156 @@ function renderComments(comments) {
         }
     });
 
+    function getAvatarColor(userIdStr) {
+        const colors = [
+            '#FF4D6D', '#EF476F', '#FFD166', '#06D6A0', '#118AB2', '#073B4C', 
+            '#7B2CBF', '#5A189A', '#3C096C', '#240046', '#fb5607', '#3a86ff'
+        ];
+        if (!userIdStr) return colors[0];
+        let hash = 0;
+        for (let i = 0; i < userIdStr.length; i++) {
+            hash = ((hash << 5) - hash) + userIdStr.charCodeAt(i);
+            hash |= 0; 
+        }
+        return colors[Math.abs(hash) % colors.length];
+    }
+
+    function parseSpoilers(text) {
+        // Заменяем ||текст|| на скрытый спан
+        return text.replace(/\|\|([\s\S]+?)\|\|/g, (match, content) => {
+            return `<span class="comment-spoiler" onclick="this.classList.toggle('revealed'); event.stopPropagation();">${escapeHtml(content)}</span>`;
+        });
+    }
+
     function renderNode(c, isChild = false) {
         const initial = (c.user_name || 'А')[0].toUpperCase();
         const date = formatDate(c.created_at);
         const isOwn = String(c.user_id) === userId;
-        const deleteBtn = isOwn ? `<button class="comment-delete-btn" onclick="deleteComment(${c.id})">🗑</button>` : '';
-        const replyBtn = !isChild ? `<button class="comment-reply-btn" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')">↩ Ответить</button>` : '';
+        const isAdmin = isAdminMode; // Булево значение из глобального состояния
+        const color = getAvatarColor(String(c.user_id));
+        
+        // Кнопки управления
+        const deleteBtn = (isOwn || isAdmin) ? `<button class="c-action-btn c-delete" onclick="deleteComment(${c.id})">Удалить</button>` : '';
+        const editBtn = isOwn ? `<button class="c-action-btn" onclick="editComment(${c.id})">Ред.</button>` : '';
+        const replyBtn = `<button class="c-action-btn" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')">Ответить</button>`;
+
+        // Реакции
+        const likes = c.likes || 0;
+        const dislikes = c.dislikes || 0;
+        const userReaction = c.user_reaction; // 'like', 'dislike' или null
+
+        const likeActive = userReaction === 'like' ? 'active' : '';
+        const dislikeActive = userReaction === 'dislike' ? 'active' : '';
+
+        // Avatar with Proxy & Fallback
+        const avatarUrl = API_URL ? `${API_URL}/api/avatar?user_id=${c.user_id}` : null;
+        const avatarHtml = avatarUrl 
+            ? `<img src="${avatarUrl}" class="comment-avatar" alt="${initial}" style="background:${color}" onerror="this.onerror=null;this.outerHTML='<div class=&quot;comment-avatar&quot; style=&quot;background:${color}&quot;>${initial}</div>';">`
+            : `<div class="comment-avatar" style="background:${color}">${initial}</div>`;
 
         let html = `
         <div class="comment-item ${isChild ? 'comment-reply' : ''}" id="comment-${c.id}">
-            <div class="comment-header">
-                <div class="comment-avatar">${initial}</div>
-                <div class="comment-meta">
+            <div class="comment-avatar-container">
+                ${avatarHtml}
+            </div>
+            <div class="comment-content">
+                <div class="comment-header">
                     <div class="comment-author">${escapeHtml(c.user_name)}</div>
                     <div class="comment-date">${date}</div>
                 </div>
-                ${replyBtn}
-                ${deleteBtn}
-            </div>
-            <div class="comment-text">${escapeHtml(c.text)}</div>
+                <div class="comment-text" id="comment-text-${c.id}">${parseSpoilers(c.text)}</div>
+                <div class="comment-actions">
+                    <div class="comment-reactions">
+                        <button class="c-reaction-btn c-like ${likeActive}" onclick="reactToComment(${c.id}, 'like')" title="Нравится">
+                            <svg class="icon-xs" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <span>${likes}</span>
+                        </button>
+                    </div>
+                    <div class="comment-main-actions">
+                        ${replyBtn}
+                        ${editBtn}
+                        ${deleteBtn}
+                    </div>
+                </div>
         `;
 
         if (c.children && c.children.length > 0) {
             html += `<div class="comment-children">` + c.children.map(child => renderNode(child, true)).join('') + `</div>`;
         }
 
-        html += `</div>`;
+        html += `</div></div>`;
         return html;
     }
 
     list.innerHTML = topLevel.map(c => renderNode(c, false)).join('');
+}
+
+async function reactToComment(commentId, type) {
+    if (!API_URL || !userId) {
+        showToast('Пожалуйста, авторизуйтесь через бота.');
+        return;
+    }
+    try {
+        const resp = await apiFetch(`${API_URL}/api/comments/react`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment_id: commentId, type: type })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            await loadComments();
+        } else {
+            showToast('Ошибка при реакции: ' + (data.error || 'неизвестно'));
+        }
+    } catch (e) {
+        showToast('Ошибка сети.');
+    }
+}
+
+function sortComments(type) {
+    currentCommentSort = type;
+    document.getElementById('tab-sort-top').classList.toggle('active', type === 'top');
+    document.getElementById('tab-sort-new').classList.toggle('active', type === 'new');
+    renderComments(allCommentsCache);
+}
+
+function editComment(id) {
+    const comment = allCommentsCache.find(c => c.id === id);
+    if (!comment) return;
+    
+    const textNode = document.getElementById(`comment-text-${id}`);
+    const originalText = comment.text;
+    
+    textNode.innerHTML = `
+        <textarea class="comment-input edit-area" id="edit-input-${id}" rows="3">${escapeHtml(originalText)}</textarea>
+        <div class="edit-actions" style="margin-top:8px; display:flex; gap:8px;">
+            <button class="comment-submit-btn" style="float:none; padding:6px 14px;" onclick="saveCommentEdit(${id})">Сохранить</button>
+            <button class="c-action-btn" onclick="renderComments(allCommentsCache)">Отмена</button>
+        </div>
+    `;
+    document.getElementById(`edit-input-${id}`).focus();
+}
+
+async function saveCommentEdit(id) {
+    const newText = document.getElementById(`edit-input-${id}`).value.trim();
+    if (!newText) return;
+
+    try {
+        const resp = await apiFetch(`${API_URL}/api/comments/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: newText })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            await loadComments();
+            showToast('Комментарий изменён');
+        } else {
+            showToast('Ошибка: ' + (data.error || 'не удалось'));
+        }
+    } catch (e) {
+        showToast('Ошибка сети.');
+    }
 }
 
 async function postComment() {
@@ -1074,6 +1275,87 @@ function escapeHtml(str) {
 }
 
 // ==========================================================================
+// РЕАКЦИИ (Improved v3)
+// ==========================================================================
+
+async function loadReactions() {
+    if (!API_URL) return;
+    const key = getChapterKey();
+    if (!key) return;
+    try {
+        const resp = await apiFetch(API_URL + `/api/reactions?chapter_key=${encodeURIComponent(key)}`);
+        const data = await resp.json();
+        renderReactions(data);
+    } catch (e) {
+        console.warn('Reactions load error:', e);
+    }
+}
+
+function renderReactions(data) {
+    const bar = document.getElementById('reaction-bar');
+    if (!bar) return;
+
+    const list = [
+        { type: 'like', text: 'Круто', emoji: '👍', svg: '<svg class="r-svg" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>' },
+        { type: 'heart', text: 'Люблю', emoji: '❤️', svg: '<svg class="r-svg" viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>' },
+        { type: 'fire', text: 'Огонь', emoji: '🔥', svg: '<svg class="r-svg" viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>' },
+        { type: 'funny', text: 'Угар', emoji: '😂', svg: '<svg class="r-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>' },
+        { type: 'wow', text: 'Ого!', emoji: '😮', svg: '<svg class="r-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 15h8"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>' },
+        { type: 'sad', text: 'Грустно', emoji: '😢', svg: '<svg class="r-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M16 16s-1.5-2-4-2-4 2-4 2"/><line x1="9" x2="9.01" y1="9" y2="9"/><line x1="15" x2="15.01" y1="9" y2="9"/></svg>' },
+        { type: 'battle', text: 'Эпик', emoji: '⚔️', svg: '<svg class="r-svg" viewBox="0 0 24 24"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/></svg>' }
+    ];
+
+    const reactions = data.reactions || {};
+    const user_reaction = data.user_reaction;
+
+    bar.innerHTML = list.map(item => {
+        const count = reactions[item.type] || 0;
+        const active = user_reaction === item.type ? 'active' : '';
+        return `
+            <div class="reaction-item ${active} type-${item.type}" onclick="toggleReaction('${item.type}')" title="${item.text}">
+                <div class="reaction-icon-wrapper">${item.svg}</div>
+                <span class="reaction-count">${count > 0 ? count : ''}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+async function toggleReaction(type) {
+    if (!API_URL || !userId) {
+        showToast('Авторизуйтесь в боте для реакций');
+        return;
+    }
+    const key = getChapterKey();
+    if (!key) return;
+
+    // Visual Feedback
+    const itemEl = document.querySelector(`.reaction-item.type-${type}`);
+    const emojiMap = { like: '👍', heart: '❤️', fire: '🔥', funny: '😂', wow: '😮', sad: '😢', battle: '⚔️' };
+    
+    haptic('medium');
+    if (itemEl && !itemEl.classList.contains('active')) {
+        spawnFloatingEmoji(emojiMap[type] || '✨', itemEl);
+    }
+
+    try {
+        const resp = await apiFetch(API_URL + '/api/reactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chapter_key: key,
+                reaction: type
+            })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            await loadReactions();
+        }
+    } catch (e) {
+        showToast('Ошибка сети.');
+    }
+}
+
+// ==========================================================================
 // НАВИГАЦИЯ ЭКРАНОВ
 // ==========================================================================
 
@@ -1090,6 +1372,14 @@ function showScreen(name) {
     });
 
     document.getElementById(`screen-${name}`).classList.add('active');
+
+    // Admin FAB visibility (Phase 4)
+    const adminFab = document.getElementById('admin-fab-container');
+    if (adminFab) {
+        adminFab.style.display = (name === 'reader' && isAdminMode) ? 'flex' : 'none';
+        // Close menu if switching screens
+        closeAdminMenu();
+    }
 
     // Update bottom nav
     const navTabs = document.querySelectorAll('.nav-tab');
@@ -1197,6 +1487,12 @@ function setIndent(enabled) {
     saveSettings();
 }
 
+function setParaSpacing(val) {
+    settings.paraSpacing = parseInt(val);
+    applySettings();
+    saveSettings();
+}
+
 function applySettings() {
     // Тема
     document.body.className = '';
@@ -1212,15 +1508,19 @@ function applySettings() {
         readerText.style.lineHeight = settings.lineHeight;
 
         // Шрифт
-        readerText.classList.remove('font-sans', 'font-slab');
+        readerText.classList.remove('font-sans', 'font-slab', 'font-mono');
         if (settings.font === 'sans') readerText.classList.add('font-sans');
         if (settings.font === 'slab') readerText.classList.add('font-slab');
+        if (settings.font === 'mono') readerText.classList.add('font-mono');
 
         // Выравнивание
         readerText.classList.toggle('align-justify', settings.textAlign === 'justify');
 
         // Отступы
         readerText.classList.toggle('indent-on', settings.indent);
+
+        // Отступ между абзацами
+        readerText.style.setProperty('--para-spacing', settings.paraSpacing + 'px');
     }
 
     // Social section width
@@ -1266,6 +1566,7 @@ function restoreSettings() {
         b.classList.toggle('active', b.dataset.align === settings.textAlign);
     });
     document.getElementById('width-slider').value = settings.textWidth;
+    document.getElementById('para-spacing-slider').value = settings.paraSpacing;
 
     const indentToggle = document.getElementById('indent-toggle');
     if (indentToggle) indentToggle.checked = settings.indent;
@@ -1545,13 +1846,6 @@ document.addEventListener('DOMContentLoaded', () => {
             lbTouchDeltaY = 0;
         }, { passive: true });
     }
-
-    // Close on Escape
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeLightbox();
-        if (e.key === 'ArrowLeft') lightboxNavigate(-1);
-        if (e.key === 'ArrowRight') lightboxNavigate(1);
-    });
 });
 
 // ==========================================================================
@@ -2361,6 +2655,42 @@ function fabAction(action) {
     }
 }
 
+// ==========================================================================
+// ADMIN FLOATING MENU (Phase 4)
+// ==========================================================================
+
+function toggleAdminMenu() {
+    const btn = document.getElementById('admin-fab-btn');
+    const menu = document.getElementById('admin-menu');
+    if (!btn || !menu) return;
+
+    const isOpen = btn.classList.contains('open');
+    haptic('medium');
+
+    if (!isOpen) {
+        btn.classList.add('open');
+        menu.classList.remove('hidden');
+    } else {
+        closeAdminMenu();
+    }
+}
+
+function closeAdminMenu() {
+    const btn = document.getElementById('admin-fab-btn');
+    const menu = document.getElementById('admin-menu');
+    if (btn) btn.classList.remove('open');
+    if (menu) menu.classList.add('hidden');
+}
+
+function renameChapterCurrent() {
+    closeAdminMenu();
+    const ch = currentChapters[currentChapterIdx];
+    if (!ch || !currentSeries || !currentVolume) return;
+    
+    // Use the existing core rename logic
+    renameItem(`chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}`);
+}
+
 // === Gestures: Swipe Back & Pull to Next ===
 let touchStartX = 0;
 let gestureTouchStartY = 0;
@@ -2489,12 +2819,49 @@ function initGestures() {
     document.addEventListener('mouseup', () => { if (pullTouchStartY) { onEnd(); pullTouchStartY = 0; } });
 }
 
+function initReaderScrollListeners() {
+    const content = document.getElementById('reader-content');
+    const screen = document.getElementById('screen-reader');
+    const progressBar = document.getElementById('reading-progress-bar');
+    if (!content || !screen || !progressBar) return;
 
-// ==========================================================================
-// ИНИЦИАЛИЗАЦИЯ
-// ==========================================================================
+    let lastScrollTop = 0;
+    const threshold = 15;
+
+    content.addEventListener('scroll', () => {
+        const scrollTop = content.scrollTop;
+        const scrollHeight = content.scrollHeight - content.clientHeight;
+        
+        // 1. Прогресс-бар
+        const progress = (scrollTop / Math.max(1, scrollHeight)) * 100;
+        progressBar.style.width = `${progress}%`;
+
+        // 2. Immersive Scroll (Скрытие UI при скролле вниз)
+        if (Math.abs(scrollTop - lastScrollTop) > threshold) {
+            if (scrollTop > lastScrollTop && scrollTop > 100) {
+                screen.classList.add('immersive');
+                // Закрываем FAB при скролле вниз
+                const fab = document.getElementById('fab-menu');
+                if (fab && !fab.classList.contains('hidden')) toggleFab();
+            } else if (scrollTop < lastScrollTop - 5) {
+                screen.classList.remove('immersive');
+            }
+            lastScrollTop = scrollTop;
+        }
+
+        // 3. Автосохранение позиции
+        clearTimeout(scrollSaveTimer);
+        scrollSaveTimer = setTimeout(saveScrollPosition, 1000);
+
+        // 4. Prefetch следующей главы (при 85%)
+        if (progress > 85) {
+            preloadNextChapter();
+        }
+    }, { passive: true });
+}
 
 restoreSettings();
 loadData();
 initTypoReporter();
 initGestures();
+initReaderScrollListeners();
