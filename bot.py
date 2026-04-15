@@ -3401,32 +3401,22 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
 
     # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ
     links = _clean_urls(text_input)
-    has_telegraph = any("telegra.ph" in l for l in links)
     
-    # Решаем: загружать ли в Telegraph?
-    # Если ссылок нет ВООБЩЕ или есть много текста без Telegraph ссылки
-    if not has_telegraph:
-        # Если в тексте есть ссылки, но нет телеграфа, и текста много (больше 100 символов помимо ссылок)
-        pure_text = text_input
-        for l in links: pure_text = pure_text.replace(l, "")
-        
-        if len(pure_text.strip()) > 30 or not links:
-            wait_msg = await message.answer("📝 <i>Готовлю страницу Telegraph...</i>", parse_mode="HTML")
-            id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
-            title = f"{ct['emoji']} {ct['name']} — {id_label}, Глава {chapter}"
-            new_link = await upload_to_telegraph(title, text_input)
-            if new_link:
-                link = new_link
-                await wait_msg.delete()
-            else:
-                await wait_msg.edit_text("⚠️ Не удалось загрузить в Телеграф, сохраняю как есть.")
-                link = text_input
+    # Авто-конвертация только если нет ссылок ВООБЩЕ и текст достаточно большой
+    if not links and len(text_input) > 30:
+        wait_msg = await message.answer("📝 <i>Готовлю страницу Telegraph...</i>", parse_mode="HTML")
+        id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
+        title = f"{ct['emoji']} {ct['name']} — {id_label}, Глава {chapter}"
+        new_link = await upload_to_telegraph(title, text_input)
+        if new_link:
+            link = new_link
+            await wait_msg.delete()
         else:
-            # Текста мало, просто объединяем ссылки
-            link = " ".join(links)
+            await wait_msg.edit_text("⚠️ Не удалось загрузить в Телеграф, сохраняю как есть.")
+            link = text_input
     else:
-        # Телеграф уже есть или это просто ссылка(и) на него
-        link = " ".join(links)
+        # Просто сохраняем всё сообщение со всеми ссылками (как прислали)
+        link = text_input
 
     async with aiosqlite.connect('manga.db') as db:
         # Получаем текущий макс. sort_order для этого тайтла/тома
@@ -3935,27 +3925,17 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
         if not info:
             return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
 
-        # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ И ПРИОРИТЕТИЗИРУЕМ ТЕЛЕГРАФ
+        # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ
         links = _clean_urls(new_url)
-        has_telegraph = any("telegra.ph" in l for l in links)
 
-        if not has_telegraph:
-            pure_text = new_url
-            for l in links: pure_text = pure_text.replace(l, "")
-            
-            if len(pure_text.strip()) > 30 or not links:
-                title = f"Глава {chapter}"
-                s_name = await get_custom_name(f"series_{series_id}") or series_id
-                title = f"{s_name} — Глава {chapter}"
-                telegraph_url = await upload_to_telegraph(title, new_url)
-                if telegraph_url:
-                    new_url = telegraph_url
-                elif links:
-                    new_url = " ".join(links)
-            else:
-                new_url = " ".join(links)
-        else:
-            new_url = " ".join(links)
+        # Конвертируем только если ВООБЩЕ нет ссылок и текст большой
+        if not links and len(new_url) > 30:
+            title = f"Глава {chapter}"
+            s_name = await get_custom_name(f"series_{series_id}") or series_id
+            title = f"{s_name} — Глава {chapter}"
+            telegraph_url = await upload_to_telegraph(title, new_url)
+            if telegraph_url:
+                new_url = telegraph_url
 
         table, _, _, _ = info
         
@@ -4247,15 +4227,16 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
             await db.commit()
 
         # Уведомление админам
+        import html
         admins = await get_admins()
         logging.info(f"Typo report received from {user_name} ({user_id}). Admins to notify: {admins}")
         report_text = (
             f"🚨 <b>Новая опечатка!</b>\n"
-            f"От: {user_name} (ID: {user_id})\n"
-            f"Глава: <code>{chapter_key}</code>\n\n"
-            f"<b>Текст:</b> <code>{selected_text}</code>\n"
-            f"<b>Контекст:</b> <i>...{context_text}...</i>\n"
-            f"<b>Комментарий:</b> {comment}"
+            f"От: {html.escape(user_name)} (ID: {user_id})\n"
+            f"Глава: <code>{html.escape(chapter_key)}</code>\n\n"
+            f"<b>Текст:</b> <code>{html.escape(selected_text)}</code>\n"
+            f"<b>Контекст:</b> <i>...{html.escape(context_text)}...</i>\n"
+            f"<b>Комментарий:</b> {html.escape(comment)}"
         )
         for admin_id in admins:
             try:
