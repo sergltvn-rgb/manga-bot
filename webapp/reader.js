@@ -1306,7 +1306,7 @@ function editComment(id) {
     textNode.innerHTML = `
         <textarea class="comment-input edit-area" id="edit-input-${id}" rows="3">${escapeHtml(originalText)}</textarea>
         <div class="edit-actions" style="margin-top:8px; display:flex; gap:8px;">
-            <button class="comment-submit-btn" style="float:none; padding:6px 14px;" onclick="saveCommentEdit(${id})">Сохранить</button>
+            <button class="comment-submit-btn" style="float:none; padding:6px 14px;" onclick="saveCommentEdit('${id}')">Сохранить</button>
             <button class="c-action-btn" onclick="renderComments(allCommentsCache)">Отмена</button>
         </div>
     `;
@@ -3066,9 +3066,8 @@ function initGestures() {
 function initReaderScrollListeners() {
     const content = document.getElementById('reader-content');
     const screen = document.getElementById('screen-reader');
-    const bottomBar = document.getElementById('reading-progress-bar');
-    const topBar = document.getElementById('top-progress-line');
-    if (!content || !screen) return;
+    const progressBar = document.getElementById('reading-progress-bar');
+    if (!content || !screen || !progressBar) return;
 
     let lastScrollTop = 0;
     const threshold = 15;
@@ -3077,10 +3076,9 @@ function initReaderScrollListeners() {
         const scrollTop = content.scrollTop;
         const scrollHeight = content.scrollHeight - content.clientHeight;
         
-        // 1. Прогресс-бары
+        // 1. Прогресс-бар
         const progress = (scrollTop / Math.max(1, scrollHeight)) * 100;
-        if (bottomBar) bottomBar.style.width = `${progress}%`;
-        if (topBar) topBar.style.width = `${progress}%`;
+        progressBar.style.width = `${progress}%`;
 
         // 2. Immersive Scroll (Скрытие UI при скролле вниз)
         if (Math.abs(scrollTop - lastScrollTop) > threshold) {

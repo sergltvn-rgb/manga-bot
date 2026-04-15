@@ -84,49 +84,39 @@ body.theme-sepia {
     --progress-gradient: linear-gradient(90deg, #6366f1, #a855f7);
 }
 
+/* Themes */
 body.theme-dark {
-    --bg: #0f172a; /* Slate 950-ish */
+    --bg: #0f172a;
     --text: #e2e8f0;
     --text-primary: #f8fafc;
     --text-secondary: #94a3b8;
     --card-bg: #1e293b;
     --card-border: rgba(99, 102, 241, 0.1);
-    --tab-active: #818cf8; /* Softer Indigo */
+    --header-bg: #0f172a;
     --accent: #818cf8;
-    --progress-gradient: linear-gradient(90deg, #818cf8, #c084fc);
-    --glass-bg: rgba(15, 23, 42, 0.95);
-    --overlay: rgba(0,0,0,0.8);
-    --reader-bg: #0f172a;
-    --reader-text: #d4d4d4;
-    --divider: rgba(255, 255, 255, 0.1);
-    --shadow: 0 4px 15px rgba(0,0,0,0.4);
-    --tab-bg: #1e293b;
-    --settings-bg: #0f172a;
-    --input-bg: #16162a;
-    --glass-border: rgba(255, 255, 255, 0.1);
+    --badge-bg: rgba(129, 140, 248, 0.15);
+    --tab-active: #818cf8;
+    --divider: rgba(255,255,255,0.08);
 }
 
 body.theme-amoled {
     --bg: #000000;
     --text: #cbd5e1;
-    --tab-active: #818cf8;
+    --header-bg: #000000;
     --accent: #818cf8;
-    --glass-bg: rgba(0,0,0,0.98);
-    --text-primary: #ffffff;
-    --text-secondary: #888;
     --card-bg: #111;
-    --card-border: rgba(99, 102, 241, 0.2);
-    --card-hover: rgba(99, 102, 241, 0.1);
-    --header-bg: rgba(0, 0, 0, 0.98);
-    --reader-bg: #000;
-    --reader-text: #ccc;
-    --divider: rgba(255, 255, 255, 0.12);
-    --shadow: none;
-    --tab-bg: #111;
-    --settings-bg: #111;
-    --input-bg: #0a0a0a;
-    --overlay: rgba(0,0,0,0.8);
-    --glass-border: rgba(255, 255, 255, 0.12);
+    --divider: rgba(255,255,255,0.1);
+}
+
+body.theme-gray {
+    --bg: #1f2937; /* Gray 800 */
+    --text: #d1d5db;
+    --text-secondary: #9ca3af;
+    --card-bg: #374151;
+    --header-bg: #1f2937;
+    --accent: #60a5fa;
+    --tab-active: #60a5fa;
+    --divider: rgba(255,255,255,0.05);
 }
 
 /* === БАЗОВЫЕ СТИЛИ === */
@@ -526,7 +516,6 @@ body {
 .chapter-indicator { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
 
 /* --- Progress Bar --- */
-/* --- Unified Progress Bar (Single 2px Line) --- */
 .reading-progress-container {
     position: fixed;
     top: 56px; /* Below standard header */
@@ -660,6 +649,8 @@ body {
     font-weight: 600;
     opacity: 0.8;
 }
+
+.settings-title {
     margin: 0 0 20px 0;
     font-size: 20px;
     font-weight: 700;
@@ -1068,8 +1059,6 @@ input:checked + .slider:before { transform: translateX(20px); }
 .comment-submit-btn:active { transform: scale(0.96); }
 .comment-submit-btn:disabled { opacity: 0.4; pointer-events: none; }
 
-/* --- Consolidated comment styles moved to relevant section --- */
-
 .comment-reactions {
     display: flex;
     gap: 8px;
@@ -1172,8 +1161,6 @@ input:checked + .slider:before { transform: translateX(20px); }
     color: var(--text-secondary);
     font-size: 13px;
 }
-
-/* Deleted duplicate progress bar styles */
 
 /* === Карточка Продолжить чтение === */
 .continue-reading-card {
@@ -1491,10 +1478,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 .toc-item.toc-h3 { padding-left: 36px; font-size: 13px; }
 .toc-item.toc-h4 { padding-left: 52px; font-size: 12px; color: var(--text-secondary); }
 
-/* ==========================================================================
-   AUTOSCROLL FAB
-   ========================================================================== */
-
+/* === AUTOSCROLL FAB === */
 .autoscroll-fab {
     position: fixed;
     bottom: 70px;
@@ -1524,10 +1508,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     50% { box-shadow: 0 4px 24px rgba(255, 107, 129, 0.6); }
 }
 
-/* ==========================================================================
-   EDIT URL MODAL & BULK UPLOAD MODAL (Admin)
-   ========================================================================== */
-
+/* === EDIT URL MODAL & BULK UPLOAD MODAL (Admin) === */
 .modal-overlay {
     position: fixed;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -2082,7 +2063,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     left: 0;
     right: 0;
     height: calc(64px + env(safe-area-inset-bottom));
-    background: var(--header-bg);
+    background: var(--bg);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border-top: 1px solid var(--divider);
@@ -2900,9 +2881,6 @@ input:checked + .slider:before { transform: translateX(20px); }
     animation: heartPop 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* ★ Анимация летящих сердечек */
-/* Floating emojis consolidated in .floating-emoji */
-
 /* ★ Индикатор времени чтения */
 .reading-time-badge {
     text-align: center;
@@ -2912,8 +2890,6 @@ input:checked + .slider:before { transform: translateX(20px); }
     font-family: Inter, -apple-system, sans-serif;
     opacity: 0.8;
 }
-
-/* Animation replaced by reactionPop */
 
 /* ★ Scrollbar styling for dark themes */
 .reader-content::-webkit-scrollbar { width: 4px; }
@@ -2951,7 +2927,7 @@ input:checked + .slider:before { transform: translateX(20px); }
     transition: background-color 0.3s ease;
 }
 
-/* --- Top Progress Bar & Bottom Chapter Progress --- */
+/* --- Top Progress Bar --- */
 .top-progress-line {
     position: fixed;
     top: 0;
@@ -3143,21 +3119,19 @@ input:checked + .slider:before { transform: translateX(20px); }
     position: fixed;
     top: 50%;
     left: 50%;
-    transform: translate(-50%, -50%) scale(0.95);
-    width: min(340px, 92vw);
-    max-height: 70vh;
+    transform: translate(-50%, -50%) scale(0.9);
+    width: min(340px, 94vw);
+    max-height: 60vh;
     overflow-y: auto;
-    z-index: 21000;
-    background: var(--glass-bg);
-    backdrop-filter: blur(30px) brightness(0.85);
-    -webkit-backdrop-filter: blur(30px) brightness(0.85);
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-    border: 1px solid var(--glass-border);
-    border-radius: 24px;
+    z-index: 30000; /* Max priority */
+    background: var(--bg);
+    border: 1px solid var(--divider);
+    border-radius: 20px;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.5);
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
-    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .quick-switcher.active {
