@@ -2949,6 +2949,13 @@ async def build_reader_data() -> dict:
         async with db.execute('SELECT id, name FROM custom_names') as c:
             for row in await c.fetchall():
                 custom_names[row[0]] = row[1]
+                
+        # ПРЕДЗАГРУЗКА: Читаем список админов для бейджей в WebApp
+        async with db.execute('SELECT user_id FROM admins') as c:
+            admin_ids = [str(row[0]) for row in await c.fetchall()]
+        # Добавляем хардкод админов из конфига (на всякий случай)
+        admin_ids.extend([str(aid) for aid in ADMIN_IDS])
+        result["admin_ids"] = list(set(admin_ids)) # Уникальные ID
 
         async with db.execute('SELECT DISTINCT volume FROM akashic_ranobe ORDER BY volume') as cursor:
             ak_vols = [row[0] for row in await cursor.fetchall()]
@@ -4654,6 +4661,10 @@ async def main():
         BotCommand(command="marriages", description="Топ пар")
     ]
     await bot.set_my_commands(commands, BotCommandScopeDefault())
+    
+    # === Установка кнопки WebApp в меню чата ===
+    reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html" + (f"?api={API_HOST}" if API_HOST else "")
+    await bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(text="✨ Читалка", web_app=types.WebAppInfo(url=reader_url)))
     
     # === API сервер для WebApp читалки ===
     app = aiohttp.web.Application()

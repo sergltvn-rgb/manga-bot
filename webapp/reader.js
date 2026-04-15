@@ -14,14 +14,16 @@ const userName = tgUser.first_name || 'Аноним';
 
 // === Состояние ===
 let allData = { series: [] };
+let adminIds = []; // Список ID администраторов из БД
 let currentSeries = null;
 let currentVolume = null;
 let currentChapterIdx = 0;
 let currentChapters = [];
 let isAdminMode = false;
-let currentCommentSort = 'top'; // Сортировка: 'top' или 'new'
-let allCommentsCache = []; // Кэш всех комментариев текущей главы
-let commentsData = []; // Список для рендеринга (отфильтрован/отсортирован)
+let currentCommentSort = 'top'; 
+let allCommentsCache = []; 
+let commentsData = []; 
+let isImmersive = false;
 
 // === Typo Report State ===
 let typoSelectedText = '';
@@ -31,6 +33,10 @@ let typoSelectionRange = null;
 function toggleAdminMode(enabled) {
     isAdminMode = enabled;
     if (document.getElementById('screen-series').classList.contains('active')) renderSeriesList();
+    if (isAdminMode) {
+        document.getElementById('screen-chapters').classList.add('admin-enabled');
+    }
+    renderContinueReading();
     if (document.getElementById('screen-chapters').classList.contains('active')) {
         renderVolumeTabs();
         renderChaptersList();
@@ -81,13 +87,97 @@ async function resetCustomName(objId) {
 }
 
 // === Настройки (из localStorage) ===
-const defaults = { fontSize: 17, theme: 'light', textWidth: 90, font: 'serif', lineHeight: 1.8, textAlign: 'left', indent: true, paraSpacing: 20 };
+function getUserRole(userIdStr) {
+    if (adminIds.includes(userIdStr)) return { text: 'Админ', css: 'badge-admin' };
+    return null;
+}
+
+function formatDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+        const safeDateStr = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
+        const d = new Date(safeDateStr);
+        const now = new Date();
+        const diff = now - d;
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return 'только что';
+        if (mins < 60) return `${mins} мин. назад`;
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return `${hours} ч. назад`;
+        const days = Math.floor(hours / 24);
+        if (days < 7) return `${days} дн. назад`;
+        return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    } catch {
+        return dateStr;
+    }
+}
+
+function toggleImmersiveMode(force = null) {
+    isImmersive = force !== null ? force : !isImmersive;
+    const header = document.querySelector('.reader-header');
+    const bottomBar = document.getElementById('reader-bottom-bar');
+    const fab = document.getElementById('fab-container');
+    
+    if (isImmersive) {
+        header?.classList.add('header-hidden');
+        bottomBar?.classList.add('bar-hidden');
+        fab?.classList.add('fab-hidden');
+    } else {
+        header?.classList.remove('header-hidden');
+        bottomBar?.classList.remove('bar-hidden');
+        fab?.classList.remove('fab-hidden');
+    }
+}
+
+function toggleQuickSwitcher() {
+    const switcher = document.getElementById('quick-switcher');
+    if (!switcher) return;
+    const isHidden = switcher.classList.contains('hidden');
+    
+    if (isHidden) {
+        renderQuickSwitcherList();
+        switcher.classList.remove('hidden');
+    } else {
+        switcher.classList.add('hidden');
+    }
+}
+
+function renderQuickSwitcherList() {
+    const list = document.getElementById('quick-switcher-list');
+    if (!list || !currentChapters) return;
+    
+    list.innerHTML = currentChapters.map((ch, idx) => `
+        <div class="quick-switcher-item ${idx === currentChapterIdx ? 'active' : ''}" 
+             onclick="openChapter(${idx}); toggleQuickSwitcher();">
+            ${ch.custom_name || 'Глава ' + ch.chapter}
+        </div>
+    `).join('');
+}
+
+const defaults = { 
+    fontSize: 17, 
+    theme: 'light', 
+    textWidth: 90, 
+    font: 'serif', 
+    lineHeight: 1.8, 
+    textAlign: 'left', 
+    indent: true, 
+    paraSpacing: 20,
+    letterSpacing: 0,
+    paraIndent: 25,
+    dimmerValue: 0,
+    readingMode: 'scroll' // 'scroll' or 'pages'
+};
 let settings = JSON.parse(localStorage.getItem('reader_settings') || 'null') || { ...defaults };
 // Миграция старых настроек
 if (!settings.lineHeight) settings.lineHeight = 1.8;
 if (!settings.textAlign) settings.textAlign = 'left';
 if (settings.indent === undefined) settings.indent = true;
 if (settings.paraSpacing === undefined) settings.paraSpacing = 20;
+if (settings.letterSpacing === undefined) settings.letterSpacing = 0;
+if (settings.paraIndent === undefined) settings.paraIndent = 25;
+if (settings.dimmerValue === undefined) settings.dimmerValue = 0;
+if (settings.readingMode === undefined) settings.readingMode = 'scroll';
 
 let readChapters = JSON.parse(localStorage.getItem('reader_progress') || '{}');
 
@@ -298,10 +388,16 @@ async function loadData() {
             if (resp.ok) {
                 allData = await resp.json();
                 console.log("Data loaded from API, series count:", allData.series?.length);
+                
+                // Сохраняем админов для бейджей
+                if (allData.admin_ids) {
+                    adminIds = allData.admin_ids.map(id => String(id));
+                }
+
                 if (allData.series && allData.series.length > 0) {
                     renderSeriesList();
                     renderContinueReading();
-                    handleStartParam(); // ★ Deep link handling (Phase 5)
+                    handleStartParam(); 
                     return;
                 }
                 console.log("API returned empty series list, falling back to JSON...");
@@ -546,17 +642,27 @@ function openChapter(idx, usePrefetch = false) {
     const chapter = currentChapters[idx];
     if (!chapter) return;
 
-    document.getElementById('reader-title').textContent = chapter.custom_name || `Глава ${chapter.chapter}`;
+    // Smooth transition: fade out
+    const content = document.getElementById('reader-content');
+    if (content) content.classList.add('loading');
+
+    // Update UI
+    const titleHeader = document.getElementById('chapter-title-header');
+    if (titleHeader) titleHeader.textContent = chapter.custom_name || `Глава ${chapter.chapter}`;
+    
     updateNavButtons();
     markAsRead(currentSeries.id, currentVolume.volume, chapter.chapter);
     loadChapterContent(chapter, usePrefetch);
 
     initProgressBar();
     if (progressBarEl) progressBarEl.style.width = '0%';
+    
+    // Auto-close switcher
+    const switcher = document.getElementById('quick-switcher');
+    if (switcher) switcher.classList.add('hidden');
 
     showScreen('reader');
 
-    // Загружаем лайки, реакции и комментарии (для API)
     if (API_URL) {
         loadLikes();
         loadReactions();
@@ -679,42 +785,27 @@ function loadChapterContent(chapter, usePrefetch = false) {
 function renderLoadedContent(container, html, chapter) {
     container.innerHTML = html;
 
+    // Smooth transition: fade in (remove loading class)
+    const contentArea = document.getElementById('reader-content');
+    if (contentArea) {
+        setTimeout(() => contentArea.classList.remove('loading'), 100);
+    }
+
     // --- Расчет примерного времени чтения ---
     const textContent = container.innerText;
     const wordCount = textContent.split(/\s+/).filter(w => w.length > 0).length;
     if (wordCount > 50) {
-        const readingTimeMins = Math.max(1, Math.ceil(wordCount / 200)); // В среднем 200 слов в минуту
+        const readingTimeMins = Math.max(1, Math.ceil(wordCount / 200)); 
         const timeBadge = document.createElement('div');
         timeBadge.className = 'reading-time-badge';
         timeBadge.innerHTML = `<svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px; margin-right:4px;"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><polyline points="12 6 12 12 16 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>~${readingTimeMins} мин. чтения`;
         container.insertBefore(timeBadge, container.firstChild);
     }
-    // ----------------------------------------
 
-    // Инициализируем Lightbox и ToC после загрузки контента
     initLightbox();
     buildToC();
-
-    // ★ Fade-in для изображений
     initImageFadeIn(container);
-
-    // ★ Smart Dark Mode для iframe Teletype
     applyIframeDarkMode();
-
-    if (!container.innerHTML.includes('<iframe')) {
-        container.innerHTML += `
-        <div class="channel-banner">
-            <div class="channel-content">
-                <h3>🌸 Присоединяйся к нам!</h3>
-                <p>Все свежие переводы, новости и общение — в нашем Telegram-канале.</p>
-                <a href="https://t.me/alya_novel" target="_blank" class="channel-btn">
-                    Подписаться на канал
-                </a>
-            </div>
-        </div>`;
-    }
-
-    // Восстанавливаем позицию скролла
     restoreScrollPosition();
 }
 
@@ -1063,34 +1154,49 @@ function renderComments(comments) {
         return colors[Math.abs(hash) % colors.length];
     }
 
-    function parseSpoilers(text) {
-        // Заменяем ||текст|| на скрытый спан
-        return text.replace(/\|\|([\s\S]+?)\|\|/g, (match, content) => {
-            return `<span class="comment-spoiler" onclick="this.classList.toggle('revealed'); event.stopPropagation();">${escapeHtml(content)}</span>`;
+    function applyMarkup(text) {
+        if (!text) return '';
+        // 1. Escaping (handled by renderNode but redundant here if we are careful)
+        let html = escapeHtml(text);
+        
+        // 2. Bold: [b]...[/b]
+        html = html.replace(/\[b\]([\s\S]+?)\[\/b\]/g, '<strong>$1</strong>');
+        // 3. Italic: [i]...[/i]
+        html = html.replace(/\[i\]([\s\S]+?)\[\/i\]/g, '<em>$1</em>');
+        // 4. Strike: [s]...[/s]
+        html = html.replace(/\[s\]([\s\S]+?)\[\/s\]/g, '<del>$1</del>');
+        // 5. Spoiller: ||...||
+        html = html.replace(/\|\|([\s\S]+?)\|\|/g, (match, content) => {
+            return `<span class="comment-spoiler" onclick="this.classList.toggle('revealed'); event.stopPropagation();">${content}</span>`;
         });
+        // 6. Quote: [quote]...[/quote]
+        html = html.replace(/\[quote\]([\s\S]+?)\[\/quote\]/g, '<blockquote class="comment-quote">$1</blockquote>');
+        
+        return html;
     }
 
     function renderNode(c, isChild = false) {
         const initial = (c.user_name || 'А')[0].toUpperCase();
         const date = formatDate(c.created_at);
         const isOwn = String(c.user_id) === userId;
-        const isAdmin = isAdminMode; // Булево значение из глобального состояния
+        const viewerIsAdmin = isAdminMode; 
         const color = getAvatarColor(String(c.user_id));
         
-        // Кнопки управления
-        const deleteBtn = (isOwn || isAdmin) ? `<button class="c-action-btn c-delete" onclick="deleteComment(${c.id})">Удалить</button>` : '';
+        // Роль автора (бейджик)
+        const role = getUserRole(String(c.user_id));
+        const roleBadge = role ? `<span class="comment-role-badge ${role.css}">${role.text}</span>` : '';
+
+        const deleteBtn = (isOwn || viewerIsAdmin) ? `<button class="c-action-btn c-delete" onclick="deleteComment(${c.id})">Удалить</button>` : '';
         const editBtn = isOwn ? `<button class="c-action-btn" onclick="editComment(${c.id})">Ред.</button>` : '';
         const replyBtn = `<button class="c-action-btn" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')">Ответить</button>`;
+        const reportBtn = !isOwn ? `<button class="c-action-btn" onclick="reportComment(${c.id})">Пожаловаться</button>` : '';
 
         // Реакции
         const likes = c.likes || 0;
-        const dislikes = c.dislikes || 0;
-        const userReaction = c.user_reaction; // 'like', 'dislike' или null
-
+        const userReaction = c.user_reaction; 
         const likeActive = userReaction === 'like' ? 'active' : '';
-        const dislikeActive = userReaction === 'dislike' ? 'active' : '';
 
-        // Avatar with Proxy & Fallback
+        // Avatar
         const avatarUrl = API_URL ? `${API_URL}/api/avatar?user_id=${c.user_id}` : null;
         const avatarHtml = avatarUrl 
             ? `<img src="${avatarUrl}" class="comment-avatar" alt="${initial}" style="background:${color}" onerror="this.onerror=null;this.outerHTML='<div class=&quot;comment-avatar&quot; style=&quot;background:${color}&quot;>${initial}</div>';">`
@@ -1098,15 +1204,16 @@ function renderComments(comments) {
 
         let html = `
         <div class="comment-item ${isChild ? 'comment-reply' : ''}" id="comment-${c.id}">
+            ${isChild ? '<div class="comment-branch"></div><div class="comment-branch-curve"></div>' : ''}
             <div class="comment-avatar-container">
                 ${avatarHtml}
             </div>
             <div class="comment-content">
                 <div class="comment-header">
-                    <div class="comment-author">${escapeHtml(c.user_name)}</div>
+                    <div class="comment-author">${escapeHtml(c.user_name)}${roleBadge}</div>
                     <div class="comment-date">${date}</div>
                 </div>
-                <div class="comment-text" id="comment-text-${c.id}">${parseSpoilers(c.text)}</div>
+                <div class="comment-text" id="comment-text-${c.id}">${applyMarkup(c.text)}</div>
                 <div class="comment-actions">
                     <div class="comment-reactions">
                         <button class="c-reaction-btn c-like ${likeActive}" onclick="reactToComment(${c.id}, 'like')" title="Нравится">
@@ -1118,6 +1225,7 @@ function renderComments(comments) {
                         ${replyBtn}
                         ${editBtn}
                         ${deleteBtn}
+                        ${reportBtn}
                     </div>
                 </div>
         `;
@@ -1131,6 +1239,21 @@ function renderComments(comments) {
     }
 
     list.innerHTML = topLevel.map(c => renderNode(c, false)).join('');
+}
+
+function reportComment(id) {
+    if (!API_URL) return;
+    const reason = prompt("Укажите причину жалобы (спам, оскорбления и т.д.):");
+    if (!reason) return;
+    
+    apiFetch(`${API_URL}/api/comments/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment_id: id, reason: reason })
+    }).then(r => r.json()).then(data => {
+        if (data.ok) showToast("Жалоба отправлена модераторам.");
+        else showToast("Ошибка: " + data.error);
+    }).catch(() => showToast("Ошибка сети."));
 }
 
 async function reactToComment(commentId, type) {
@@ -1199,6 +1322,46 @@ async function saveCommentEdit(id) {
     } catch (e) {
         showToast('Ошибка сети.');
     }
+}
+
+function toggleCommentMode(mode) {
+    const writeArea = document.getElementById('comment-write-area');
+    const previewArea = document.getElementById('comment-preview-area');
+    const btnWrite = document.getElementById('mode-write');
+    const btnPreview = document.getElementById('mode-preview');
+    const input = document.getElementById('comment-input');
+    
+    if (mode === 'preview') {
+        writeArea.classList.add('hidden');
+        previewArea.classList.remove('hidden');
+        btnWrite.classList.remove('active');
+        btnPreview.classList.add('active');
+        
+        previewArea.innerHTML = applyMarkup(input.value) || '<i style="opacity:0.6">Текст отсутствует...</i>';
+    } else {
+        writeArea.classList.remove('hidden');
+        previewArea.classList.add('hidden');
+        btnWrite.classList.add('active');
+        btnPreview.classList.remove('active');
+    }
+}
+
+function insertFormatting(start, end) {
+    const input = document.getElementById('comment-input');
+    const startPos = input.selectionStart;
+    const endPos = input.selectionEnd;
+    const text = input.value;
+    const selectedText = text.substring(startPos, endPos);
+    
+    const before = text.substring(0, startPos);
+    const after = text.substring(endPos, text.length);
+    
+    input.value = before + start + selectedText + end + after;
+    input.focus();
+    
+    // Помещаем курсор после вставки
+    const newPos = startPos + start.length + selectedText.length + end.length;
+    input.setSelectionRange(newPos, newPos);
 }
 
 async function postComment() {
@@ -1419,6 +1582,75 @@ function markAsRead(seriesId, vol, chapter) {
     localStorage.setItem('reader_progress', JSON.stringify(readChapters));
 }
 
+function setFontSize(size) {
+    settings.fontSize = parseInt(size);
+    const label = document.getElementById('label-fontSize');
+    if (label) label.innerText = size + 'px';
+    applySettings();
+    saveSettings();
+}
+
+function setTheme(theme) {
+    settings.theme = theme;
+    applySettings();
+    saveSettings();
+    updateSettingsUI();
+}
+
+function setTextWidth(width) {
+    settings.textWidth = parseInt(width);
+    const label = document.getElementById('label-textWidth');
+    if (label) label.innerText = width + '%';
+    applySettings();
+    saveSettings();
+}
+
+function setFont(font) {
+    settings.font = font;
+    applySettings();
+    saveSettings();
+    updateSettingsUI();
+}
+
+function setLineHeight(lh) {
+    settings.lineHeight = parseFloat(lh);
+    const label = document.getElementById('label-lineHeight');
+    if (label) label.innerText = lh;
+    applySettings();
+    saveSettings();
+}
+
+function setLetterSpacing(ls) {
+    settings.letterSpacing = parseFloat(ls);
+    const label = document.getElementById('label-letterSpacing');
+    if (label) label.innerText = ls + 'px';
+    applySettings();
+    saveSettings();
+}
+
+function setParaIndent(px) {
+    settings.paraIndent = parseInt(px);
+    const label = document.getElementById('label-paraIndent');
+    if (label) label.innerText = px + 'px';
+    applySettings();
+    saveSettings();
+}
+
+function setTextAlign(align) {
+    settings.textAlign = align;
+    applySettings();
+    saveSettings();
+    updateSettingsUI();
+}
+
+function setIndent(enabled) {
+    settings.indent = enabled;
+    const group = document.getElementById('para-indent-group');
+    if (group) group.style.display = enabled ? 'block' : 'none';
+    applySettings();
+    saveSettings();
+}
+
 // ==========================================================================
 // НАСТРОЙКИ
 // ==========================================================================
@@ -1426,8 +1658,62 @@ function markAsRead(seriesId, vol, chapter) {
 function toggleSettings() {
     const overlay = document.getElementById('settings-overlay');
     const panel = document.getElementById('settings-panel');
+    const isHidden = panel.classList.contains('hidden');
+    
     overlay.classList.toggle('hidden');
     panel.classList.toggle('hidden');
+    
+    if (!isHidden) {
+        // Closing: save
+        saveSettings();
+    } else {
+        // Opening: show default tab
+        showSettingsTab('font');
+        updateSettingsUI();
+    }
+}
+
+function showSettingsTab(tabName) {
+    const contents = document.querySelectorAll('.settings-tab-content');
+    const buttons = document.querySelectorAll('.settings-tab-btn');
+    
+    contents.forEach(content => {
+        content.classList.add('hidden');
+        content.classList.remove('animate-slide-in');
+    });
+    buttons.forEach(btn => btn.classList.remove('active'));
+    
+    const activeContent = document.getElementById(`settings-tab-${tabName}`);
+    activeContent.classList.remove('hidden');
+    activeContent.classList.add('animate-slide-in');
+    
+    document.getElementById(`tab-btn-${tabName}`).classList.add('active');
+}
+
+function updateSettingsUI() {
+    // Labels for sliders
+    if (document.getElementById('label-fontSize')) document.getElementById('label-fontSize').innerText = settings.fontSize + 'px';
+    if (document.getElementById('label-textWidth')) document.getElementById('label-textWidth').innerText = settings.textWidth + '%';
+    if (document.getElementById('label-lineHeight')) document.getElementById('label-lineHeight').innerText = settings.lineHeight;
+    if (document.getElementById('label-dimmerValue')) document.getElementById('label-dimmerValue').innerText = settings.dimmerValue + '%';
+
+    // Inputs value
+    if (document.getElementById('input-fontSize')) document.getElementById('input-fontSize').value = settings.fontSize;
+    if (document.getElementById('input-textWidth')) document.getElementById('input-textWidth').value = settings.textWidth;
+    if (document.getElementById('input-lineHeight')) document.getElementById('input-lineHeight').value = settings.lineHeight;
+    if (document.getElementById('input-dimmerValue')) document.getElementById('input-dimmerValue').value = settings.dimmerValue;
+
+    // Segmented controls classes
+    document.querySelectorAll('[data-font]').forEach(b => b.classList.toggle('active', b.dataset.font === settings.font));
+    document.querySelectorAll('[data-align]').forEach(b => b.classList.toggle('active', b.dataset.align === settings.textAlign));
+    document.querySelectorAll('[data-theme]').forEach(b => b.classList.toggle('active', b.dataset.theme === settings.theme));
+}
+
+function setDimmer(val) {
+    settings.dimmerValue = parseInt(val);
+    if (document.getElementById('label-dimmerValue')) document.getElementById('label-dimmerValue').innerText = val + '%';
+    applySettings();
+    saveSettings();
 }
 
 function setFontSize(size) {
@@ -1439,65 +1725,18 @@ function setFontSize(size) {
     });
 }
 
-function setTheme(theme) {
-    settings.theme = theme;
-    applySettings();
-    saveSettings();
-    document.querySelectorAll('[data-theme]').forEach(b => {
-        b.classList.toggle('active', b.dataset.theme === theme);
-    });
-}
-
-function setTextWidth(width) {
-    settings.textWidth = parseInt(width);
-    applySettings();
-    saveSettings();
-}
-
-function setFont(font) {
-    settings.font = font;
-    applySettings();
-    saveSettings();
-    document.querySelectorAll('[data-font]').forEach(b => {
-        b.classList.toggle('active', b.dataset.font === font);
-    });
-}
-
-function setLineHeight(lh) {
-    settings.lineHeight = parseFloat(lh);
-    applySettings();
-    saveSettings();
-    document.querySelectorAll('[data-lh]').forEach(b => {
-        b.classList.toggle('active', parseFloat(b.dataset.lh) === settings.lineHeight);
-    });
-}
-
-function setTextAlign(align) {
-    settings.textAlign = align;
-    applySettings();
-    saveSettings();
-    document.querySelectorAll('[data-align]').forEach(b => {
-        b.classList.toggle('active', b.dataset.align === align);
-    });
-}
-
-function setIndent(enabled) {
-    settings.indent = enabled;
-    applySettings();
-    saveSettings();
-}
-
-function setParaSpacing(val) {
-    settings.paraSpacing = parseInt(val);
-    applySettings();
-    saveSettings();
-}
-
 function applySettings() {
     // Тема
     document.body.className = '';
     if (settings.theme !== 'light') {
         document.body.classList.add(`theme-${settings.theme}`);
+    }
+
+    // Диммер (Яркость)
+    const dimmer = document.getElementById('dimmer-overlay');
+    if (dimmer) {
+        dimmer.style.backgroundColor = `rgba(0, 0, 0, ${settings.dimmerValue / 100})`;
+        dimmer.style.pointerEvents = 'none'; // Всегда прокликивается, если только это не оверлей настроек
     }
 
     // Шрифт и размер
@@ -1506,12 +1745,13 @@ function applySettings() {
         readerText.style.fontSize = settings.fontSize + 'px';
         readerText.style.maxWidth = settings.textWidth + '%';
         readerText.style.lineHeight = settings.lineHeight;
+        readerText.style.letterSpacing = settings.letterSpacing + 'px';
 
         // Шрифт
-        readerText.classList.remove('font-sans', 'font-slab', 'font-mono');
+        readerText.classList.remove('font-sans', 'font-slab', 'font-mono', 'font-montserrat', 'font-display');
         if (settings.font === 'sans') readerText.classList.add('font-sans');
-        if (settings.font === 'slab') readerText.classList.add('font-slab');
-        if (settings.font === 'mono') readerText.classList.add('font-mono');
+        if (settings.font === 'montserrat') readerText.classList.add('font-montserrat');
+        if (settings.font === 'display') readerText.classList.add('font-display');
 
         // Выравнивание
         readerText.classList.toggle('align-justify', settings.textAlign === 'justify');
@@ -1521,6 +1761,7 @@ function applySettings() {
 
         // Отступ между абзацами
         readerText.style.setProperty('--para-spacing', settings.paraSpacing + 'px');
+        readerText.style.setProperty('--para-indent', settings.paraIndent + 'px');
     }
 
     // Social section width
@@ -1538,7 +1779,7 @@ function applySettings() {
     // Telegram header
     try {
         const colors = {
-            light: '#ffffff', sepia: '#f4ead5',
+            light: '#ffffff', sepia: '#f4ead5', gray: '#333333',
             dark: '#1a1a2e', amoled: '#000000'
         };
         tg.setHeaderColor(colors[settings.theme] || '#ffffff');

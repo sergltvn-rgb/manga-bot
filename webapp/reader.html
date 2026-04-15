@@ -2,15 +2,20 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>📖 Читалка — Аля</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="reader.css?v=11">
+    <link rel="stylesheet" href="reader.css?v=12">
 </head>
 <body class="theme-light">
+    <!-- ★ Full Screen Dimmer Overlay (MangaLib style) -->
+    <div id="dimmer-overlay" class="dimmer-overlay"></div>
+    
+    <!-- ★ Top Progress Line -->
+    <div id="top-progress-line" class="top-progress-line"></div>
     <!-- ★ Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
@@ -61,19 +66,29 @@
 
     <!-- === ЭКРАН 3: Чтение === -->
     <div id="screen-reader" class="screen">
-        <div class="reader-header reader-top-bar" id="reader-top-bar">
+        <div class="reader-header" id="reader-header">
             <button class="back-btn" onclick="backFromReader()" aria-label="Назад">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
-            <div class="header-title">
-                <h1 id="reader-title">Глава 1</h1>
+            <div class="header-title-container" onclick="toggleQuickSwitcher()">
+                <div class="chapter-title" id="chapter-title-header">Глава 1</div>
+                <svg class="icon-xs switcher-arrow" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-            <button class="toc-toggle-btn" id="toc-toggle-btn" onclick="toggleToC()" title="Оглавление" style="display:none;">
-                <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <button class="settings-btn" onclick="toggleSettings()" aria-label="Настройки">
-                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
+            
+            <div class="header-right-actions">
+                <button class="header-action-btn" id="header-toc-btn" onclick="toggleToC()" title="Оглавление">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="header-action-btn" id="header-settings-btn" onclick="toggleSettings()" title="Настройки">
+                    <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            </div>
+
+            <!-- ★ Quick Switcher Dropdown -->
+            <div id="quick-switcher" class="quick-switcher hidden glass-panel">
+                <div class="quick-switcher-header">Выберите главу</div>
+                <div id="quick-switcher-list" class="quick-switcher-list"></div>
+            </div>
         </div>
         <!-- Progress Bar -->
         <div id="reading-progress-container" class="reading-progress-container">
@@ -103,10 +118,14 @@
 
             <!-- Лайк и комментарии (после текста) -->
             <div id="social-section" class="social-section" style="display:none;">
-                <!-- Лайк -->
-                <div class="like-section">
-                    <button class="like-btn" id="like-btn" onclick="toggleLike()">
-                        <svg class="like-icon" id="like-icon" viewBox="0 0 24 24" width="22" height="22"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                
+                <div class="chapter-actions-bar" id="chapter-actions-bar">
+                    <a href="https://t.me/alya_novel" target="_blank" class="manga-action-btn channel-btn">
+                        <svg class="icon-sm" viewBox="0 0 24 24" style="margin-right: 6px;"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Telegram Канал
+                    </a>
+                    <button class="manga-action-btn like-btn" id="like-btn" onclick="toggleLike()">
+                        <svg class="like-icon" id="like-icon" viewBox="0 0 24 24" width="20" height="20" style="margin-right: 6px;"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                         <span class="like-count" id="like-count">0</span>
                     </button>
                 </div>
@@ -125,15 +144,32 @@
                         <div class="comment-tab active" id="tab-sort-top" onclick="sortComments('top')">Интересные</div>
                         <div class="comment-tab" id="tab-sort-new" onclick="sortComments('new')">По дате</div>
                     </div>
+                    
                     <div class="comment-form" id="comment-form">
-                        <div id="reply-indicator" class="reply-indicator" style="display:none;">
-                            <span>Ответ: <strong id="reply-to-name"></strong></span>
-                            <button class="cancel-reply-btn" onclick="cancelReply()">
-                                <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            </button>
+                        <div class="comment-form-modes">
+                            <button type="button" class="comment-mode-btn active" id="mode-write" onclick="toggleCommentMode('write')">Написать</button>
+                            <button type="button" class="comment-mode-btn" id="mode-preview" onclick="toggleCommentMode('preview')">Предпросмотр</button>
                         </div>
-                        <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="2"></textarea>
-                        <button class="comment-submit-btn" onclick="postComment()">Отправить</button>
+                        
+                        <div id="comment-write-area">
+                            <div id="comment-toolbar" class="comment-toolbar">
+                                <button type="button" onclick="insertFormatting('[b]', '[/b]')" title="Жирный"><svg class="icon-xs" viewBox="0 0 24 24"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                                <button type="button" onclick="insertFormatting('[i]', '[/i]')" title="Курсив"><svg class="icon-xs" viewBox="0 0 24 24"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                                <button type="button" onclick="insertFormatting('[s]', '[/s]')" title="Зачеркнутый"><svg class="icon-xs" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><path d="M16 10.5c.5-2-1.5-3.5-3-3.5a4 4 0 0 0-4 4 4 4 0 0 0 4 4c1.5 0 3.5-1.5 3-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                                <button type="button" onclick="insertFormatting('[quote]', '[/quote]')" title="Цитата"><svg class="icon-xs" viewBox="0 0 24 24"><path d="M11 5L6 9H2V15H6L11 19V5z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+                                <button type="button" onclick="insertFormatting('||', '||')" title="Спойлер"><svg class="icon-xs" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                            </div>
+                            <div id="reply-indicator" class="reply-indicator" style="display:none;">
+                                <span>Ответ: <strong id="reply-to-name"></strong></span>
+                                <button type="button" class="cancel-reply-btn" onclick="cancelReply()">
+                                    <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                </button>
+                            </div>
+                            <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="3"></textarea>
+                        </div>
+                        
+                        <div id="comment-preview-area" class="comment-preview-area hidden"></div>
+                        <button type="button" class="comment-submit-btn" onclick="postComment()">Отправить</button>
                     </div>
 
                     <div id="comments-list" class="comments-list"></div>
@@ -254,97 +290,139 @@
         </button>
     </div>
 
-    <!-- === Панель настроек === -->
-    <div id="settings-overlay" class="settings-overlay hidden" onclick="toggleSettings()"></div>
-    <div id="settings-panel" class="settings-panel hidden">
-        <h2>Настройки чтения</h2>
+    <!-- === Advanced Settings Modal (Phase 4) === -->
+    <div id="settings-overlay" class="modal-overlay hidden" onclick="toggleSettings()"></div>
+    <div id="settings-panel" class="settings-panel hidden glass-panel">
+        <div class="settings-header">Настройки читалки</div>
         
-        <div class="setting-group">
-            <label>Размер шрифта</label>
-            <div class="setting-buttons">
-                <button onclick="setFontSize(14)" data-size="14">A<small>−</small></button>
-                <button onclick="setFontSize(17)" data-size="17" class="active">A</button>
-                <button onclick="setFontSize(20)" data-size="20">A<small>+</small></button>
-                <button onclick="setFontSize(24)" data-size="24">A<small>++</small></button>
+        <div class="settings-tabs">
+            <button class="settings-tab-btn active" id="tab-btn-font" onclick="showSettingsTab('font')">Шрифт</button>
+            <button class="settings-tab-btn" id="tab-btn-display" onclick="showSettingsTab('display')">Вид</button>
+            <button class="settings-tab-btn" id="tab-btn-nav" onclick="showSettingsTab('nav')">Навигация</button>
+        </div>
+
+        <!-- Tab: Font -->
+        <div id="settings-tab-font" class="settings-tab-content">
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Размер текста</label>
+                    <span id="label-fontSize" class="setting-value-badge">17px</span>
+                </div>
+                <input type="range" id="input-fontSize" min="12" max="30" value="17" step="1" oninput="setFontSize(this.value)">
+            </div>
+            
+            <div class="setting-item-block">
+                <label>Шрифт</label>
+                <div class="segmented-control">
+                    <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">С засечками</button>
+                    <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
+                </div>
+            </div>
+
+            <div class="setting-item-block">
+                <label>Выравнивание</label>
+                <div class="segmented-control">
+                    <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
+                    <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
+                </div>
             </div>
         </div>
 
-        <div class="setting-group">
-            <label>Тема</label>
-            <div class="setting-buttons theme-buttons">
-                <button onclick="setTheme('light')" data-theme="light" class="theme-light-btn active">Светлая</button>
-                <button onclick="setTheme('sepia')" data-theme="sepia" class="theme-sepia-btn">Сепия</button>
-                <button onclick="setTheme('dark')" data-theme="dark" class="theme-dark-btn">Тёмная</button>
-                <button onclick="setTheme('amoled')" data-theme="amoled" class="theme-amoled-btn">AMOLED</button>
+        <!-- Tab: Display -->
+        <div id="settings-tab-display" class="settings-tab-content hidden">
+            <div class="setting-item-block">
+                <label>Цветовая схема</label>
+                <div class="theme-grid">
+                    <button class="theme-chip theme-light active" onclick="setTheme('light')" data-theme="light">Светлая</button>
+                    <button class="theme-chip theme-sepia" onclick="setTheme('sepia')" data-theme="sepia">Сепия</button>
+                    <button class="theme-chip theme-gray" onclick="setTheme('gray')" data-theme="gray">Серая</button>
+                    <button class="theme-chip theme-dark" onclick="setTheme('dark')" data-theme="dark">Темная</button>
+                    <button class="theme-chip theme-amoled" onclick="setTheme('amoled')" data-theme="amoled">Amoled</button>
+                </div>
+            </div>
+
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Макс. ширина</label>
+                    <span id="label-textWidth" class="setting-value-badge">90%</span>
+                </div>
+                <input type="range" id="input-textWidth" min="50" max="100" value="90" step="1" oninput="setTextWidth(this.value)">
+            </div>
+
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Яркость экрана</label>
+                    <span id="label-dimmerValue" class="setting-value-badge">0%</span>
+                </div>
+                <input type="range" id="input-dimmerValue" min="0" max="85" value="0" step="5" oninput="setDimmer(this.value)">
+            </div>
+
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Межстрочный интервал</label>
+                    <span id="label-lineHeight" class="setting-value-badge">1.8</span>
+                </div>
+                <input type="range" id="input-lineHeight" min="1.0" max="2.5" value="1.8" step="0.1" oninput="setLineHeight(this.value)">
+            </div>
+            
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Расстояние между букв</label>
+                    <span id="label-letterSpacing" class="setting-value-badge">0px</span>
+                </div>
+                <input type="range" id="input-letterSpacing" min="-1" max="5" value="0" step="0.5" oninput="setLetterSpacing(this.value)">
             </div>
         </div>
 
-        <div class="setting-group">
-            <label>Ширина текста</label>
-            <input type="range" id="width-slider" min="60" max="100" value="90" oninput="setTextWidth(this.value)">
-        </div>
-
-        <div class="setting-group">
-            <label>Отступ между абзацами</label>
-            <input type="range" id="para-spacing-slider" min="0" max="40" value="20" oninput="setParaSpacing(this.value)">
-        </div>
-
-        <div class="setting-group">
-            <label>Межстрочный интервал</label>
-            <div class="setting-buttons">
-                <button onclick="setLineHeight(1.5)" data-lh="1.5">Компактный</button>
-                <button onclick="setLineHeight(1.8)" data-lh="1.8" class="active">Обычный</button>
-                <button onclick="setLineHeight(2.2)" data-lh="2.2">Свободный</button>
+        <!-- Tab: Navigation -->
+        <div id="settings-tab-nav" class="settings-tab-content hidden">
+            <div class="setting-item-row">
+                <div class="setting-info">
+                    <label>Красная строка</label>
+                    <p class="setting-hint">Отступ первого абзаца</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="indent-toggle" checked onchange="setIndent(this.checked)">
+                    <span class="slider round"></span>
+                </label>
             </div>
-        </div>
 
-        <div class="setting-group">
-            <label>Шрифт</label>
-            <div class="setting-buttons font-buttons">
-                <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">Серифный</button>
-                <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
-                <button onclick="setFont('slab')" data-font="slab" style="font-family: 'Roboto Slab'">Слэб</button>
-                <button onclick="setFont('mono')" data-font="mono" style="font-family: 'JetBrains Mono', monospace">Моно</button>
+            <div class="setting-item-block" id="para-indent-group">
+                <div class="setting-label-row">
+                    <label>Размер отступа</label>
+                    <span id="label-paraIndent" class="setting-value-badge">25px</span>
+                </div>
+                <input type="range" id="input-paraIndent" min="0" max="60" value="25" step="5" oninput="setParaIndent(this.value)">
             </div>
-        </div>
-
-        <div class="setting-group">
-            <label>Выравнивание текста</label>
-            <div class="setting-buttons">
-                <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
-                <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
+            
+            <div class="setting-item-row">
+                <div class="setting-info">
+                    <label>Автопрокрутка</label>
+                    <p class="setting-hint">Листать текст автоматически</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
+                    <span class="slider round"></span>
+                </label>
             </div>
-        </div>
 
-        <div class="setting-group" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-            <label style="margin-bottom:0;">¶ Абзацный отступ</label>
-            <label class="switch">
-                <input type="checkbox" id="indent-toggle" checked onchange="setIndent(this.checked)">
-                <span class="slider round"></span>
-            </label>
-        </div>
+            <div class="setting-item-block autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
+                <div class="setting-label-row">
+                    <label>Скорость прокрутки</label>
+                </div>
+                <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
+            </div>
 
-        <div class="setting-group" style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-            <label style="margin-bottom:0;">Автопрокрутка</label>
-            <label class="switch">
-                <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
-                <span class="slider round"></span>
-            </label>
-        </div>
-        <div class="setting-group autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
-            <label>Скорость автопрокрутки</label>
-            <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
-        </div>
-
-        <div class="setting-group" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--divider);">
-            <label style="display: flex; justify-content: space-between; align-items: center;">
-                <span>Режим редактора</span>
+            <div class="setting-item-row" style="margin-top:16px; border-top:1px solid var(--divider); padding-top:16px;">
+                <div class="setting-info">
+                    <label>Режим редактора</label>
+                    <p class="setting-hint">Только для администраторов</p>
+                </div>
                 <label class="switch">
                     <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
                     <span class="slider round"></span>
                 </label>
-            </label>
-            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 5px; line-height: 1.3;">Включает редактирование для переименования проектов, томов и глав.</p>
+            </div>
         </div>
         
         <button class="close-settings-btn" onclick="toggleSettings()">Готово</button>

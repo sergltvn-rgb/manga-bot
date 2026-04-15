@@ -849,38 +849,58 @@ input:checked + .slider:before { transform: translateX(20px); }
     padding: 0 16px 80px;
 }
 
-/* --- Лайк --- */
-.like-section {
+/* --- Chapter Actions Bar (Channel + Like) --- */
+.chapter-actions-bar {
     display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin: 30px 0;
+}
+
+.manga-action-btn {
+    display: flex;
+    align-items: center;
     justify-content: center;
-    padding: 24px 0 20px;
-    border-top: 1px solid var(--divider);
-    margin-top: 30px;
+    padding: 12px 16px;
+    border-radius: 16px;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s, background 0.2s;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    text-decoration: none;
+}
+
+.manga-action-btn:active {
+    transform: scale(0.96);
+}
+
+.channel-btn {
+    flex: 1.5;
+    background: linear-gradient(135deg, #ff6b81, #ff9a9e);
+    color: white !important;
+    box-shadow: 0 4px 15px rgba(255, 107, 129, 0.3);
+}
+
+.channel-btn:hover {
+    box-shadow: 0 6px 20px rgba(255, 107, 129, 0.4);
 }
 
 .like-btn {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 28px;
-    border: 2px solid var(--divider);
-    border-radius: 40px;
+    flex: 1;
     background: var(--card-bg);
-    cursor: pointer;
-    font-size: 16px;
-    font-weight: 600;
     color: var(--text);
-    transition: all 0.25s ease;
-    user-select: none;
-    -webkit-tap-highlight-color: transparent;
+    border: 1px solid var(--card-border);
+    box-shadow: var(--shadow);
 }
 
-.like-btn:active { transform: scale(0.92); }
-
 .like-btn.liked {
-    border-color: #FF4D6D;
-    background: rgba(255, 77, 109, 0.12);
-    color: #FF4D6D;
+    background: var(--accent-light);
+    color: var(--accent);
+    border-color: var(--accent);
 }
 
 .like-icon {
@@ -1044,10 +1064,26 @@ input:checked + .slider:before { transform: translateX(20px); }
 .comment-item {
     display: flex;
     gap: 12px;
-    padding: 16px 0;
-    border-bottom: 1px solid var(--divider);
+    padding: 16px;
+    margin-bottom: 12px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
 }
-.comment-item:last-child { border-bottom: none; }
+.comment-reply {
+    margin-left: 20px;
+    border-left: 3px solid var(--accent);
+    border-radius: 0 16px 16px 0;
+    padding-left: 12px;
+    background: transparent;
+    box-shadow: none;
+    border-top: none;
+    border-right: none;
+    border-bottom: none;
+    margin-bottom: 8px;
+}
+.comment-item:last-child { margin-bottom: 0; }
 
 .comment-avatar-container {
     flex-shrink: 0;
@@ -2879,3 +2915,475 @@ input:checked + .slider:before { transform: translateX(20px); }
 
 /* ★ Stat icons with SVG */
 .stat-icon .icon-sm { color: var(--accent); }
+
+/* ==========================================================================
+   ★ BATCH 4: MANGALIB DELUXE STYLES
+   Categorized Settings, Full-screen Dimmer, Inter Font
+   ========================================================================== */
+
+:root {
+    --inter-font: 'Inter', -apple-system, system-ui, sans-serif;
+    --progress-height: 4px;
+    --badge-admin-bg: rgba(255, 107, 129, 0.15);
+    --badge-admin-text: #ff6b81;
+}
+
+/* --- Full Screen Dimmer --- */
+.dimmer-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0);
+    z-index: 10000;
+    pointer-events: none;
+    transition: background-color 0.3s ease;
+}
+
+/* --- Top Progress Bar --- */
+.top-progress-line {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: var(--progress-height);
+    background: var(--accent);
+    z-index: 11000;
+    width: 0%;
+    transition: width 0.2s ease;
+    box-shadow: 0 0 10px var(--accent);
+}
+
+/* --- Categorized Settings Panel --- */
+.settings-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--divider);
+    padding-bottom: 8px;
+}
+
+.settings-tab-btn {
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-radius: 8px;
+}
+
+.settings-tab-btn.active {
+    color: var(--accent);
+    background: var(--badge-bg);
+}
+
+.settings-tab-content {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.settings-tab-content.hidden {
+    display: none;
+}
+
+.animate-slide-in {
+    animation: slideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideIn {
+    from { opacity: 0; transform: translateX(15px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+
+/* --- Segmented Control (MangaLib style) --- */
+.segmented-control {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    padding: 4px;
+    margin-top: 8px;
+    border: 1px solid var(--divider);
+}
+
+.segmented-control button {
+    padding: 8px 4px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+.segmented-control button.active {
+    background: var(--bg-primary);
+    color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* --- Theme Chips --- */
+.theme-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.theme-chip {
+    padding: 10px;
+    border: 1.5px solid var(--divider);
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.theme-chip::before {
+    content: '';
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.1);
+}
+
+.theme-chip.theme-light::before { background: #ffffff; }
+.theme-chip.theme-sepia::before { background: #f4ecd8; }
+.theme-chip.theme-gray::before { background: #333333; }
+.theme-chip.theme-dark::before { background: #1a1a1a; }
+.theme-chip.theme-amoled::before { background: #000000; }
+
+.theme-chip.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-light);
+}
+
+/* --- Range Inputs --- */
+.setting-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.setting-value-badge {
+    background: var(--badge-bg);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* --- Header Improvement: Quick Switcher --- */
+.header-title-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+
+.header-title-container:hover {
+    background: var(--bg-hover);
+}
+
+.switcher-arrow {
+    opacity: 0.6;
+}
+
+.header-right-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.header-action-btn {
+    padding: 8px;
+    border-radius: 50%;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    transition: background 0.2s;
+}
+
+.header-action-btn:hover {
+    background: var(--bg-hover);
+}
+
+.quick-switcher {
+    position: absolute;
+    top: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 280px;
+    max-height: 350px;
+    overflow-y: auto;
+    z-index: 20000;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+    border: 1px solid var(--divider);
+    animation: panelPop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.quick-switcher-header {
+    padding: 12px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    border-bottom: 1px solid var(--divider);
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.quick-switcher-item {
+    padding: 12px 16px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--divider-light);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.quick-switcher-item:hover {
+    background: var(--bg-hover);
+    padding-left: 20px;
+}
+
+.quick-switcher-item.active {
+    color: var(--accent);
+    font-weight: 700;
+    background: var(--badge-bg);
+}
+
+/* --- Immersive Mode Classes --- */
+.header-hidden {
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
+}
+.bar-hidden {
+    transform: translateY(100%);
+    opacity: 0;
+    pointer-events: none;
+}
+.fab-hidden {
+    opacity: 0;
+    transform: scale(0.8);
+    pointer-events: none;
+}
+
+.reader-header, .reader-bottom-bar, .fab-container {
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+}
+
+/* --- Comment Roles & Branches --- */
+.comment-role-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 6px;
+}
+
+.badge-admin {
+    background: var(--badge-admin-bg);
+    color: var(--badge-admin-text);
+}
+
+.comment-branch {
+    position: absolute;
+    left: -20px;
+    top: 0;
+    bottom: 20px;
+    width: 2px;
+    background: var(--divider);
+}
+
+.comment-branch-curve {
+    position: absolute;
+    left: -20px;
+    top: 20px;
+    width: 20px;
+    height: 2px;
+    background: var(--divider);
+}
+
+/* --- Setting Blocks (Stacked) --- */
+.setting-item-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.setting-item-block label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* --- Setting Rows (Horizontal) --- */
+.setting-item-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--divider-light);
+}
+
+.setting-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.setting-info label {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.setting-hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+/* --- Improved Sliders --- */
+input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 6px;
+    background: var(--divider);
+    border-radius: 5px;
+    outline: none;
+    margin: 12px 0;
+}
+
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    background: var(--accent);
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 0 10px rgba(255,107,129,0.3);
+    transition: transform 0.1s ease;
+}
+
+input[type=range]:active::-webkit-slider-thumb {
+    transform: scale(1.2);
+}
+
+/* --- Comment Form Revamp --- */
+.comment-form-modes {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    background: var(--bg-secondary);
+    padding: 3px;
+    border-radius: 10px;
+    width: fit-content;
+}
+
+.comment-mode-btn {
+    padding: 6px 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+.comment-mode-btn.active {
+    background: var(--badge-bg);
+    color: var(--accent);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.comment-toolbar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--divider-light);
+    margin-bottom: 8px;
+}
+
+.comment-toolbar button {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+
+.comment-toolbar button:hover {
+    background: var(--accent-light);
+    color: var(--accent);
+}
+
+.comment-preview-area {
+    min-height: 80px;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    font-size: 15px;
+    line-height: 1.6;
+    margin-bottom: 12px;
+    border: 1px dashed var(--divider);
+}
+
+.comment-quote {
+    border-left: 3px solid var(--accent);
+    margin: 8px 0;
+    padding: 4px 12px;
+    background: var(--accent-light);
+    font-style: italic;
+    font-size: 14px;
+    border-radius: 0 8px 8px 0;
+}
+
+/* Visibility helper */
+.hidden { display: none !important; }
+/* Font classes */
+.font-sans, .font-montserrat, .font-display {
+    font-family: var(--inter-font) !important;
+}
+.font-montserrat { font-family: 'Montserrat', sans-serif !important; }
+.font-display { font-family: 'Playfair Display', serif !important; }
+
+/* Smooth fade transition between chapters */
+.reader-content {
+    transition: opacity 0.3s ease;
+}
+.reader-content.loading {
+    opacity: 0;
+}
+
+@charset " UTF-8\;
