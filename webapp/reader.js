@@ -1791,27 +1791,7 @@ function saveSettings() {
 }
 
 function restoreSettings() {
-    document.querySelectorAll('[data-size]').forEach(b => {
-        b.classList.toggle('active', parseInt(b.dataset.size) === settings.fontSize);
-    });
-    document.querySelectorAll('[data-theme]').forEach(b => {
-        b.classList.toggle('active', b.dataset.theme === settings.theme);
-    });
-    document.querySelectorAll('[data-font]').forEach(b => {
-        b.classList.toggle('active', b.dataset.font === settings.font);
-    });
-    document.querySelectorAll('[data-lh]').forEach(b => {
-        b.classList.toggle('active', parseFloat(b.dataset.lh) === settings.lineHeight);
-    });
-    document.querySelectorAll('[data-align]').forEach(b => {
-        b.classList.toggle('active', b.dataset.align === settings.textAlign);
-    });
-    document.getElementById('width-slider').value = settings.textWidth;
-    document.getElementById('para-spacing-slider').value = settings.paraSpacing;
-
-    const indentToggle = document.getElementById('indent-toggle');
-    if (indentToggle) indentToggle.checked = settings.indent;
-
+    updateSettingsUI();
     applySettings();
 }
 
