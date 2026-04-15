@@ -1950,7 +1950,6 @@ input:checked + .slider:before { transform: translateX(20px); }
     font-size: 14px;
     line-height: 1.5;
     color: var(--text);
-    padding-left: 42px; /* avatar width 32 + gap 10 */
     white-space: pre-wrap;
 }
 
@@ -3349,15 +3348,17 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 
 .comment-preview-area {
-    min-height: 80px;
+    min-height: 40px;
     padding: 12px;
     background: var(--bg-secondary);
     border-radius: 12px;
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.6;
-    margin-bottom: 12px;
+    margin-top: 12px;
     border: 1px dashed var(--divider);
+    color: var(--text-main);
 }
+.comment-preview-area:empty { display: none; }
 
 .comment-quote {
     border-left: 3px solid var(--accent);

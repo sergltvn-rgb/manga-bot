@@ -4403,6 +4403,42 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
+async def handle_comments_report(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Жалоба на комментарий."""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        user_name = user.get("first_name", "Аноним")
+
+        data = await request.json()
+        comment_id = data.get('comment_id')
+        reason = data.get('reason', '').strip()
+        comment_text = data.get('comment_text', '').strip()
+
+        if not comment_id or not reason:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+
+        # Уведомление админам
+        admins = await get_admins()
+        report_text = (
+            f"🚫 <b>Жалоба на комментарий!</b>\n"
+            f"От: {html.escape(user_name)} (ID: <code>{user_id}</code>)\n"
+            f"ID комментария: <code>{comment_id}</code>\n"
+            f"Причина: {html.escape(reason)}\n\n"
+            f"<b>Текст комментария:</b>\n<i>{html.escape(comment_text)}</i>"
+        )
+        for admin_id in admins:
+            try:
+                await bot.send_message(admin_id, report_text, parse_mode="HTML")
+            except Exception:
+                pass
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
 # --- Аватары и Реакции (Phase 3) ---
 
 async def handle_avatar_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -4683,6 +4719,8 @@ async def main():
     app.router.add_options("/api/comments/react", handle_cors_preflight)
     app.router.add_options("/api/comments", handle_cors_preflight)
     app.router.add_route("DELETE", "/api/comments", handle_comments_delete)
+    app.router.add_post("/api/comments/report", handle_comments_report)
+    app.router.add_options("/api/comments/report", handle_cors_preflight)
     # Аватары
     app.router.add_get("/api/avatar", handle_avatar_get)
     app.router.add_options("/api/avatar", handle_cors_preflight)

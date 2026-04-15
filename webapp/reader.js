@@ -1154,26 +1154,7 @@ function renderComments(comments) {
         return colors[Math.abs(hash) % colors.length];
     }
 
-    function applyMarkup(text) {
-        if (!text) return '';
-        // 1. Escaping (handled by renderNode but redundant here if we are careful)
-        let html = escapeHtml(text);
-        
-        // 2. Bold: [b]...[/b]
-        html = html.replace(/\[b\]([\s\S]+?)\[\/b\]/g, '<strong>$1</strong>');
-        // 3. Italic: [i]...[/i]
-        html = html.replace(/\[i\]([\s\S]+?)\[\/i\]/g, '<em>$1</em>');
-        // 4. Strike: [s]...[/s]
-        html = html.replace(/\[s\]([\s\S]+?)\[\/s\]/g, '<del>$1</del>');
-        // 5. Spoiller: ||...||
-        html = html.replace(/\|\|([\s\S]+?)\|\|/g, (match, content) => {
-            return `<span class="comment-spoiler" onclick="this.classList.toggle('revealed'); event.stopPropagation();">${content}</span>`;
-        });
-        // 6. Quote: [quote]...[/quote]
-        html = html.replace(/\[quote\]([\s\S]+?)\[\/quote\]/g, '<blockquote class="comment-quote">$1</blockquote>');
-        
-        return html;
-    }
+    // Markup helpers are now global
 
     function renderNode(c, isChild = false) {
         const initial = (c.user_name || 'А')[0].toUpperCase();
@@ -1246,10 +1227,14 @@ function reportComment(id) {
     const reason = prompt("Укажите причину жалобы (спам, оскорбления и т.д.):");
     if (!reason) return;
     
+    // Пытаемся найти текст комментария для полноты отчета
+    const commentEl = document.getElementById(`comment-text-${id}`);
+    const commentText = commentEl ? commentEl.innerText : "";
+
     apiFetch(`${API_URL}/api/comments/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ comment_id: id, reason: reason })
+        body: JSON.stringify({ comment_id: id, reason: reason, comment_text: commentText })
     }).then(r => r.json()).then(data => {
         if (data.ok) showToast("Жалоба отправлена модераторам.");
         else showToast("Ошибка: " + data.error);
@@ -1324,27 +1309,22 @@ async function saveCommentEdit(id) {
     }
 }
 
-function toggleCommentMode(mode) {
-    const writeArea = document.getElementById('comment-write-area');
-    const previewArea = document.getElementById('comment-preview-area');
-    const btnWrite = document.getElementById('mode-write');
-    const btnPreview = document.getElementById('mode-preview');
+function updateCommentPreview() {
     const input = document.getElementById('comment-input');
+    const preview = document.getElementById('comment-preview-area');
+    if (!input || !preview) return;
     
-    if (mode === 'preview') {
-        writeArea.classList.add('hidden');
-        previewArea.classList.remove('hidden');
-        btnWrite.classList.remove('active');
-        btnPreview.classList.add('active');
-        
-        previewArea.innerHTML = applyMarkup(input.value) || '<i style="opacity:0.6">Текст отсутствует...</i>';
+    const val = input.value.trim();
+    if (val) {
+        preview.classList.remove('hidden');
+        preview.innerHTML = `<div style="font-size: 11px; opacity: 0.5; margin-bottom: 4px; font-weight: 700; text-transform: uppercase;">Предпросмотр:</div>` + applyMarkup(val);
     } else {
-        writeArea.classList.remove('hidden');
-        previewArea.classList.add('hidden');
-        btnWrite.classList.add('active');
-        btnPreview.classList.remove('active');
+        preview.classList.add('hidden');
+        preview.innerHTML = '';
     }
 }
+
+// Inline preview updates automatically on input
 
 function insertFormatting(start, end) {
     const input = document.getElementById('comment-input');
@@ -1362,6 +1342,8 @@ function insertFormatting(start, end) {
     // Помещаем курсор после вставки
     const newPos = startPos + start.length + selectedText.length + end.length;
     input.setSelectionRange(newPos, newPos);
+    
+    updateCommentPreview();
 }
 
 async function postComment() {
@@ -1432,9 +1414,30 @@ function formatDate(dateStr) {
 }
 
 function escapeHtml(str) {
+    if (!str) return '';
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+function applyMarkup(text) {
+    if (!text) return '';
+    let html = escapeHtml(text);
+    
+    // 2. Bold: [b]...[/b]
+    html = html.replace(/\[b\]([\s\S]+?)\[\/b\]/g, '<strong>$1</strong>');
+    // 3. Italic: [i]...[/i]
+    html = html.replace(/\[i\]([\s\S]+?)\[\/i\]/g, '<em>$1</em>');
+    // 4. Strike: [s]...[/s]
+    html = html.replace(/\[s\]([\s\S]+?)\[\/s\]/g, '<del>$1</del>');
+    // 5. Spoiler: ||...||
+    html = html.replace(/\|\|([\s\S]+?)\|\|/g, (match, content) => {
+        return `<span class="comment-spoiler" onclick="this.classList.toggle('revealed'); event.stopPropagation();">${content}</span>`;
+    });
+    // 6. Quote: [quote]...[/quote]
+    html = html.replace(/\[quote\]([\s\S]+?)\[\/quote\]/g, '<blockquote class="comment-quote">$1</blockquote>');
+    
+    return html;
 }
 
 // ==========================================================================
@@ -2077,44 +2080,38 @@ let tocItems = [];
 let tocObserver = null;
 
 function buildToC() {
-    const container = document.getElementById('reader-text');
     const tocList = document.getElementById('toc-list');
-    const tocBtn = document.getElementById('toc-toggle-btn');
-    if (!container || !tocList || !tocBtn) return;
+    if (!tocList) return;
 
-    const headings = container.querySelectorAll('h2, h3, h4');
-    tocItems = Array.from(headings);
-
-    if (tocItems.length === 0) {
-        tocBtn.style.display = 'none';
+    if (!currentChapters || currentChapters.length === 0) {
+        tocList.innerHTML = '<div class="no-chapters">Список глав пуст</div>';
         return;
     }
 
-    tocBtn.style.display = 'flex';
-    // Assign IDs to headings
-    tocItems.forEach((h, i) => {
-        if (!h.id) h.id = `toc-heading-${i}`;
-    });
-
-    tocList.innerHTML = tocItems.map((h, i) => {
-        const level = h.tagName.toLowerCase();
-        const cssClass = level === 'h3' ? 'toc-h3' : level === 'h4' ? 'toc-h4' : '';
-        return `<div class="toc-item ${cssClass}" data-toc-idx="${i}" onclick="scrollToHeading(${i})">${h.textContent}</div>`;
+    tocList.innerHTML = currentChapters.map((ch, idx) => {
+        const isActive = idx === currentChapterIdx;
+        const isRead = readChapters[ch.id || `${currentSeries.id}_v${currentVolume.volume}_ch${ch.chapter}`];
+        return `
+            <div class="toc-item ${isActive ? 'active' : ''} ${isRead ? 'read' : ''}" 
+                 onclick="openChapter(${idx}); toggleToC();">
+                <span class="toc-num">${idx + 1}.</span>
+                <span class="toc-name">${ch.custom_name || 'Глава ' + ch.chapter}</span>
+                ${isActive ? '<span class="toc-status-icon">📍</span>' : (isRead ? '<span class="toc-status-icon">✓</span>' : '')}
+            </div>
+        `;
     }).join('');
 
-    // IntersectionObserver for active heading
-    if (tocObserver) tocObserver.disconnect();
-    tocObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                const idx = tocItems.indexOf(entry.target);
-                if (idx !== -1) highlightToCItem(idx);
-            }
-        });
-    }, { root: document.getElementById('reader-content'), rootMargin: '-10% 0px -70% 0px', threshold: 0.1 });
-
-    tocItems.forEach(h => tocObserver.observe(h));
+    // Скролл к активной главе в списке
+    setTimeout(() => {
+        const activeItem = tocList.querySelector('.toc-item.active');
+        if (activeItem) {
+            activeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, 100);
 }
+
+// Заменяем scrollToHeading на пустую для совместимости
+function scrollToHeading(idx) {}
 
 function highlightToCItem(idx) {
     document.querySelectorAll('.toc-item').forEach((item, i) => {

@@ -98,7 +98,7 @@
         <div id="toc-overlay" class="toc-overlay hidden" onclick="toggleToC()"></div>
         <div id="toc-panel" class="toc-panel hidden">
             <div class="toc-header">
-                <h3>Оглавление</h3>
+                <h3>📖 Главы</h3>
                 <button class="toc-close-btn" onclick="toggleToC()">
                     <svg class="icon-sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
@@ -146,10 +146,7 @@
                     </div>
                     
                     <div class="comment-form" id="comment-form">
-                        <div class="comment-form-modes">
-                            <button type="button" class="comment-mode-btn active" id="mode-write" onclick="toggleCommentMode('write')">Написать</button>
-                            <button type="button" class="comment-mode-btn" id="mode-preview" onclick="toggleCommentMode('preview')">Предпросмотр</button>
-                        </div>
+                        <!-- Mode buttons removed for inline preview -->
                         
                         <div id="comment-write-area">
                             <div id="comment-toolbar" class="comment-toolbar">
@@ -165,7 +162,7 @@
                                     <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                                 </button>
                             </div>
-                            <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="3"></textarea>
+                            <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="3" oninput="updateCommentPreview()"></textarea>
                         </div>
                         
                         <div id="comment-preview-area" class="comment-preview-area hidden"></div>
