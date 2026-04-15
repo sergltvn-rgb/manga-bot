@@ -1,4 +1,4 @@
-const CACHE_NAME = 'reader-cache-v1';
+const CACHE_NAME = 'reader-cache-v3';
 const ASSETS_TO_CACHE = [
   './reader.html',
   './reader.css',

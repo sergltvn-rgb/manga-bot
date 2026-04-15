@@ -333,15 +333,36 @@ function getLastRead(seriesId) {
     const local = all[seriesId];
 
     const serverBm = serverBookmarks.find(b => String(b.series_id) === String(seriesId));
+    
+    if (serverBm && local) {
+        // Сравниваем время. Сервер возвращает строку TIMESTAMP.
+        const serverTs = new Date(serverBm.updated_at + (serverBm.updated_at.includes('Z') ? '' : ' UTC')).getTime();
+        const localTs = local.ts || 0;
+        
+        if (serverTs > localTs) {
+            console.log("Using newer Server progress for", seriesId);
+            return {
+                seriesId: seriesId,
+                volume: serverBm.volume_id,
+                chapter: serverBm.chapter_key,
+                scroll: serverBm.scroll_pos,
+                isServer: true
+            };
+        } else {
+            console.log("Using newer Local progress for", seriesId);
+            return local;
+        }
+    }
+
     if (serverBm) {
         return {
             seriesId: seriesId,
             volume: serverBm.volume_id,
             chapter: serverBm.chapter_key,
+            scroll: serverBm.scroll_pos,
             isServer: true
         };
     }
-
     return local || null;
 }
 
@@ -1385,7 +1406,7 @@ async function postComment() {
     btn.disabled = true;
 
     try {
-        await apiFetch(API_URL + '/api/comments', {
+        const resp = await apiFetch(API_URL + '/api/comments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1394,11 +1415,18 @@ async function postComment() {
                 parent_id: replyingToId
             })
         });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || 'Ошибка сервера при отправке');
+        }
+
         input.value = '';
         cancelReply();
         await loadComments();
     } catch (e) {
-        console.warn('Post comment error:', e);
+        console.error('Post comment error:', e);
+        tg.showAlert("Ошибка: " + e.message);
     } finally {
         btn.disabled = false;
     }
