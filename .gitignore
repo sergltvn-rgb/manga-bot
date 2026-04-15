@@ -23,6 +23,22 @@ manga.db-journal
 .vscode/
 .idea/
 
-# Windows
+# Node.js
+node_modules/
+webapp/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Other
+.DS_Store
 Thumbs.db
 Desktop.ini
+.cache/
+dist/
+build/
+*.bak
+*.rar
+*.zip
+*.log
