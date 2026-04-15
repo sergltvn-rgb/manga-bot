@@ -7,6 +7,14 @@ const tg = window.Telegram.WebApp;
 tg.expand();
 tg.ready();
 
+function openChannel() {
+    if (window.Telegram && window.Telegram.WebApp) {
+        window.Telegram.WebApp.openTelegramLink('https://t.me/alya_novel');
+    } else {
+        window.open('https://t.me/alya_novel', '_blank');
+    }
+}
+
 // === Telegram User ===
 const tgUser = tg.initDataUnsafe?.user || {};
 const userId = String(tgUser.id || '');
@@ -1102,6 +1110,7 @@ async function loadComments() {
 }
 
 function renderComments(comments) {
+    allCommentsCache = comments; // Важно: обновляем кэш для корректной работы сортировки
     const list = document.getElementById('comments-list');
     const badge = document.getElementById('comments-count-badge');
     badge.textContent = comments.length > 0 ? `(${comments.length})` : '';
@@ -1116,12 +1125,19 @@ function renderComments(comments) {
 
     // ★ Фаза 5: Применяем сортировку
     commentsData = [...comments];
+
+    const parseDate = (d) => {
+        if (!d) return 0;
+        const safe = d.includes('T') ? d : d.replace(' ', 'T') + 'Z';
+        return new Date(safe).getTime();
+    };
+
     if (currentCommentSort === 'top') {
         // Сортировка по лайкам (интересные)
-        commentsData.sort((a, b) => ((b.likes || 0) - (b.dislikes || 0)) - ((a.likes || 0) - (a.dislikes || 0)));
+        commentsData.sort((a, b) => (b.likes || 0) - (a.likes || 0));
     } else {
         // По дате (новые сверху)
-        commentsData.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        commentsData.sort((a, b) => parseDate(b.created_at) - parseDate(a.created_at));
     }
 
     // Строим дерево
@@ -1186,13 +1202,11 @@ function renderComments(comments) {
         let html = `
         <div class="comment-item ${isChild ? 'comment-reply' : ''}" id="comment-${c.id}">
             ${isChild ? '<div class="comment-branch"></div><div class="comment-branch-curve"></div>' : ''}
-            <div class="comment-avatar-container">
-                ${avatarHtml}
-            </div>
             <div class="comment-content">
                 <div class="comment-header">
+                    ${avatarHtml}
                     <div class="comment-author">${escapeHtml(c.user_name)}${roleBadge}</div>
-                    <div class="comment-date">${date}</div>
+                    <div class="comment-date" style="margin-left:auto;">${date}</div>
                 </div>
                 <div class="comment-text" id="comment-text-${c.id}">${applyMarkup(c.text)}</div>
                 <div class="comment-actions">
@@ -2130,8 +2144,8 @@ function scrollToHeading(idx) {
 }
 
 function toggleToC() {
-    document.getElementById('toc-overlay').classList.toggle('hidden');
-    document.getElementById('toc-panel').classList.toggle('hidden');
+    document.getElementById('toc-overlay').classList.toggle('active');
+    document.getElementById('toc-panel').classList.toggle('active');
 }
 
 // ==========================================================================
@@ -3040,8 +3054,9 @@ function initGestures() {
 function initReaderScrollListeners() {
     const content = document.getElementById('reader-content');
     const screen = document.getElementById('screen-reader');
-    const progressBar = document.getElementById('reading-progress-bar');
-    if (!content || !screen || !progressBar) return;
+    const bottomBar = document.getElementById('reading-progress-bar');
+    const topBar = document.getElementById('top-progress-line');
+    if (!content || !screen) return;
 
     let lastScrollTop = 0;
     const threshold = 15;
@@ -3050,9 +3065,10 @@ function initReaderScrollListeners() {
         const scrollTop = content.scrollTop;
         const scrollHeight = content.scrollHeight - content.clientHeight;
         
-        // 1. Прогресс-бар
+        // 1. Прогресс-бары
         const progress = (scrollTop / Math.max(1, scrollHeight)) * 100;
-        progressBar.style.width = `${progress}%`;
+        if (bottomBar) bottomBar.style.width = `${progress}%`;
+        if (topBar) topBar.style.width = `${progress}%`;
 
         // 2. Immersive Scroll (Скрытие UI при скролле вниз)
         if (Math.abs(scrollTop - lastScrollTop) > threshold) {
