@@ -1047,7 +1047,7 @@ async def process_vs_anime(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "suggest_art_menu")
 async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMContext):
-    if await check_cd_and_warn(callback, "suggest_art", 60): return
+    if await check_cd_and_warn(callback, "suggest_art", 30): return
     await state.set_state(ArtSuggest.waiting_for_photo)
     text = (
         "🖼 <b>Предложка артов</b>\n\n"
@@ -1062,7 +1062,7 @@ async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMCon
 
 @dp.callback_query(F.data == "tech_support_menu")
 async def process_tech_support_menu(callback: types.CallbackQuery, state: FSMContext):
-    if await check_cd_and_warn(callback, "tech_support", 180): return
+    if await check_cd_and_warn(callback, "tech_support", 30): return
     await state.set_state(TechSupport.waiting_for_message)
     await callback.message.edit_text(
         "🆘 <b>Техническая поддержка / Идеи</b>\n\n"
@@ -1342,7 +1342,7 @@ async def cmd_rob(message: types.Message):
     if target.is_bot:
         return await message.answer("🤖 Роботы не носят с собой кошельки!")
         
-    if await check_cd_and_warn(message, "rob", 3600): return
+    if await check_cd_and_warn(message, "rob", 30): return
     
     target_stats = await get_user_stats(target.id)
     target_balance = target_stats[7]
@@ -3776,7 +3776,7 @@ async def finish_art_upload(message: types.Message, state: FSMContext):
 # --- ПРЕДЛОЖКА АРТОВ ---
 @dp.message(Command("suggest_art"))
 async def cmd_suggest_art(message: types.Message, state: FSMContext):
-    if await check_cd_and_warn(message, "suggest_art", 60): return
+    if await check_cd_and_warn(message, "suggest_art", 30): return
     await state.set_state(ArtSuggest.waiting_for_photo)
     text = (
         "🖼 <b>Предложка артов</b>\n\n"
