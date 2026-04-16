@@ -1349,7 +1349,8 @@ async def cmd_rob(message: types.Message):
         
     # Шанс 30%
     if random.random() < 0.30:
-        amount = int(target_balance * 0.10)
+        # Увеличиваем вариативность суммы кражи (от 5% до 15% от баланса жертвы)
+        amount = int(target_balance * random.uniform(0.05, 0.15))
         if amount < 1: amount = 1
         
         async with aiosqlite.connect('manga.db') as db:
@@ -1359,25 +1360,32 @@ async def cmd_rob(message: types.Message):
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (amount, initiator.id))
             await db.commit()
             
-        msg = await message.answer(
-            f"🥷 <b>Успешная кража!</b>\n"
-            f"Вы незаметно вытащили <b>{amount} монет</b> из кошелька @{target.username}.",
-            parse_mode="HTML"
-        )
+        success_templates = [
+            "🥷 <b>Успешная кража!</b>\nТы незаметно вытащил <b>{amount} монет</b> из кармана @{target}.",
+            "😏 <b>План 'Г' сработал!</b>\nПока Аля отвлеклась, ты стянул <b>{amount} монет</b> у @{target}.",
+            "✨ <b>Фортуна на твоей стороне!</b>\nТы ловко обчистил @{target} на <b>{amount} монет</b>.",
+            "🤫 <b>Тихо и чисто!</b>\n@{target} даже не заметил(а) потери <b>{amount} монет</b>."
+        ]
+        text = random.choice(success_templates).format(amount=amount, target=target.username)
+        msg = await message.answer(text, parse_mode="HTML")
         if message.chat.type in ["group", "supergroup"]:
             asyncio.create_task(delete_after(msg, 30))
     else:
-        # Провал - штраф 100 монет
+        # Провал - штраф (рандом от 50 до 150 монет)
+        penalty = random.randint(50, 150)
         async with aiosqlite.connect('manga.db') as db:
             await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (initiator.id,))
-            await db.execute('UPDATE users_stats SET balance = MAX(0, balance - 100) WHERE user_id = ?', (initiator.id,))
+            await db.execute('UPDATE users_stats SET balance = MAX(0, balance - ?) WHERE user_id = ?', (penalty, initiator.id))
             await db.commit()
             
-        msg = await message.answer(
-            f"🚨 <b>Провал!</b>\n"
-            f"Вас поймала <b>Аля</b> на месте преступления! За нарушение порядка вы оштрафованы на <b>100 монет</b>.",
-            parse_mode="HTML"
-        )
+        failure_templates = [
+            "🚨 <b>Провал!</b>\nВас поймала <b>Аля</b> на месте преступления! За нарушение порядка вы оштрафованы на <b>{penalty} монет</b>.",
+            "👮‍♂️ <b>Масачика заметил!</b>\nОн не любит воришек. Ты оштрафован на <b>{penalty} монет</b>.",
+            "😡 <b>Неудачная попытка!</b>\n@{target} оказался слишком внимательным. Твой кошелек полегчал на <b>{penalty} монет</b>.",
+            "🤦‍♂️ <b>Эх, спалился...</b>\nАля увидела, как ты лезешь в карман. Штраф <b>{penalty} монет</b>."
+        ]
+        text = random.choice(failure_templates).format(penalty=penalty, target=target.username)
+        msg = await message.answer(text, parse_mode="HTML")
         if message.chat.type in ["group", "supergroup"]:
             asyncio.create_task(delete_after(msg, 30))
 
