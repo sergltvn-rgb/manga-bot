@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>📖 Читалка — Аля</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="reader.css?v=12">
+</head>
+<body class="theme-light">
+    <!-- ★ Full Screen Dimmer Overlay (MangaLib style) -->
+    <div id="dimmer-overlay" class="dimmer-overlay"></div>
+    
+    <!-- ★ Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- ★ Swipe-back edge indicator -->
+    <div id="swipe-back-indicator" class="swipe-back-indicator"></div>
+
+    <!-- === ЭКРАН 1: Выбор серии === -->
+    <div id="screen-series" class="screen active">
+        <div class="reader-header">
+            <div class="header-title">
+                <svg class="icon header-icon-svg" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <h1>Библиотека</h1>
+            </div>
+            <button class="settings-btn" onclick="toggleSettings()" aria-label="Настройки">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+        </div>
+        <div class="content-area">
+            <!-- Блок "Продолжить чтение" -->
+            <div id="continue-reading-container" style="display:none;"></div>
+            
+            <div id="series-list">
+                <div class="skeleton-cards">
+                    <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
+                    <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:80%"></div><div class="skeleton-line" style="width:40%"></div></div></div>
+                    <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:65%"></div><div class="skeleton-line" style="width:55%"></div></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- === ЭКРАН 2: Выбор главы === -->
+    <div id="screen-chapters" class="screen">
+        <div class="reader-header">
+            <button class="back-btn" onclick="showScreen('series')" aria-label="Назад">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="header-title">
+                <h1 id="chapters-title">Том 1</h1>
+            </div>
+            <button class="settings-btn" onclick="toggleSettings()" aria-label="Настройки">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+        </div>
+        <div class="volume-tabs" id="volume-tabs"></div>
+        <div id="chapters-list" class="content-area"></div>
+    </div>
+
+    <!-- === ЭКРАН 3: Чтение === -->
+    <div id="screen-reader" class="screen">
+        <div class="reader-header" id="reader-header">
+            <button class="back-btn" onclick="backFromReader()" aria-label="Назад">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="header-title-container" onclick="toggleQuickSwitcher()">
+                <div class="chapter-title" id="chapter-title-header">Глава 1</div>
+                <svg class="icon-xs switcher-arrow" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            
+            <div class="header-right-actions">
+                <button class="header-action-btn" id="header-toc-btn" onclick="toggleToC()" title="Оглавление">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <button class="header-action-btn" id="header-settings-btn" onclick="toggleSettings()" title="Настройки">
+                    <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            </div>
+
+        </div>
+        <!-- Progress Bar -->
+        <div id="reading-progress-container" class="reading-progress-container">
+            <div id="reading-progress-bar" class="reading-progress-bar"></div>
+        </div>
+        <!-- ★ Quick Switcher Modal (Controlled via .active class) -->
+        <div id="quick-switcher" class="quick-switcher">
+            <div class="quick-switcher-header">Выберите главу</div>
+            <div id="quick-switcher-list" class="quick-switcher-list"></div>
+        </div>
+        <!-- ToC Sidebar -->
+        <div id="toc-overlay" class="toc-overlay" onclick="toggleToC()"></div>
+        <div id="toc-panel" class="toc-panel">
+            <div class="toc-header">
+                <h3>📖 Главы</h3>
+                <button class="toc-close-btn" onclick="toggleToC()">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+            </div>
+            <div id="toc-list" class="toc-list"></div>
+        </div>
+        <div class="reader-content" id="reader-content">
+            <div class="reader-text" id="reader-text">
+                <div class="skeleton-loader">
+                    <div class="skeleton-line" style="width:100%"></div>
+                    <div class="skeleton-line" style="width:92%"></div>
+                    <div class="skeleton-line" style="width:85%"></div>
+                    <div class="skeleton-line" style="width:95%"></div>
+                    <div class="skeleton-line" style="width:70%"></div>
+                </div>
+            </div>
+
+            <!-- Лайк и комментарии (после текста) -->
+            <div id="social-section" class="social-section" style="display:none;">
+                
+                <div class="chapter-actions-bar" id="chapter-actions-bar">
+                    <button class="manga-action-btn channel-btn" onclick="openChannel()">
+                        <svg class="icon-sm" viewBox="0 0 24 24" style="margin-right: 6px;"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Telegram Канал
+                    </button>
+                    <button class="manga-action-btn like-btn" id="like-btn" onclick="toggleLike()">
+                        <svg class="like-icon" id="like-icon" viewBox="0 0 24 24" width="20" height="20" style="margin-right: 6px;"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        <span class="like-count" id="like-count">0</span>
+                    </button>
+                </div>
+
+                <!-- Комментарии -->
+                <div id="reaction-bar" class="reaction-bar">
+            <!-- Будет заполнено JS -->
+        </div>
+
+        <div class="comments-section">
+                    <h3 class="comments-title">
+                        <svg class="icon-sm" viewBox="0 0 24 24" style="vertical-align:-3px;margin-right:6px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Комментарии <span class="comments-count" id="comments-count-badge"></span>
+                    </h3>
+                    <div class="comment-tabs">
+                        <div class="comment-tab active" id="tab-sort-top" onclick="sortComments('top')">Интересные</div>
+                        <div class="comment-tab" id="tab-sort-new" onclick="sortComments('new')">По дате</div>
+                    </div>
+                    
+                    <div class="comment-form" id="comment-form">
+                        <!-- Mode buttons removed for inline preview -->
+                        
+                        <div id="comment-write-area">
+                            <div id="comment-toolbar" class="comment-toolbar">
+                                <button type="button" onclick="insertFormatting('[b]', '[/b]')" title="Жирный"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
+                                <button type="button" onclick="insertFormatting('[i]', '[/i]')" title="Курсив"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+                                <button type="button" onclick="insertFormatting('[s]', '[/s]')" title="Зачеркнутый"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><path d="M16 6a5 5 0 0 0-8 0"/><path d="M8 18a5 5 0 0 0 8 0"/></svg></button>
+                                <button type="button" onclick="insertFormatting('[quote]', '[/quote]')" title="Цитата"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-1-2.25-2.25-2.25S5.5 3.75 5.5 5V8c0 1.25 1 2.25 2.25 2.25H10v3c0 1.25-1 2.25-2.25 2.25-1.5 0-2.75 1-2.75 2.5s1.25 2.5 2.75 2.5h.25z"/></svg></button>
+                                <button type="button" onclick="insertFormatting('||', '||')" title="Спойлер"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg></button>
+                            </div>
+                            <div id="reply-indicator" class="reply-indicator" style="display:none;">
+                                <span>Ответ: <strong id="reply-to-name"></strong></span>
+                                <button type="button" class="cancel-reply-btn" onclick="cancelReply()">
+                                    <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                </button>
+                            </div>
+                            <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="3" oninput="updateCommentPreview()"></textarea>
+                        </div>
+                        
+                        <div id="comment-preview-area" class="comment-preview-area hidden"></div>
+                        <button type="button" class="comment-submit-btn" onclick="postComment()">Отправить</button>
+                    </div>
+
+                    <div id="comments-list" class="comments-list"></div>
+                </div>
+            </div>
+
+            <!-- ★ Pull-to-next-chapter indicator -->
+            <div id="pull-next-indicator" class="pull-next-indicator" style="display:none;">
+                <div class="pull-next-content">
+                    <svg class="icon pull-next-arrow" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span id="pull-next-text">Тяните для следующей главы</span>
+                </div>
+            </div>
+
+            <!-- ★ Floating Admin FAB (Phase 4) -->
+            <div id="admin-fab-container" class="admin-fab-container" style="display:none;">
+                <button class="admin-fab-btn" id="admin-fab-btn" onclick="toggleAdminMenu()">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </button>
+                <div id="admin-menu" class="admin-menu glass-panel hidden">
+                    <div class="admin-menu-header">Инструменты Админа</div>
+                    <button class="admin-menu-item" onclick="renameChapterCurrent()"><span class="icon">📝</span> Переименовать главу</button>
+                    <button class="admin-menu-item" onclick="openEditUrlModal(currentChapterIdx)"><span class="icon">🔗</span> Ред. ссылки</button>
+                    <button class="admin-menu-item" onclick="openBulkModal()"><span class="icon">📦</span> Масс. загрузка</button>
+                </div>
+            </div>
+        </div>
+        <div class="reader-bottom-bar" id="reader-bottom-bar">
+            <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">
+                <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Пред.
+            </button>
+            <span class="chapter-indicator" id="chapter-indicator">1 / 10</span>
+            <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">
+                След.
+                <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:4px;"><path d="M5 12h14M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+        </div>
+
+        <!-- ★ Morphing FAB (пункт 10) -->
+        <div class="fab-container" id="fab-container">
+            <!-- Autoscroll Play/Pause FAB -->
+            <button id="autoscroll-fab" class="autoscroll-fab hidden" onclick="toggleAutoscroll()">▶</button>
+
+            <div class="fab-menu hidden" id="fab-menu">
+                <button class="fab-menu-item" data-action="toc" onclick="fabAction('toc')">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><path d="M3 12h18M3 6h18M3 18h18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Оглавление</span>
+                </button>
+                <button class="fab-menu-item" data-action="autoscroll" onclick="fabAction('autoscroll')">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Автоскролл</span>
+                </button>
+                <button class="fab-menu-item" data-action="comments" onclick="fabAction('comments')">
+                    <svg class="icon-sm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <span>Комментарии</span>
+                </button>
+            </div>
+            <button class="fab-btn" id="fab-btn" onclick="toggleFab()">
+                <svg class="fab-icon fab-icon-plus" id="fab-icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <svg class="fab-icon fab-icon-close hidden" id="fab-icon-close" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- === ЭКРАН 4: Моя библиотека === -->
+    <div id="screen-library" class="screen">
+        <div class="reader-header">
+            <div class="header-title">
+                <svg class="icon header-icon-svg" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <h1>Моя библиотека</h1>
+            </div>
+            <button class="settings-btn" onclick="toggleSettings()" aria-label="Настройки">
+                <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+        </div>
+        <div class="content-area">
+            <!-- Reading Stats -->
+            <div class="reading-stats-card">
+                <div class="stat-item">
+                    <span class="stat-icon">
+                        <svg class="icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><polyline points="12 6 12 12 16 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-time">0 ч 0 м</div>
+                        <div class="stat-label">Время за чтением</div>
+                    </div>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-icon">
+                        <svg class="icon-sm" viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="stat-info">
+                        <div class="stat-value" id="stat-chapters">0</div>
+                        <div class="stat-label">Прочитано глав</div>
+                    </div>
+                </div>
+            </div>
+            
+            <h3 class="library-section-title">В процессе чтения</h3>
+            <div id="library-list">
+                <div class="skeleton-cards">
+                    <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- === ТАБ БАР (Нижняя навигация) === -->
+    <div class="bottom-nav-bar" id="main-bottom-nav">
+        <button class="nav-tab active" id="tab-series" onclick="showScreen('series')">
+            <svg class="tab-icon-svg" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="9 22 9 12 15 12 15 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="tab-label">Главная</span>
+        </button>
+        <button class="nav-tab" id="tab-library" onclick="showScreen('library')">
+            <svg class="tab-icon-svg" viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span class="tab-label">Библиотека</span>
+        </button>
+    </div>
+
+    <!-- === Advanced Settings Modal (Phase 4) === -->
+    <div id="settings-overlay" class="modal-overlay hidden" onclick="toggleSettings()"></div>
+    <div id="settings-panel" class="settings-panel hidden glass-panel">
+        <div class="settings-header">Настройки читалки</div>
+        
+        <div class="settings-tabs">
+            <button class="settings-tab-btn active" id="tab-btn-font" onclick="showSettingsTab('font')">Шрифт</button>
+            <button class="settings-tab-btn" id="tab-btn-display" onclick="showSettingsTab('display')">Вид</button>
+            <button class="settings-tab-btn" id="tab-btn-nav" onclick="showSettingsTab('nav')">Навигация</button>
+        </div>
+
+        <!-- Tab: Font -->
+        <div id="settings-tab-font" class="settings-tab-content">
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Размер текста</label>
+                    <span id="label-fontSize" class="setting-value-badge">17px</span>
+                </div>
+                <input type="range" id="input-fontSize" min="12" max="30" value="17" step="1" oninput="setFontSize(this.value)">
+            </div>
+            
+            <div class="setting-item-block">
+                <label>Шрифт</label>
+                <div class="segmented-control">
+                    <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">С засечками</button>
+                    <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
+                </div>
+            </div>
+
+            <div class="setting-item-block">
+                <label>Выравнивание</label>
+                <div class="segmented-control">
+                    <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
+                    <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab: Display -->
+        <div id="settings-tab-display" class="settings-tab-content hidden">
+            <div class="setting-item-block">
+                <label>Цветовая схема</label>
+                <div class="theme-grid">
+                    <button class="theme-chip theme-light active" onclick="setTheme('light')" data-theme="light">Светлая</button>
+                    <button class="theme-chip theme-sepia" onclick="setTheme('sepia')" data-theme="sepia">Сепия</button>
+                    <button class="theme-chip theme-gray" onclick="setTheme('gray')" data-theme="gray">Серая</button>
+                    <button class="theme-chip theme-dark" onclick="setTheme('dark')" data-theme="dark">Темная</button>
+                    <button class="theme-chip theme-amoled" onclick="setTheme('amoled')" data-theme="amoled">Amoled</button>
+                </div>
+            </div>
+
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Макс. ширина</label>
+                    <span id="label-textWidth" class="setting-value-badge">90%</span>
+                </div>
+                <input type="range" id="input-textWidth" min="50" max="100" value="90" step="1" oninput="setTextWidth(this.value)">
+            </div>
+
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Яркость экрана</label>
+                    <span id="label-dimmerValue" class="setting-value-badge">0%</span>
+                </div>
+                <input type="range" id="input-dimmerValue" min="0" max="85" value="0" step="5" oninput="setDimmer(this.value)">
+            </div>
+
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Межстрочный интервал</label>
+                    <span id="label-lineHeight" class="setting-value-badge">1.8</span>
+                </div>
+                <input type="range" id="input-lineHeight" min="1.0" max="2.5" value="1.8" step="0.1" oninput="setLineHeight(this.value)">
+            </div>
+            
+            <div class="setting-item-block">
+                <div class="setting-label-row">
+                    <label>Расстояние между букв</label>
+                    <span id="label-letterSpacing" class="setting-value-badge">0px</span>
+                </div>
+                <input type="range" id="input-letterSpacing" min="-1" max="5" value="0" step="0.5" oninput="setLetterSpacing(this.value)">
+            </div>
+        </div>
+
+        <!-- Tab: Navigation -->
+        <div id="settings-tab-nav" class="settings-tab-content hidden">
+            <div class="setting-item-row">
+                <div class="setting-info">
+                    <label>Красная строка</label>
+                    <p class="setting-hint">Отступ первого абзаца</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="indent-toggle" checked onchange="setIndent(this.checked)">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+
+            <div class="setting-item-block" id="para-indent-group">
+                <div class="setting-label-row">
+                    <label>Размер отступа</label>
+                    <span id="label-paraIndent" class="setting-value-badge">25px</span>
+                </div>
+                <input type="range" id="input-paraIndent" min="0" max="60" value="25" step="5" oninput="setParaIndent(this.value)">
+            </div>
+            
+            <div class="setting-item-row">
+                <div class="setting-info">
+                    <label>Автопрокрутка</label>
+                    <p class="setting-hint">Листать текст автоматически</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+
+            <div class="setting-item-block autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
+                <div class="setting-label-row">
+                    <label>Скорость прокрутки</label>
+                </div>
+                <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
+            </div>
+
+            <div class="setting-item-row" style="margin-top:16px; border-top:1px solid var(--divider); padding-top:16px;">
+                <div class="setting-info">
+                    <label>Режим редактора</label>
+                    <p class="setting-hint">Только для администраторов</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
+                    <span class="slider round"></span>
+                </label>
+            </div>
+        </div>
+        
+        <button class="close-settings-btn" onclick="toggleSettings()">Готово</button>
+    </div>
+
+    <!-- === Image Lightbox === -->
+    <div id="lightbox-overlay" class="lightbox-overlay hidden">
+        <button class="lightbox-close" onclick="closeLightbox()">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="lightbox-nav lightbox-prev" id="lightbox-prev" onclick="lightboxNavigate(-1)">‹</button>
+        <div class="lightbox-image-wrapper" id="lightbox-image-wrapper">
+            <img id="lightbox-img" class="lightbox-img" src="" alt="">
+        </div>
+        <button class="lightbox-nav lightbox-next" id="lightbox-next" onclick="lightboxNavigate(1)">›</button>
+        <div class="lightbox-counter" id="lightbox-counter"></div>
+    </div>
+
+    <!-- === Edit URL Modal (Admin) === -->
+    <div id="edit-url-overlay" class="modal-overlay hidden" onclick="closeEditUrlModal()"></div>
+    <div id="edit-url-modal" class="edit-url-modal hidden">
+        <h3>Редактирование ссылки</h3>
+        <p class="edit-url-chapter-name" id="edit-url-chapter-name"></p>
+        <input type="text" id="edit-url-input" class="edit-url-input" placeholder="https://telegra.ph/...">
+        <div class="edit-url-actions">
+            <button class="edit-url-cancel" onclick="closeEditUrlModal()">Отмена</button>
+            <button class="edit-url-save" id="edit-url-save" onclick="saveEditUrl()">Сохранить</button>
+        </div>
+    </div>
+
+    <!-- === Bulk Upload Modal (Admin) === -->
+    <div id="bulk-upload-overlay" class="modal-overlay hidden" onclick="closeBulkModal()"></div>
+    <div id="bulk-upload-modal" class="bulk-upload-modal hidden">
+        <h3>Массовое добавление глав</h3>
+        <p class="bulk-upload-hint">Вставьте ссылки (по одной на строку). Нумерация продолжится автоматически.</p>
+        <textarea id="bulk-upload-input" class="bulk-upload-input" placeholder="https://telegra.ph/chapter-15&#10;https://telegra.ph/chapter-16&#10;https://telegra.ph/chapter-17" rows="6"></textarea>
+        <div class="bulk-upload-actions">
+            <button class="edit-url-cancel" onclick="closeBulkModal()">Отмена</button>
+            <button class="edit-url-save" id="bulk-upload-save" onclick="executeBulkUpload()">Добавить</button>
+        </div>
+    </div>
+
+    <!-- === Typo Reporter === -->
+    <div id="typo-tooltip" class="typo-tooltip">
+        <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-1px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Сообщить об опечатке
+    </div>
+
+    <div id="typo-modal-overlay" class="modal-overlay hidden" onclick="closeTypoModal()"></div>
+    <div id="typo-modal" class="edit-url-modal hidden">
+        <h3>Репорт об опечатке</h3>
+        <div class="typo-modal-context" id="typo-modal-context">
+            Текст с <span class="typo-modal-selected">оШибкой</span>
+        </div>
+        <textarea id="typo-comment" class="typo-modal-input" placeholder="Комментарий (необязательно)..." rows="3"></textarea>
+        <div class="edit-url-actions" style="margin-top: 16px;">
+            <button class="edit-url-cancel" onclick="closeTypoModal()">Отмена</button>
+            <button class="edit-url-save" id="typo-submit-btn" onclick="submitTypoReport()">Отправить</button>
+        </div>
+    </div>
+
+    <script src="reader.js?v=12"></script>
+</body>
+</html>
