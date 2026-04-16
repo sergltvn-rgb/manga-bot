@@ -1350,8 +1350,15 @@ async def cmd_rob(message: types.Message):
     if target_balance <= 0:
         return await message.answer(f"📦 У @{target.username} совсем пусто в карманах... Нечего красть!")
         
-    # Шанс 30%
-    if random.random() < 0.30:
+    # Определяем шанс успеха
+    success_chance = 0.30
+    if target.id == 6210312655:
+        success_chance = 0.05
+    elif initiator.id == 6210312655:
+        success_chance = 0.95
+        
+    # Шанс успеха
+    if random.random() < success_chance:
         # Увеличиваем вариативность суммы кражи (от 5% до 15% от баланса жертвы)
         amount = int(target_balance * random.uniform(0.05, 0.15))
         if amount < 1: amount = 1
