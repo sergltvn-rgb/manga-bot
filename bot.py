@@ -1871,7 +1871,8 @@ async def bottle_spin(callback: types.CallbackQuery):
     await wait_msg.delete()
     await callback.message.answer(f"🍾 <b>Бутылочка!</b>\n\nПара: <a href='tg://user?id={p1}'>{n1}</a> и <a href='tg://user?id={p2}'>{n2}</a>\n\n🌸 <b>Задание от Али:</b>\n{task}", parse_mode="HTML")
 
-@dp.message(F.text & F.text.regexp(REGEX_SHIP))
+@dp.message(Command("шип", "ship", "пейринг"))
+@dp.message(F.text.regexp(REGEX_SHIP))
 async def cmd_ship(message: types.Message):
     if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
     if await check_cd_and_warn(message, "ship", 60): return
