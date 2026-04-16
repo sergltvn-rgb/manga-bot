@@ -467,6 +467,7 @@ _GAME_REGEXES = [
     REGEX_DICE, REGEX_MARRY, REGEX_DIVORCE, REGEX_MARRIAGES, REGEX_PROFILE,
     REGEX_STATS, REGEX_DARTS, REGEX_BASKETBALL, REGEX_FOOTBALL, REGEX_SLOT,
     REGEX_BOWLING, REGEX_RPS, REGEX_COMPATIBILITY, REGEX_MAGIC_BALL, REGEX_ROULETTE,
+    REGEX_SHIP, # <--- ADDED THIS
 ]
 
 def is_ai_trigger(message: types.Message):
@@ -670,6 +671,8 @@ async def callback_claim_drop(callback: types.CallbackQuery):
         f"💼 <i>Твой баланс пополнен.</i>",
         parse_mode="HTML"
     )
+    if callback.message.chat.type in ["group", "supergroup"]:
+        asyncio.create_task(delete_after(callback.message, 30))
     await callback.answer(f"Вы получили {reward} монет!")
 
 @dp.message(Command("start", ignore_mention=True), StateFilter("*"))
