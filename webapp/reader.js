@@ -3,7 +3,7 @@
 // Загрузка/отображение, прогресс чтения, лайки, комментарии
 // ==========================================================================
 
-const tg = window.Telegram.WebApp;
+const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : { expand: () => {}, ready: () => {}, openTelegramLink: (url) => window.open(url, '_blank'), initDataUnsafe: {} };
 tg.expand();
 tg.ready();
 
@@ -100,6 +100,7 @@ function getUserRole(userIdStr) {
     return null;
 }
 
+// SQLite возвращает время в UTC "YYYY-MM-DD HH:MM:SS". Превращаем его в валидный ISO 8601 UTC.
 function formatDate(dateStr) {
     if (!dateStr) return '';
     try {
@@ -139,7 +140,7 @@ function toggleImmersiveMode(force = null) {
 
 function toggleQuickSwitcher() {
     const switcher = document.getElementById('quick-switcher');
-    const overlay = document.getElementById('toc-overlay');
+    const overlay = document.getElementById('quick-switcher-overlay');
     if (!switcher) return;
     
     // Прячем меню FAB если открыто
@@ -188,7 +189,13 @@ const defaults = {
     dimmerValue: 0,
     readingMode: 'scroll' // 'scroll' or 'pages'
 };
-let settings = JSON.parse(localStorage.getItem('reader_settings') || 'null') || { ...defaults };
+let settings;
+try {
+    settings = JSON.parse(localStorage.getItem('reader_settings') || 'null') || { ...defaults };
+} catch (e) {
+    console.warn("Failed to parse settings from localStorage", e);
+    settings = { ...defaults };
+}
 // Миграция старых настроек
 if (!settings.lineHeight) settings.lineHeight = 1.8;
 if (!settings.textAlign) settings.textAlign = 'left';
@@ -199,7 +206,27 @@ if (settings.paraIndent === undefined) settings.paraIndent = 25;
 if (settings.dimmerValue === undefined) settings.dimmerValue = 0;
 if (settings.readingMode === undefined) settings.readingMode = 'scroll';
 
-let readChapters = JSON.parse(localStorage.getItem('reader_progress') || '{}');
+let readChapters;
+try {
+    readChapters = JSON.parse(localStorage.getItem('reader_progress') || '{}');
+} catch (e) {
+    console.warn("Failed to parse readChapters from localStorage", e);
+    readChapters = {};
+}
+
+function safeGetLocal(key, defaultVal) {
+    try {
+        const val = localStorage.getItem(key);
+        return val ? JSON.parse(val) : defaultVal;
+    } catch (e) {
+        return defaultVal;
+    }
+}
+function safeSetLocal(key, val) {
+    try {
+        localStorage.setItem(key, JSON.stringify(val));
+    } catch (e) {}
+}
 
 // === Получение API URL из параметров URL ===
 // Приоритет: 1) ?api=... из URL 2) window.location.origin (если бот и WebApp на одном хосте)
@@ -209,6 +236,9 @@ const API_URL = urlParams.get('api') || (window.location.hostname.includes('gith
 
 // === API Wrapper ===
 async function apiFetch(url, options = {}) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        throw new Error('Offline');
+    }
     options.headers = options.headers || {};
     if (typeof tg !== 'undefined' && tg.initData) {
         options.headers['Authorization'] = 'tma ' + tg.initData;
@@ -236,7 +266,7 @@ function saveScrollPosition() {
     const el = document.getElementById('reader-content');
     if (!el) return;
     const pct = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
-    localStorage.setItem(key, JSON.stringify({ pct, ts: Date.now() }));
+        safeSetLocal(key, { pct, ts: Date.now() });
     saveLastRead();
 
     // Синхронизация с сервером (debounced — не чаще 1 раз в 3 секунды)
@@ -258,12 +288,17 @@ function saveScrollPosition() {
 }
 
 let _scrollResizeObserver = null; // Единственный ResizeObserver для скролла
+let _scrollResizeTimeout = null; // Таймаут для очистки observer
 
 function restoreScrollPosition() {
-    // Убираем предыдущий observer (если был — нет утечки)
+    // Убираем предыдущий observer и таймаут (если были — нет утечки)
     if (_scrollResizeObserver) {
         _scrollResizeObserver.disconnect();
         _scrollResizeObserver = null;
+    }
+    if (_scrollResizeTimeout) {
+        clearTimeout(_scrollResizeTimeout);
+        _scrollResizeTimeout = null;
     }
 
     // 1. Пробуем серверную
@@ -280,7 +315,7 @@ function restoreScrollPosition() {
     if (pctToRestore === null) {
         const key = getScrollKey();
         if (key) {
-            const saved = JSON.parse(localStorage.getItem(key) || 'null');
+            const saved = safeGetLocal(key, null);
             if (saved) pctToRestore = saved.pct;
         }
     }
@@ -300,11 +335,12 @@ function restoreScrollPosition() {
     
     _scrollResizeObserver.observe(el);
     
-    setTimeout(() => {
+    _scrollResizeTimeout = setTimeout(() => {
         if (_scrollResizeObserver) {
             _scrollResizeObserver.disconnect();
             _scrollResizeObserver = null;
         }
+        _scrollResizeTimeout = null;
         if (!hasRestored) {
             const maxScroll = el.scrollHeight - el.clientHeight;
             el.scrollTop = pctToRestore * maxScroll;
@@ -323,13 +359,13 @@ function saveLastRead() {
         chapter: ch.chapter,
         ts: Date.now()
     };
-    const all = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
+    const all = safeGetLocal('reader_last_read', {});
     all[currentSeries.id] = last;
-    localStorage.setItem('reader_last_read', JSON.stringify(all));
+    safeSetLocal('reader_last_read', all);
 }
 
 function getLastRead(seriesId) {
-    const all = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
+    const all = safeGetLocal('reader_last_read', {});
     const local = all[seriesId];
 
     const serverBm = serverBookmarks.find(b => String(b.series_id) === String(seriesId));
@@ -378,9 +414,9 @@ function initProgressBar() {
     }
 }
 
-function updateProgressBar() {
+function updateProgressBar(el) {
     if (!progressBarEl) return;
-    const el = document.getElementById('reader-content');
+    if (!el) el = document.getElementById('reader-content');
     if (!el) return;
     const max = el.scrollHeight - el.clientHeight;
     const pct = max > 0 ? (el.scrollTop / max) * 100 : 0;
@@ -527,9 +563,9 @@ function renderSeriesList() {
     }
 
     container.innerHTML = allData.series.map((s, i) => {
-        const totalCh = s.volumes.reduce((sum, v) => sum + v.chapters.length, 0);
+        const totalCh = s.volumes.reduce((sum, v) => sum + (v.chapters || []).length, 0);
         const readCount = s.volumes.reduce((sum, v) => {
-            return sum + v.chapters.filter(c => isRead(s.id, v.volume, c.chapter)).length;
+            return sum + (v.chapters || []).filter(c => isRead(s.id, v.volume, c.chapter)).length;
         }, 0);
         const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
 
@@ -548,14 +584,14 @@ function renderSeriesList() {
 
         // Cover image support (Batch 3)
         const coverEl = s.cover_url
-            ? `<img src="${s.cover_url}" class="series-cover-img" alt="${s.title}" loading="lazy">`
+            ? `<img src="${s.cover_url}" class="series-cover-img" alt="${escapeHtml(s.title)}" loading="lazy">`
             : `<div class="series-icon">${['📖', '📕', '📗', '📘', '📙'][i % 5]}</div>`;
 
         return `
         <div class="series-card" onclick="selectSeries('${s.id}')">
             ${coverEl}
             <div class="series-info">
-                <h3>${s.title}${customBadge}${editBtns}</h3>
+                <h3>${escapeHtml(s.title)}${customBadge}${editBtns}</h3>
                 <p>${s.volumes.length} том(ов) &middot; ${totalCh} глав${progress > 0 ? ` &middot; ${progress}%` : ''}</p>
                 ${continueBadge}
             </div>
@@ -568,7 +604,7 @@ function selectSeries(seriesId) {
     currentSeries = allData.series.find(s => s.id === seriesId);
     if (!currentSeries) return;
 
-    document.getElementById('chapters-title').textContent = currentSeries.title;
+    document.getElementById('chapters-title').textContent = currentSeries.title; // textContent escapes HTML
     renderVolumeTabs();
 
     // Восстанавливаем последнюю читаемую главу или первый том
@@ -624,6 +660,7 @@ function selectVolume(volNum) {
 }
 
 function renderChaptersList() {
+    cleanupChapterDnD();
     const container = document.getElementById('chapters-list');
     currentChapters = currentVolume.chapters;
 
@@ -682,6 +719,12 @@ function openChapter(idx, usePrefetch = false) {
     currentChapterIdx = idx;
     const chapter = currentChapters[idx];
     if (!chapter) return;
+    
+    // Проверка что chapter имеет необходимые свойства
+    if (!chapter.chapter) {
+        console.warn('Chapter object missing required properties:', chapter);
+        return;
+    }
 
     // Smooth transition: fade out
     const content = document.getElementById('reader-content');
@@ -692,7 +735,9 @@ function openChapter(idx, usePrefetch = false) {
     if (titleHeader) titleHeader.textContent = chapter.custom_name || `Глава ${chapter.chapter}`;
     
     updateNavButtons();
-    markAsRead(currentSeries.id, currentVolume.volume, chapter.chapter);
+    if (currentSeries && currentVolume) {
+        markAsRead(currentSeries.id, currentVolume.volume, chapter.chapter);
+    }
     loadChapterContent(chapter, usePrefetch);
 
     initProgressBar();
@@ -716,6 +761,7 @@ function openChapter(idx, usePrefetch = false) {
 
 // === Prefetch cache ===
 let prefetchedChapter = { idx: -1, html: null };
+let _prefetchingIdx = -1;
 let _chapterAbortController = null; // AbortController для отмены загрузки при смене главы
 
 function loadChapterContent(chapter, usePrefetch = false) {
@@ -769,6 +815,12 @@ function loadChapterContent(chapter, usePrefetch = false) {
 
         _chapterAbortController = new AbortController();
         signal = _chapterAbortController.signal;
+        // Добавляем таймаут 15 секунд
+        setTimeout(() => {
+            if (_chapterAbortController && !_chapterAbortController.signal.aborted) {
+                _chapterAbortController.abort(new Error('Timeout'));
+            }
+        }, 15000);
 
         const loadPromises = urlsToLoad.map(async (u) => {
             // Teletype — используем iframe
@@ -792,7 +844,7 @@ function loadChapterContent(chapter, usePrefetch = false) {
         });
 
         Promise.all(loadPromises).then(results => {
-            if (signal.aborted) return;
+            if (signal.aborted || chapter !== currentChapters[currentChapterIdx]) return;
             renderLoadedContent(container, results.join(''), chapter);
         }).catch(err => {
             if (err.name === 'AbortError') return;
@@ -892,10 +944,12 @@ function applyIframeDarkMode() {
 function prefetchNextChapter() {
     const nextIdx = currentChapterIdx + 1;
     if (nextIdx >= currentChapters.length) return;
-    if (prefetchedChapter.idx === nextIdx) return; // уже загружено
+    if (prefetchedChapter.idx === nextIdx || _prefetchingIdx === nextIdx) return; // уже загружено или в процессе
 
     const chapter = currentChapters[nextIdx];
     if (!chapter) return;
+
+    _prefetchingIdx = nextIdx;
 
     let urlsToLoad = [];
     if (chapter.urls && chapter.urls.length > 0) {
@@ -913,6 +967,9 @@ function prefetchNextChapter() {
     }
 
     if (urlsToLoad.length > 0) {
+        const prefetchAbortController = new AbortController();
+        setTimeout(() => prefetchAbortController.abort(), 20000); // 20s timeout
+        
         const loadPromises = urlsToLoad.map(async (u) => {
             if (u.includes('teletype.in')) {
                 return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;" loading="lazy"></iframe>`;
@@ -920,7 +977,7 @@ function prefetchNextChapter() {
             const telegraphMatch = u.match(/telegra\.ph\/(.+)/);
             if (telegraphMatch) {
                 try {
-                    const resp = await fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`);
+                    const resp = await fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`, { signal: prefetchAbortController.signal });
                     const data = await resp.json();
                     if (data.ok && data.result && data.result.content) {
                         const html = renderTelegraphContent(data.result.content);
@@ -936,11 +993,15 @@ function prefetchNextChapter() {
         });
         Promise.all(loadPromises).then(results => {
             prefetchedChapter = { idx: nextIdx, html: results.join('') };
+            _prefetchingIdx = -1;
             console.log('✅ Prefetched chapter (with images)', nextIdx + 1);
-        }).catch(() => { });
+        }).catch(() => { _prefetchingIdx = -1; });
     } else if (chapter.text) {
         const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
         prefetchedChapter = { idx: nextIdx, html: paragraphs };
+        _prefetchingIdx = -1;
+    } else {
+        _prefetchingIdx = -1;
     }
 }
 
@@ -1024,6 +1085,7 @@ function spawnFloatingEmoji(emoji, targetEl) {
     const rect = targetEl.getBoundingClientRect();
     const count = 6;
 
+    const fragment = document.createDocumentFragment();
     for (let i = 0; i < count; i++) {
         const el = document.createElement('div');
         el.className = 'floating-emoji';
@@ -1043,9 +1105,10 @@ function spawnFloatingEmoji(emoji, targetEl) {
         el.style.setProperty('--r0', `${Math.random() * 40 - 20}deg`);
         el.style.animationDelay = `${Math.random() * 0.2}s`;
 
-        document.body.appendChild(el);
+        fragment.appendChild(el);
         setTimeout(() => el.remove(), 1000);
     }
+    document.body.appendChild(fragment);
 }
 
 function spawnFloatingHearts() {
@@ -1136,7 +1199,14 @@ async function loadComments() {
     try {
         const resp = await apiFetch(API_URL + `/api/comments?chapter_key=${encodeURIComponent(key)}`);
         const data = await resp.json();
-        renderComments(data.comments || []);
+        allCommentsCache = data.comments || [];
+        
+        const countBadge = document.getElementById('comments-count-badge');
+        if (countBadge) countBadge.textContent = allCommentsCache.length > 0 ? `(${allCommentsCache.length})` : '';
+        
+        if (!activeCommentEditId) {
+            renderComments(allCommentsCache);
+        }
     } catch (e) {
         console.warn('Comments load error:', e);
     }
@@ -1145,11 +1215,9 @@ async function loadComments() {
 function renderComments(comments) {
     allCommentsCache = comments; // Важно: обновляем кэш для корректной работы сортировки
     const list = document.getElementById('comments-list');
-    const badge = document.getElementById('comments-count-badge');
-    badge.textContent = comments.length > 0 ? `(${comments.length})` : '';
-
+    
     const countBadge = document.getElementById('comments-count-badge');
-    if (countBadge) countBadge.innerText = comments.length > 0 ? `(${comments.length})` : '';
+    if (countBadge) countBadge.textContent = comments.length > 0 ? `(${comments.length})` : '';
 
     if (comments.length === 0) {
         list.innerHTML = `<div class="no-comments">Пока нет комментариев. Будьте первым! ✨</div>`;
@@ -1165,12 +1233,19 @@ function renderComments(comments) {
         return new Date(safe).getTime();
     };
 
+    commentsData.forEach(c => {
+        if (c._ts === undefined) c._ts = parseDate(c.created_at);
+    });
+
     if (currentCommentSort === 'top') {
-        // Сортировка по лайкам (интересные)
-        commentsData.sort((a, b) => (b.likes || 0) - (a.likes || 0));
+        // Сортировка по лайкам (интересные), при равенстве по дате
+        commentsData.sort((a, b) => {
+            const diff = (b.likes || 0) - (a.likes || 0);
+            return diff !== 0 ? diff : b._ts - a._ts;
+        });
     } else {
         // По дате (новые сверху)
-        commentsData.sort((a, b) => parseDate(b.created_at) - parseDate(a.created_at));
+        commentsData.sort((a, b) => b._ts - a._ts);
     }
 
     // Строим дерево
@@ -1182,8 +1257,11 @@ function renderComments(comments) {
     });
 
     commentsData.forEach(c => {
-        if (c.parent_id && commentMap[c.parent_id]) {
-            commentMap[c.parent_id].children.push(c);
+        if (c.parent_id) {
+            if (commentMap[c.parent_id]) {
+                commentMap[c.parent_id].children.push(c);
+            }
+            // Сиротские ответы игнорируются
         } else {
             topLevel.push(c);
         }
@@ -1227,7 +1305,7 @@ function renderComments(comments) {
         const likeActive = userReaction === 'like' ? 'active' : '';
 
         // Avatar
-        const avatarUrl = API_URL ? `${API_URL}/api/avatar?user_id=${c.user_id}` : null;
+        const avatarUrl = API_URL && c.user_id ? `${API_URL}/api/avatar?user_id=${c.user_id}` : null;
         const avatarHtml = avatarUrl 
             ? `<img src="${avatarUrl}" class="comment-avatar" alt="${initial}" style="background:${color}" onerror="this.onerror=null;this.outerHTML='<div class=&quot;comment-avatar&quot; style=&quot;background:${color}&quot;>${initial}</div>';">`
             : `<div class="comment-avatar" style="background:${color}">${initial}</div>`;
@@ -1271,21 +1349,48 @@ function renderComments(comments) {
 
 function reportComment(id) {
     if (!API_URL) return;
-    const reason = prompt("Укажите причину жалобы (спам, оскорбления и т.д.):");
-    if (!reason) return;
-    
-    // Пытаемся найти текст комментария для полноты отчета
-    const commentEl = document.getElementById(`comment-text-${id}`);
-    const commentText = commentEl ? commentEl.innerText : "";
 
-    apiFetch(`${API_URL}/api/comments/report`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ comment_id: id, reason: reason, comment_text: commentText })
-    }).then(r => r.json()).then(data => {
-        if (data.ok) showToast("Жалоба отправлена модераторам.");
-        else showToast("Ошибка: " + data.error);
-    }).catch(() => showToast("Ошибка сети."));
+    // Create a custom modal for reporting instead of prompt()
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay active';
+    overlay.style.zIndex = '99999';
+    overlay.innerHTML = `
+        <div class="modal-container" style="padding: 20px; background: var(--bg); border-radius: 12px; width: 90%; max-width: 400px; margin: auto; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: var(--shadow);">
+            <h3 style="margin-bottom: 12px; font-size: 18px;">Жалоба на комментарий</h3>
+            <p style="margin-bottom: 12px; font-size: 14px; opacity: 0.8;">Укажите причину жалобы (спам, оскорбления и т.д.):</p>
+            <textarea id="report-reason-input" class="comment-input" rows="3" style="width: 100%; box-sizing: border-box; margin-bottom: 16px; border: 1px solid var(--divider); padding: 8px; border-radius: 8px; background: var(--input-bg); color: var(--text);"></textarea>
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                <button class="c-action-btn" id="report-cancel-btn">Отмена</button>
+                <button class="comment-submit-btn" id="report-submit-btn" style="float: none;">Отправить</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    document.getElementById('report-cancel-btn').onclick = () => {
+        document.body.removeChild(overlay);
+    };
+
+    document.getElementById('report-submit-btn').onclick = () => {
+        const reason = document.getElementById('report-reason-input').value.trim();
+        if (!reason) {
+            showToast("Причина не может быть пустой");
+            return;
+        }
+        document.body.removeChild(overlay);
+
+        const commentEl = document.getElementById(`comment-text-${id}`);
+        const commentText = commentEl ? commentEl.innerText : "";
+
+        apiFetch(`${API_URL}/api/comments/report`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment_id: id, reason: reason, comment_text: commentText })
+        }).then(r => r.json()).then(data => {
+            if (data.ok) showToast("Жалоба отправлена модераторам.");
+            else showToast("Ошибка: " + data.error);
+        }).catch(() => showToast("Ошибка сети."));
+    };
 }
 
 async function reactToComment(commentId, type) {
@@ -1317,7 +1422,10 @@ function sortComments(type) {
     renderComments(allCommentsCache);
 }
 
+let activeCommentEditId = null;
+
 function editComment(id) {
+    activeCommentEditId = id;
     const comment = allCommentsCache.find(c => c.id === id);
     if (!comment) return;
     
@@ -1328,15 +1436,31 @@ function editComment(id) {
         <textarea class="comment-input edit-area" id="edit-input-${id}" rows="3">${escapeHtml(originalText)}</textarea>
         <div class="edit-actions" style="margin-top:8px; display:flex; gap:8px;">
             <button class="comment-submit-btn" style="float:none; padding:6px 14px;" onclick="saveCommentEdit('${id}')">Сохранить</button>
-            <button class="c-action-btn" onclick="renderComments(allCommentsCache)">Отмена</button>
+            <button class="c-action-btn" onclick="cancelEdit('${id}')">Отмена</button>
         </div>
     `;
     document.getElementById(`edit-input-${id}`).focus();
 }
 
+function cancelEdit(id) {
+    activeCommentEditId = null;
+    const comment = allCommentsCache.find(c => c.id == id);
+    if (comment) {
+        const textNode = document.getElementById(`comment-text-${id}`);
+        if (textNode) {
+            textNode.innerHTML = applyMarkup(comment.text);
+        }
+    } else {
+        renderComments(allCommentsCache);
+    }
+}
+
 async function saveCommentEdit(id) {
     const newText = document.getElementById(`edit-input-${id}`).value.trim();
-    if (!newText) return;
+    if (!newText) {
+        showToast('Комментарий не может быть пустым');
+        return;
+    }
 
     try {
         const resp = await apiFetch(`${API_URL}/api/comments/${id}`, {
@@ -1374,7 +1498,9 @@ function updateCommentPreview() {
 // Inline preview updates automatically on input
 
 function insertFormatting(start, end) {
-    const input = document.getElementById('comment-input');
+    const inputId = activeCommentEditId ? `edit-input-${activeCommentEditId}` : 'comment-input';
+    const input = document.getElementById(inputId);
+    if (!input) return;
     const startPos = input.selectionStart;
     const endPos = input.selectionEnd;
     const text = input.value;
@@ -1397,7 +1523,10 @@ async function postComment() {
     if (!API_URL || !userId) return;
     const input = document.getElementById('comment-input');
     const text = input.value.trim();
-    if (!text) return;
+    if (!text) {
+        showToast('Комментарий не может быть пустым');
+        return;
+    }
 
     const key = getChapterKey();
     if (!key) return;
@@ -1434,44 +1563,41 @@ async function postComment() {
 
 async function deleteComment(commentId) {
     if (!API_URL || !userId) return;
+    
+    const isConfirmed = await new Promise(resolve => {
+        if (tg && tg.showConfirm) {
+            tg.showConfirm("Удалить комментарий?", resolve);
+        } else {
+            resolve(confirm("Удалить комментарий?"));
+        }
+    });
+    if (!isConfirmed) return;
+
     try {
-        await apiFetch(API_URL + '/api/comments', {
+        const resp = await apiFetch(API_URL + '/api/comments', {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ comment_id: commentId })
         });
+        if (!resp.ok) {
+            const errData = await resp.json().catch(()=>({}));
+            throw new Error(errData.error || 'Ошибка сервера при удалении');
+        }
         await loadComments();
     } catch (e) {
         console.warn('Delete comment error:', e);
-    }
-}
-
-function formatDate(dateStr) {
-    if (!dateStr) return '';
-    try {
-        // SQLite ╨▓╨╛╨╖╨▓╤А╨░╤Й╨░╨╡╤В ╨▓╤А╨╡╨╝╤П ╨▓ UTC "YYYY-MM-DD HH:MM:SS". ╨Я╤А╨╡╨▓╤А╨░╤Й╨░╨╡╨╝ ╨╡╨│╨╛ ╨▓ ╨▓╨░╨╗╨╕╨┤╨╜╤Л╨╣ ISO 8601 UTC.
-        const safeDateStr = dateStr.includes('T') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
-        const d = new Date(safeDateStr);
-        const now = new Date();
-        const diff = now - d;
-        const mins = Math.floor(diff / 60000);
-        if (mins < 1) return 'только что';
-        if (mins < 60) return `${mins} мин. назад`;
-        const hours = Math.floor(mins / 60);
-        if (hours < 24) return `${hours} ч. назад`;
-        const days = Math.floor(hours / 24);
-        if (days < 7) return `${days} дн. назад`;
-        return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
-    } catch {
-        return dateStr;
+        showToast("Ошибка удаления: " + e.message);
     }
 }
 
 function escapeHtml(str) {
     if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 function applyMarkup(text) {
@@ -1540,14 +1666,18 @@ function renderReactions(data) {
     }).join('');
 }
 
+let _isReacting = false;
 async function toggleReaction(type) {
     if (!API_URL || !userId) {
         showToast('Авторизуйтесь в боте для реакций');
         return;
     }
+    if (_isReacting) return;
+    
     const key = getChapterKey();
     if (!key) return;
 
+    _isReacting = true;
     // Visual Feedback
     const itemEl = document.querySelector(`.reaction-item.type-${type}`);
     const emojiMap = { like: '👍', heart: '❤️', fire: '🔥', funny: '😂', wow: '😮', sad: '😢', battle: '⚔️' };
@@ -1572,6 +1702,8 @@ async function toggleReaction(type) {
         }
     } catch (e) {
         showToast('Ошибка сети.');
+    } finally {
+        _isReacting = false;
     }
 }
 
@@ -1636,15 +1768,24 @@ function isRead(seriesId, vol, chapter) {
 
 function markAsRead(seriesId, vol, chapter) {
     readChapters[getReadKey(seriesId, vol, chapter)] = Date.now();
-    localStorage.setItem('reader_progress', JSON.stringify(readChapters));
+    safeSetLocal('reader_progress', readChapters);
 }
 
 function setFontSize(size) {
     settings.fontSize = parseInt(size);
+    
+    // Обновляем label если есть
     const label = document.getElementById('label-fontSize');
     if (label) label.innerText = size + 'px';
+    
+    // Применяем настройки
     applySettings();
     saveSettings();
+    
+    // Обновляем активные кнопки
+    document.querySelectorAll('[data-size]').forEach(b => {
+        b.classList.toggle('active', parseInt(b.dataset.size) === parseInt(size));
+    });
 }
 
 function setTheme(theme) {
@@ -1773,14 +1914,7 @@ function setDimmer(val) {
     saveSettings();
 }
 
-function setFontSize(size) {
-    settings.fontSize = size;
-    applySettings();
-    saveSettings();
-    document.querySelectorAll('[data-size]').forEach(b => {
-        b.classList.toggle('active', parseInt(b.dataset.size) === size);
-    });
-}
+
 
 function applySettings() {
     // Тема
@@ -1844,7 +1978,7 @@ function applySettings() {
 }
 
 function saveSettings() {
-    localStorage.setItem('reader_settings', JSON.stringify(settings));
+    safeSetLocal('reader_settings', settings);
 }
 
 function restoreSettings() {
@@ -1863,49 +1997,56 @@ let uiHidden = false;
 document.addEventListener('DOMContentLoaded', () => {
     const readerContent = document.getElementById('reader-content');
     if (readerContent) {
+        let ticking = false;
         readerContent.addEventListener('scroll', () => {
-            updateProgressBar();
+            if (!ticking) {
+                window.requestAnimationFrame(() => {
+                    updateProgressBar(readerContent);
 
-            // ★ Auto-hide UI на скролле (пункт 1)
-            const currentScroll = readerContent.scrollTop;
-            const topBar = document.getElementById('reader-top-bar');
-            const bottomBar = document.getElementById('reader-bottom-bar');
+                    // ★ Auto-hide UI на скролле (пункт 1)
+                    const currentScroll = readerContent.scrollTop;
+                    const topBar = document.getElementById('reader-top-bar');
+                    const bottomBar = document.getElementById('reader-bottom-bar');
 
-            if (topBar && bottomBar) {
-                if (currentScroll > lastScrollY + 8 && currentScroll > 100) {
-                    // Скролл вниз — прячем
-                    if (!uiHidden) {
-                        topBar.classList.add('bars-hidden');
-                        bottomBar.classList.add('bars-hidden');
-                        uiHidden = true;
+                    if (topBar && bottomBar) {
+                        if (currentScroll > lastScrollY + 8 && currentScroll > 100) {
+                            // Скролл вниз — прячем
+                            if (!uiHidden) {
+                                topBar.classList.add('bars-hidden');
+                                bottomBar.classList.add('bars-hidden');
+                                uiHidden = true;
 
-                        // Закрываем FAB-меню при скролле вниз
-                        const menu = document.getElementById('fab-menu');
-                        if (menu && !menu.classList.contains('hidden')) toggleFab();
+                                // Закрываем FAB-меню при скролле вниз
+                                const menu = document.getElementById('fab-menu');
+                                if (menu && !menu.classList.contains('hidden')) toggleFab();
+                            }
+                        } else if (currentScroll < lastScrollY - 5) {
+                            // Скролл вверх — показываем
+                            if (uiHidden) {
+                                topBar.classList.remove('bars-hidden');
+                                bottomBar.classList.remove('bars-hidden');
+                                uiHidden = false;
+                            }
+                        }
                     }
-                } else if (currentScroll < lastScrollY - 5) {
-                    // Скролл вверх — показываем
-                    if (uiHidden) {
-                        topBar.classList.remove('bars-hidden');
-                        bottomBar.classList.remove('bars-hidden');
-                        uiHidden = false;
-                    }
-                }
-                lastScrollY = currentScroll;
-            }
 
-            // Автосохранение позиции (debounced)
-            clearTimeout(scrollSaveTimer);
-            scrollSaveTimer = setTimeout(() => {
-                saveScrollPosition();
-            }, 800);
+                    lastScrollY = currentScroll <= 0 ? 0 : currentScroll;
 
-            // ★ Prefetch следующей главы при 80% прокрутки (пункт 4)
-            const scrollPct = readerContent.scrollTop / Math.max(1, readerContent.scrollHeight - readerContent.clientHeight);
-            if (scrollPct > 0.8) {
-                prefetchNextChapter();
+                    // Prefetch and Save Logic
+                    clearTimeout(scrollSaveTimer);
+                    scrollSaveTimer = setTimeout(() => {
+                        const pct = currentScroll / Math.max(1, readerContent.scrollHeight - readerContent.clientHeight);
+                        if (pct > 0.8) prefetchNextChapter();
+                        saveScrollPosition();
+                    }, 500);
+
+                    ticking = false;
+                });
+                ticking = true;
             }
-        });
+        }, { passive: true });
+    }
+
 
         // ★ Tap-to-Scroll zones (пункт 2)
         readerContent.addEventListener('click', (e) => {
@@ -1936,7 +2077,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
-    }
 });
 
 // Сохраняем при уходе из приложения
@@ -1956,7 +2096,7 @@ function renderContinueReading() {
     if (serverBookmarks.length > 0) {
         latestBm = serverBookmarks[0];
     } else {
-        const allLocal = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
+        const allLocal = safeGetLocal('reader_last_read', {});
         let latestLocal = null;
         let maxTs = 0;
         for (let sId in allLocal) {
@@ -2142,6 +2282,12 @@ function buildToC() {
         return;
     }
 
+    // Проверка что currentSeries и currentVolume существуют
+    if (!currentSeries || !currentVolume) {
+        tocList.innerHTML = '<div class="no-chapters">Данные серии не загружены</div>';
+        return;
+    }
+
     tocList.innerHTML = currentChapters.map((ch, idx) => {
         const isActive = idx === currentChapterIdx;
         const isRead = readChapters[ch.id || `${currentSeries.id}_v${currentVolume.volume}_ch${ch.chapter}`];
@@ -2164,8 +2310,7 @@ function buildToC() {
     }, 100);
 }
 
-// Заменяем scrollToHeading на пустую для совместимости
-function scrollToHeading(idx) {}
+
 
 function highlightToCItem(idx) {
     document.querySelectorAll('.toc-item').forEach((item, i) => {
@@ -2395,14 +2540,14 @@ async function executeBulkUpload() {
 // LIBRARY & STATS
 // ==========================================================================
 
-let readingStats = JSON.parse(localStorage.getItem('reader_stats') || '{"timeSpentSeconds":0}');
+let readingStats = safeGetLocal('reader_stats', {timeSpentSeconds:0});
 
 // Track reading time when in 'reader' screen
 setInterval(() => {
     if (document.getElementById('screen-reader').classList.contains('active') && !document.hidden) {
         readingStats.timeSpentSeconds += 5;
         if (readingStats.timeSpentSeconds % 60 === 0) { // save every minute
-            localStorage.setItem('reader_stats', JSON.stringify(readingStats));
+            safeSetLocal('reader_stats', readingStats);
             updateLibraryStats();
         }
     }
@@ -2445,7 +2590,7 @@ function renderLibraryTab() {
     }
 
     // Get last read data
-    const allLocal = JSON.parse(localStorage.getItem('reader_last_read') || '{}');
+    const allLocal = safeGetLocal('reader_last_read', {});
 
     // Combine local with server bookmarks if missing
     serverBookmarks.forEach(bm => {
@@ -2481,15 +2626,15 @@ function renderLibraryTab() {
         let chTitle = "Глава " + bm.chapter;
         const v = s.volumes.find(v => String(v.volume) === String(bm.volume));
         if (v) {
-            const ch = v.chapters.find(c => String(c.chapter) === String(bm.chapter));
+            const ch = (v.chapters || []).find(c => String(c.chapter) === String(bm.chapter));
             if (ch && ch.custom_name) chTitle = ch.custom_name;
             else if (ch) chTitle = `Глава ${ch.chapter}`;
         }
 
         // Progress calc
-        const totalCh = s.volumes.reduce((sum, v) => sum + v.chapters.length, 0);
+        const totalCh = s.volumes.reduce((sum, v) => sum + (v.chapters || []).length, 0);
         const readCount = s.volumes.reduce((sum, v) => {
-            return sum + v.chapters.filter(c => isRead(s.id, v.volume, c.chapter)).length;
+            return sum + (v.chapters || []).filter(c => isRead(s.id, v.volume, c.chapter)).length;
         }, 0);
         const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
         const coverImg = s.cover_url ? `<img src="${s.cover_url}" class="library-cover" alt="">` : `<div class="series-icon">📖</div>`;
@@ -2498,7 +2643,7 @@ function renderLibraryTab() {
         <div class="series-card" style="margin-bottom:12px;" onclick="selectSeries('${s.id}')">
             ${coverImg}
             <div class="series-info">
-                <h3>${s.title}</h3>
+                <h3>${escapeHtml(s.title)}</h3>
                 <p style="font-size: 13px; color: var(--text-sec); margin-top:2px;">Остановлено: Том ${bm.volume}, ${chTitle}</p>
                 <div class="library-progress-bar">
                     <div class="library-progress-fill" style="width: ${progress}%"></div>
@@ -2517,6 +2662,22 @@ function renderLibraryTab() {
 // ==========================================================================
 
 let dragSrcIdx = null;
+
+function cleanupChapterDnD() {
+    const container = document.getElementById('chapters-list');
+    if (!container) return;
+    const items = container.querySelectorAll('.chapter-item[draggable="true"]');
+    items.forEach(item => {
+        item.removeEventListener('dragstart', handleDragStart);
+        item.removeEventListener('dragover', handleDragOver);
+        item.removeEventListener('drop', handleDrop);
+        item.removeEventListener('dragend', handleDragEnd);
+        item.removeEventListener('dragenter', handleDragEnter);
+        item.removeEventListener('dragleave', handleDragLeave);
+        const handle = item.querySelector('.drag-handle');
+        if (handle) handle.removeEventListener('touchstart', touchDragStart);
+    });
+}
 
 function initChapterDnD() {
     const container = document.getElementById('chapters-list');
@@ -2674,7 +2835,11 @@ function getSeriesCover(series) {
 // РЕПОРТ ОПЕЧАТОК (TYPO REPORTER)
 // ==========================================================================
 
+let _typoReporterInitialized = false;
 function initTypoReporter() {
+    if (_typoReporterInitialized) return;
+    _typoReporterInitialized = true;
+    
     const readerContent = document.getElementById('reader-content');
     if (!readerContent) return;
 
@@ -2969,6 +3134,11 @@ let gestureTouchStartY = 0;
 let isSwipeActive = false;
 let isGlobalPullingNext = false; // Переименовано чтобы избежать конфликтов (Баг 2)
 
+const SWIPE_EDGE_MAX_X = 35;
+const SWIPE_MIN_DELTA_X = 10;
+const SWIPE_MAX_DELTA_Y = 40;
+const SWIPE_TRIGGER_THRESHOLD = 85;
+
 function initGestures() {
     const reader = document.getElementById('screen-reader');
     const content = document.getElementById('reader-content');
@@ -2980,7 +3150,7 @@ function initGestures() {
     reader.addEventListener('pointerdown', (e) => {
         touchStartX = e.clientX;
         gestureTouchStartY = e.clientY;
-        isSwipeActive = touchStartX < 35; // edge detection
+        isSwipeActive = touchStartX < SWIPE_EDGE_MAX_X; // edge detection
     }, { passive: true });
 
     reader.addEventListener('pointermove', (e) => {
@@ -2989,7 +3159,7 @@ function initGestures() {
         let deltaY = Math.abs(e.clientY - gestureTouchStartY);
 
         // Добавлен порог по Y чтобы не срабатывало при скролле (Баг 1)
-        if (deltaX > 10 && deltaY < 40) { 
+        if (deltaX > SWIPE_MIN_DELTA_X && deltaY < SWIPE_MAX_DELTA_Y) { 
             indicator.style.opacity = Math.min(deltaX / 100, 0.8);
             // Сохраняем translateY(-50%) для центрирования (Баг 3)
             indicator.style.transform = `translateY(-50%) scaleY(${Math.min(0.5 + deltaX / 200, 1)}) translateX(${deltaX / 2}px)`;
@@ -3001,7 +3171,7 @@ function initGestures() {
         indicator.style.opacity = 0;
         indicator.style.transform = 'translateY(-50%) translateX(-100%)'; 
 
-        if (isSwipeActive && deltaX > 85) {
+        if (isSwipeActive && deltaX > SWIPE_TRIGGER_THRESHOLD) {
             haptic('medium');
             backFromReader();
         }

@@ -28,8 +28,12 @@
     --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
     --progress-gradient: linear-gradient(90deg, #6366f1 0%, #a855f7 100%);
     --overlay: rgba(0,0,0,0.4);
-    --divider: rgba(0, 0, 0, 0.08);
     --para-spacing: 20px;
+    --bg-hover: rgba(99, 102, 241, 0.08);
+    --bg-primary: #4f46e5;
+    --border: rgba(99, 102, 241, 0.12);
+    --divider-light: rgba(0, 0, 0, 0.04);
+    --badge-bg: rgba(99, 102, 241, 0.1);
 }
 
 .theme-sepia {
@@ -97,6 +101,8 @@ body.theme-dark {
     --badge-bg: rgba(129, 140, 248, 0.15);
     --tab-active: #818cf8;
     --divider: rgba(255,255,255,0.08);
+    --reader-bg: #0f172a;
+    --reader-text: #e2e8f0;
 }
 
 body.theme-amoled {
@@ -106,6 +112,8 @@ body.theme-amoled {
     --accent: #818cf8;
     --card-bg: #111;
     --divider: rgba(255,255,255,0.1);
+    --reader-bg: #000000;
+    --reader-text: #cbd5e1;
 }
 
 body.theme-gray {
@@ -117,6 +125,8 @@ body.theme-gray {
     --accent: #60a5fa;
     --tab-active: #60a5fa;
     --divider: rgba(255,255,255,0.05);
+    --reader-bg: #1f2937;
+    --reader-text: #d1d5db;
 }
 
 /* === БАЗОВЫЕ СТИЛИ === */
@@ -127,6 +137,7 @@ body {
     background: var(--bg);
     color: var(--text);
     height: 100vh;
+    height: 100dvh;
     overflow: hidden;
     transition: background 0.3s, color 0.3s;
 }
@@ -148,7 +159,7 @@ body {
 .screen.active {
     transform: translate3d(0, 0, 0);
     opacity: 1;
-    pointer-events: all;
+    pointer-events: auto;
 }
 
 .screen.slide-left {

@@ -88,6 +88,7 @@
             <div id="reading-progress-bar" class="reading-progress-bar"></div>
         </div>
         <!-- ★ Quick Switcher Modal (Controlled via .active class) -->
+        <div id="quick-switcher-overlay" class="modal-overlay hidden" onclick="toggleQuickSwitcher()"></div>
         <div id="quick-switcher" class="quick-switcher">
             <div class="quick-switcher-header">Выберите главу</div>
             <div id="quick-switcher-list" class="quick-switcher-list"></div>
@@ -300,7 +301,7 @@
         <div id="settings-tab-font" class="settings-tab-content">
             <div class="setting-item-block">
                 <div class="setting-label-row">
-                    <label>Размер текста</label>
+                    <label for="input-fontSize">Размер текста</label>
                     <span id="label-fontSize" class="setting-value-badge">17px</span>
                 </div>
                 <input type="range" id="input-fontSize" min="12" max="30" value="17" step="1" oninput="setFontSize(this.value)">
@@ -338,7 +339,7 @@
 
             <div class="setting-item-block">
                 <div class="setting-label-row">
-                    <label>Макс. ширина</label>
+                    <label for="input-textWidth">Макс. ширина</label>
                     <span id="label-textWidth" class="setting-value-badge">90%</span>
                 </div>
                 <input type="range" id="input-textWidth" min="50" max="100" value="90" step="1" oninput="setTextWidth(this.value)">
@@ -346,7 +347,7 @@
 
             <div class="setting-item-block">
                 <div class="setting-label-row">
-                    <label>Яркость экрана</label>
+                    <label for="input-dimmerValue">Яркость экрана</label>
                     <span id="label-dimmerValue" class="setting-value-badge">0%</span>
                 </div>
                 <input type="range" id="input-dimmerValue" min="0" max="85" value="0" step="5" oninput="setDimmer(this.value)">
@@ -354,7 +355,7 @@
 
             <div class="setting-item-block">
                 <div class="setting-label-row">
-                    <label>Межстрочный интервал</label>
+                    <label for="input-lineHeight">Межстрочный интервал</label>
                     <span id="label-lineHeight" class="setting-value-badge">1.8</span>
                 </div>
                 <input type="range" id="input-lineHeight" min="1.0" max="2.5" value="1.8" step="0.1" oninput="setLineHeight(this.value)">
@@ -362,7 +363,7 @@
             
             <div class="setting-item-block">
                 <div class="setting-label-row">
-                    <label>Расстояние между букв</label>
+                    <label for="input-letterSpacing">Расстояние между букв</label>
                     <span id="label-letterSpacing" class="setting-value-badge">0px</span>
                 </div>
                 <input type="range" id="input-letterSpacing" min="-1" max="5" value="0" step="0.5" oninput="setLetterSpacing(this.value)">
@@ -373,7 +374,7 @@
         <div id="settings-tab-nav" class="settings-tab-content hidden">
             <div class="setting-item-row">
                 <div class="setting-info">
-                    <label>Красная строка</label>
+                    <label for="indent-toggle">Красная строка</label>
                     <p class="setting-hint">Отступ первого абзаца</p>
                 </div>
                 <label class="switch">
@@ -384,7 +385,7 @@
 
             <div class="setting-item-block" id="para-indent-group">
                 <div class="setting-label-row">
-                    <label>Размер отступа</label>
+                    <label for="input-paraIndent">Размер отступа</label>
                     <span id="label-paraIndent" class="setting-value-badge">25px</span>
                 </div>
                 <input type="range" id="input-paraIndent" min="0" max="60" value="25" step="5" oninput="setParaIndent(this.value)">
@@ -392,7 +393,7 @@
             
             <div class="setting-item-row">
                 <div class="setting-info">
-                    <label>Автопрокрутка</label>
+                    <label for="autoscroll-toggle">Автопрокрутка</label>
                     <p class="setting-hint">Листать текст автоматически</p>
                 </div>
                 <label class="switch">
@@ -403,14 +404,14 @@
 
             <div class="setting-item-block autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
                 <div class="setting-label-row">
-                    <label>Скорость прокрутки</label>
+                    <label for="autoscroll-speed">Скорость прокрутки</label>
                 </div>
                 <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
             </div>
 
             <div class="setting-item-row" style="margin-top:16px; border-top:1px solid var(--divider); padding-top:16px;">
                 <div class="setting-info">
-                    <label>Режим редактора</label>
+                    <label for="admin-mode-toggle">Режим редактора</label>
                     <p class="setting-hint">Только для администраторов</p>
                 </div>
                 <label class="switch">
