@@ -1359,11 +1359,13 @@ async def cmd_rob(message: types.Message):
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (amount, initiator.id))
             await db.commit()
             
-        await message.answer(
+        msg = await message.answer(
             f"🥷 <b>Успешная кража!</b>\n"
             f"Вы незаметно вытащили <b>{amount} монет</b> из кошелька @{target.username}.",
             parse_mode="HTML"
         )
+        if message.chat.type in ["group", "supergroup"]:
+            asyncio.create_task(delete_after(msg, 30))
     else:
         # Провал - штраф 100 монет
         async with aiosqlite.connect('manga.db') as db:
@@ -1371,11 +1373,13 @@ async def cmd_rob(message: types.Message):
             await db.execute('UPDATE users_stats SET balance = MAX(0, balance - 100) WHERE user_id = ?', (initiator.id,))
             await db.commit()
             
-        await message.answer(
+        msg = await message.answer(
             f"🚨 <b>Провал!</b>\n"
             f"Вас поймала <b>Аля</b> на месте преступления! За нарушение порядка вы оштрафованы на <b>100 монет</b>.",
             parse_mode="HTML"
         )
+        if message.chat.type in ["group", "supergroup"]:
+            asyncio.create_task(delete_after(msg, 30))
 
 @dp.callback_query(F.data.startswith("back_to_profile_"))
 async def callback_back_to_profile(callback: types.CallbackQuery):
@@ -2119,31 +2123,63 @@ async def cmd_dice_games(message: types.Message):
                 asyncio.create_task(delete_after(msg, 30))
             
     else:
-        await message.answer_dice(emoji=emoji)
+        dice_msg = await message.answer(f"🎲 <b>Бросаю {text.replace('/', '')}...</b>", parse_mode="HTML")
+        if message.chat.type in ["group", "supergroup"]:
+            asyncio.create_task(delete_after(dice_msg, 5))
+        dice_msg = await message.answer_dice(emoji=emoji)
+        if message.chat.type in ["group", "supergroup"]:
+            asyncio.create_task(delete_after(dice_msg, 30))
 
 
 @dp.message(F.text & F.text.regexp(REGEX_RPS))
 async def cmd_rps(message: types.Message):
     if await check_cd_and_warn(message, "iris_cmd", 3): return
     match = REGEX_RPS.search(message.text)
-    user_choice = match.group(2).lower() if match.group(2) else None
-    bot_choice = random.choice(["камень", "ножницы", "бумага"])
+    user_choice = match.group(2).lower() if match and match.group(2) else None
     
     if not user_choice:
-        return await message.answer(f"✊✌️✋ Я выбрал: <b>{bot_choice}</b>\n(Чтобы сыграть со мной: напиши <i>кнб [камень/ножницы/бумага]</i>)", parse_mode="HTML")
-        
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="🪨 Камень", callback_data="rps_камень"))
+        builder.row(types.InlineKeyboardButton(text="✂️ Ножницы", callback_data="rps_ножницы"))
+        builder.row(types.InlineKeyboardButton(text="📄 Бумага", callback_data="rps_бумага"))
+        msg = await message.answer("✊✌️✋ <b>Выбери свой ход:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
+        if message.chat.type in ["group", "supergroup"]:
+            asyncio.create_task(delete_after(msg, 30))
+        return
+
+    # Если выбор передан текстом (сохраняем старую логику)
+    await process_rps_logic(message, user_choice)
+
+async def process_rps_logic(target: Union[types.Message, types.CallbackQuery], user_choice: str):
+    bot_choice = random.choice(["камень", "ножницы", "бумага"])
     wins = {"камень": "ножницы", "ножницы": "бумага", "бумага": "камень"}
+    
     if user_choice not in wins:
-        return await message.answer("Я знаю только камень, ножницы и бумагу!")
-        
+        if isinstance(target, types.Message):
+            return await target.answer("Я знаю только камень, ножницы и бумагу!")
+        else:
+            return await target.answer("Я знаю только камень, ножницы и бумагу!", show_alert=True)
+            
     if user_choice == bot_choice:
         res = "Ничья! 🤝"
     elif wins[user_choice] == bot_choice:
         res = "Ты победил! 🎉"
     else:
         res = "Я победил! 🤖"
-        
-    await message.answer(f"Твой выбор: <b>{user_choice}</b>\nМой выбор: <b>{bot_choice}</b>\n\n{res}", parse_mode="HTML")
+    
+    text = f"Твой выбор: <b>{user_choice}</b>\nМой выбор: <b>{bot_choice}</b>\n\n{res}"
+    
+    if isinstance(target, types.Message):
+        msg = await target.answer(text, parse_mode="HTML")
+        if target.chat.type in ["group", "supergroup"]:
+            asyncio.create_task(delete_after(msg, 30))
+    else:
+        await target.message.edit_text(text, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("rps_"))
+async def callback_rps(callback: types.CallbackQuery):
+    choice = callback.data.split("_")[1]
+    await process_rps_logic(callback, choice)
 
 @dp.message(F.text & F.text.regexp(REGEX_MAGIC_BALL))
 async def cmd_magic_ball(message: types.Message):
