@@ -1491,18 +1491,18 @@ async def cmd_stats(message: types.Message):
     if await check_cd_and_warn(message, "stats", 10): return
     
     async with aiosqlite.connect('manga.db') as db:
-        # Берем с запасом 100 человек, чтобы отфильтровать только тех, кто в чате
-        async with db.execute('SELECT user_id, messages_count FROM users_stats ORDER BY messages_count DESC LIMIT 100') as cursor:
+        # Запрос с балансом
+        async with db.execute('SELECT user_id, messages_count, balance FROM users_stats ORDER BY messages_count DESC LIMIT 100') as cursor:
             top_msg = await cursor.fetchall()
             
-        async with db.execute('SELECT user_id, (hugs + kisses + bites + slaps + pats) as rp_total FROM users_stats ORDER BY rp_total DESC LIMIT 100') as cursor:
+        async with db.execute('SELECT user_id, (hugs + kisses + bites + slaps + pats) as rp_total, balance FROM users_stats ORDER BY rp_total DESC LIMIT 100') as cursor:
             top_rp = await cursor.fetchall()
             
     # Собираем данные с фильтрацией по текущему чату
-    async def format_top(rows, unit, emoji_badge):
+    async def format_top(rows, unit):
         res = []
         rank = 1
-        for uid, count in rows:
+        for uid, count, balance in rows:
             if count == 0: continue
             if rank > 5: break
             try:
@@ -1513,14 +1513,13 @@ async def cmd_stats(message: types.Message):
             except Exception:
                 continue
             
-            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-            medal = medals.get(rank, "🏅")
-            res.append(f"{medal} <b>{name}</b> — {count} {unit} {emoji_badge}")
+            # Убрали лишние эмодзи, оставили только кошелек
+            res.append(f"{rank}. <b>{name}</b> — {count} {unit} | {balance} 💰")
             rank += 1
         return "\n".join(res) if res else "<i>Пока пусто...</i>"
 
-    top_msg_text = await format_top(top_msg, "сообщ.", "✉️")
-    top_rp_text = await format_top(top_rp, "РП-действий", "💞")
+    top_msg_text = await format_top(top_msg, "сообщ.")
+    top_rp_text = await format_top(top_rp, "РП")
     
     text = f"📊 <b>Статистика чата:</b>\n\n🗣 <b>Топ болтунов:</b>\n{top_msg_text}\n\n🎭 <b>Самые любвеобильные:</b>\n{top_rp_text}"
     msg = await message.answer(text, parse_mode="HTML")
@@ -1881,58 +1880,57 @@ async def bottle_spin(callback: types.CallbackQuery):
     await wait_msg.delete()
     await callback.message.answer(f"🍾 <b>Бутылочка!</b>\n\nПара: <a href='tg://user?id={p1}'>{n1}</a> и <a href='tg://user?id={p2}'>{n2}</a>\n\n🌸 <b>Задание от Али:</b>\n{task}", parse_mode="HTML")
 
-@dp.message(F.text.regexp(REGEX_SHIP))
-async def cmd_ship(message: types.Message):
-    logging.info(f"DEBUG: Ship handler triggered by {message.from_user.id} in chat {message.chat.id}")
-    if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
-    # Временно уберем кулдаун для теста
-    # if await check_cd_and_warn(message, "ship", 60): return
-
-    
-    async with aiosqlite.connect('manga.db') as db:
-        async with db.execute('SELECT user_id, first_name FROM users_stats WHERE chat_id = ? ORDER BY RANDOM() LIMIT 2', (message.chat.id,)) as cursor:
-            participants = await cursor.fetchall()
-            
-    if len(participants) < 2:
-        msg = await message.answer(f"❌ В этой беседе недостаточно данных для шипперинга (найдено {len(participants)} участников). Попробуйте написать любое сообщение, чтобы бот запомнил вас в этом чате.")
-        if message.chat.type in ["group", "supergroup"]:
-            asyncio.create_task(delete_after(msg, 30))
-        return
-        
-    p1_id, p1_name = participants[0]
-    p2_id, p2_name = participants[1]
-    
-    wait_msg = await message.answer(f"💞 <i>Аля анализирует совместимость {p1_name} и {p2_name}...</i>", parse_mode="HTML")
-    if message.chat.type in ["group", "supergroup"]:
-        asyncio.create_task(delete_after(wait_msg, 30))
-    
-    compatibility = random.randint(0, 100)
-    
-    system_prompt = (
-        "Ты Аля (аниме Roshidere). Твоя задача — сгенерировать короткую, забавную или милую "
-        f"историю любви (шипперинг) между пользователями '{p1_name}' и '{p2_name}'. "
-        f"Их процент совместимости — {compatibility}%. "
-        "Опиши, как они могли бы встретиться или почему они (не) подходят друг другу, в стиле цундере."
-    )
-    
-    if not await is_ai_enabled(message.chat.id):
-        story = "Эти баки настолько подходят друг другу, что я даже не хочу об этом говорить!"
-    else:
-        try:
-            story = await ask_groq("Расскажи историю любви", system_prompt)
-        except Exception:
-            story = "Эти баки настолько подходят друг другу, что я даже не хочу об этом говорить!"
-        
-    await wait_msg.delete()
-    text = (
-        f"💘 <b>Шипперинг!</b> 💘\n\n"
-        f"Пара: <a href='tg://user?id={p1_id}'>{p1_name}</a> x <a href='tg://user?id={p2_id}'>{p2_name}</a>\n"
-        f"Совместимость: <b>{compatibility}%</b>\n\n"
-        f"🌸 <b>Прогноз от Али:</b>\n{story}"
-    )
-    final_msg = await message.answer(text, parse_mode="HTML")
-    if message.chat.type in ["group", "supergroup"]:
-        asyncio.create_task(delete_after(final_msg, 60))
+# @dp.message(F.text.regexp(REGEX_SHIP))
+# async def cmd_ship(message: types.Message):
+#     logging.info(f"DEBUG: Ship handler triggered by {message.from_user.id} in chat {message.chat.id}")
+#     if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
+#     # Временно уберем кулдаун для теста
+#     # if await check_cd_and_warn(message, "ship", 60): return
+#     
+#     async with aiosqlite.connect('manga.db') as db:
+#         async with db.execute('SELECT user_id, first_name FROM users_stats WHERE chat_id = ? ORDER BY RANDOM() LIMIT 2', (message.chat.id,)) as cursor:
+#             participants = await cursor.fetchall()
+#             
+#     if len(participants) < 2:
+#         msg = await message.answer(f"❌ В этой беседе недостаточно данных для шипперинга (найдено {len(participants)} участников). Попробуйте написать любое сообщение, чтобы бот запомнил вас в этом чате.")
+#         if message.chat.type in ["group", "supergroup"]:
+#             asyncio.create_task(delete_after(msg, 30))
+#         return
+#         
+#     p1_id, p1_name = participants[0]
+#     p2_id, p2_name = participants[1]
+#     
+#     wait_msg = await message.answer(f"💞 <i>Аля анализирует совместимость {p1_name} и {p2_name}...</i>", parse_mode="HTML")
+#     if message.chat.type in ["group", "supergroup"]:
+#         asyncio.create_task(delete_after(wait_msg, 30))
+#         
+#     compatibility = random.randint(0, 100)
+#     
+#     system_prompt = (
+#         "Ты Аля (аниме Roshidere). Твоя задача — сгенерировать короткую, забавную или милую "
+#         f"историю любви (шипперинг) между пользователями '{p1_name}' и '{p2_name}'. "
+#         f"Их процент совместимости — {compatibility}%. "
+#         "Опиши, как они могли бы встретиться или почему они (не) подходят друг другу, в стиле цундере."
+#     )
+#     
+#     if not await is_ai_enabled(message.chat.id):
+#         story = "Эти баки настолько подходят друг другу, что я даже не хочу об этом говорить!"
+#     else:
+#         try:
+#             story = await ask_groq("Расскажи историю любви", system_prompt)
+#         except Exception:
+#             story = "Эти баки настолько подходят друг другу, что я даже не хочу об этом говорить!"
+#         
+#     await wait_msg.delete()
+#     text = (
+#         f"💘 <b>Шипперинг!</b> 💘\n\n"
+#         f"Пара: <a href='tg://user?id={p1_id}'>{p1_name}</a> x <a href='tg://user?id={p2_id}'>{p2_name}</a>\n"
+#         f"Совместимость: <b>{compatibility}%</b>\n\n"
+#         f"🌸 <b>Прогноз от Али:</b>\n{story}"
+#     )
+#     final_msg = await message.answer(text, parse_mode="HTML")
+#     if message.chat.type in ["group", "supergroup"]:
+#         asyncio.create_task(delete_after(final_msg, 60))
 
 # ==============================================================================
 # БЛОК: ЭКОНОМИКА И МАГАЗИН
