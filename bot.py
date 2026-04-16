@@ -1873,12 +1873,17 @@ async def cmd_ship(message: types.Message):
             participants = await cursor.fetchall()
             
     if len(participants) < 2:
-        return await message.answer("В этой беседе слишком мало людей для шипперинга!")
+        msg = await message.answer(f"❌ В этой беседе недостаточно данных для шипперинга (найдено {len(participants)} участников). Попробуйте написать любое сообщение, чтобы бот запомнил вас в этом чате.")
+        if message.chat.type in ["group", "supergroup"]:
+            asyncio.create_task(delete_after(msg, 30))
+        return
         
     p1_id, p1_name = participants[0]
     p2_id, p2_name = participants[1]
     
     wait_msg = await message.answer(f"💞 <i>Аля анализирует совместимость {p1_name} и {p2_name}...</i>", parse_mode="HTML")
+    if message.chat.type in ["group", "supergroup"]:
+        asyncio.create_task(delete_after(wait_msg, 30))
     
     compatibility = random.randint(0, 100)
     
@@ -1904,7 +1909,9 @@ async def cmd_ship(message: types.Message):
         f"Совместимость: <b>{compatibility}%</b>\n\n"
         f"🌸 <b>Прогноз от Али:</b>\n{story}"
     )
-    await message.answer(text, parse_mode="HTML")
+    final_msg = await message.answer(text, parse_mode="HTML")
+    if message.chat.type in ["group", "supergroup"]:
+        asyncio.create_task(delete_after(final_msg, 60))
 
 # ==============================================================================
 # БЛОК: ЭКОНОМИКА И МАГАЗИН
