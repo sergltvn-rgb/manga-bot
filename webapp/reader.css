@@ -577,27 +577,26 @@ body {
 /* --- Progress Bar --- */
 .reading-progress-container {
     position: fixed;
-    top: 56px; /* Below standard header */
-    left: 0; right: 0;
-    height: 2px;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
     z-index: 1000;
-    background: rgba(0,0,0,0.05);
+    background: transparent;
     pointer-events: none;
-    transition: transform 0.3s ease;
+    transition: none;
 }
 
 .reading-progress-bar {
     height: 100%;
     width: 0%;
     background: var(--accent);
-    box-shadow: 0 0 8px var(--accent);
     transition: width 0.2s ease-out;
 }
 
-/* Immersive state */
+/* Immersive state - removed progress bar shift */
 .immersive .reader-top-bar { transform: translateY(-100%); }
 .immersive .reader-bottom-bar { transform: translateY(100%); }
-.immersive .reading-progress-container { transform: translateY(-56px); }
 
 /* === ПАНЕЛЬ НАСТРОЕК === */
 .settings-overlay {
