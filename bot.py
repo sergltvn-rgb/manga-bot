@@ -1302,8 +1302,8 @@ async def cmd_profile(message: types.Message):
     if await check_cd_and_warn(message, "profile", 5): return
     text, markup = await get_profile_content(message.chat.type, message.chat.id, message.from_user)
     msg = await message.answer(text, parse_mode="HTML", reply_markup=markup)
-    if message.chat.type in ["group", "supergroup"]:
-        asyncio.create_task(delete_after(msg, 30))
+    # Удаление отключено для сохранения интерактивных кнопок
+
 
 @dp.message(F.text & F.text.regexp(REGEX_REF))
 async def cmd_ref(message: types.Message):
@@ -2118,7 +2118,9 @@ async def cmd_dice_games(message: types.Message):
             if message.chat.type in ["group", "supergroup"]:
                 asyncio.create_task(delete_after(msg, 30))
             
-    await message.answer_dice(emoji=emoji)
+    else:
+        await message.answer_dice(emoji=emoji)
+
 
 @dp.message(F.text & F.text.regexp(REGEX_RPS))
 async def cmd_rps(message: types.Message):
