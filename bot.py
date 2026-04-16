@@ -1159,25 +1159,29 @@ async def cmd_lootbox(message: types.Message):
         
     res = random.random()
     if res < 0.5:
-        await message.answer("📦 <b>Лутбокс оказался пустым...</b> 😢\nПопробуйте в следующий раз!", parse_mode="HTML")
+        msg = await message.answer("📦 <b>Лутбокс оказался пустым...</b> 😢\nПопробуйте в следующий раз!", parse_mode="HTML")
+        asyncio.create_task(delete_after(msg, 30))
     elif res < 0.8:
-        coins = random.randint(100, 500)
+        coins = random.randint(300, 700)
         async with aiosqlite.connect('manga.db') as db:
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (coins, user_id))
             await db.commit()
-        await message.answer(f"📦 <b>Лутбокс!</b>\n\nВы нашли мешочек с монетами: <b>{coins}</b> монет! 💰", parse_mode="HTML")
+        msg = await message.answer(f"📦 <b>Лутбокс!</b>\n\nВы нашли мешочек с монетами: <b>{coins}</b> монет! 💰", parse_mode="HTML")
+        asyncio.create_task(delete_after(msg, 30))
     elif res < 0.95:
         badges = ["💎 Алмаз", "🔥 Огонь", "🌟 Звезда", "🍀 Клевер", "🧿 Амулет"]
         badge = random.choice(badges)
         await add_to_inventory(user_id, "badge", badge)
-        await message.answer(f"📦 <b>Лутбокс!</b>\n\nВы получили редкий значок: <b>{badge}</b>! 🏅", parse_mode="HTML")
+        msg = await message.answer(f"📦 <b>Лутбокс!</b>\n\nВы получили редкий значок: <b>{badge}</b>! 🏅", parse_mode="HTML")
+        asyncio.create_task(delete_after(msg, 30))
     else:
         titles = ["Бог Рандома", "Счастливчик", "Охотник за Сокровищами", "Легенда Чатбота"]
         title = random.choice(titles)
         async with aiosqlite.connect('manga.db') as db:
             await db.execute('UPDATE users_stats SET custom_title = ? WHERE user_id = ?', (title, user_id))
             await db.commit()
-        await message.answer(f"📦 <b>Лутбокс!</b>\n\nЭПИЧЕСУИЙ ВЫИГРЫШ! Вы получили уникальный титул: <b>{title}</b>! 👑", parse_mode="HTML")
+        msg = await message.answer(f"📦 <b>Лутбокс!</b>\n\nЭПИЧЕСУИЙ ВЫИГРЫШ! Вы получили уникальный титул: <b>{title}</b>! 👑", parse_mode="HTML")
+        asyncio.create_task(delete_after(msg, 30))
 
 # --- Phase 3: Интерактивный гарем ---
 @dp.message(Command("feed"))
@@ -1297,7 +1301,9 @@ async def get_profile_content(chat_type: str, chat_id: int, user: types.User):
 async def cmd_profile(message: types.Message):
     if await check_cd_and_warn(message, "profile", 5): return
     text, markup = await get_profile_content(message.chat.type, message.chat.id, message.from_user)
-    await message.answer(text, parse_mode="HTML", reply_markup=markup)
+    msg = await message.answer(text, parse_mode="HTML", reply_markup=markup)
+    if message.chat.type in ["group", "supergroup"]:
+        asyncio.create_task(delete_after(msg, 30))
 
 @dp.message(F.text & F.text.regexp(REGEX_REF))
 async def cmd_ref(message: types.Message):
@@ -1495,7 +1501,9 @@ async def cmd_stats(message: types.Message):
     top_rp_text = await format_top(top_rp, "РП-действий", "💞")
     
     text = f"📊 <b>Статистика чата:</b>\n\n🗣 <b>Топ болтунов:</b>\n{top_msg_text}\n\n🎭 <b>Самые любвеобильные:</b>\n{top_rp_text}"
-    await message.answer(text, parse_mode="HTML")
+    msg = await message.answer(text, parse_mode="HTML")
+    if message.chat.type in ["group", "supergroup"]:
+        asyncio.create_task(delete_after(msg, 30))
 
 # РП команды теперь в handlers/rp.py
 
@@ -1918,7 +1926,9 @@ async def cmd_shop(message: types.Message):
         [types.InlineKeyboardButton(text="🎖️ Значок VIP (2000 монет)", callback_data="buy_badge_vip")]
     ])
     
-    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    msg = await message.answer(text, parse_mode="HTML", reply_markup=kb)
+    if message.chat.type in ["group", "supergroup"]:
+        asyncio.create_task(delete_after(msg, 30))
 
 @dp.callback_query(F.data == "buy_lootbox")
 async def shop_buy_lootbox_cb(callback: types.CallbackQuery):
@@ -2085,6 +2095,8 @@ async def cmd_dice_games(message: types.Message):
             await db.commit()
             
         msg = await message.answer_dice(emoji="🎰")
+        if message.chat.type in ["group", "supergroup"]:
+            asyncio.create_task(delete_after(msg, 30))
         await asyncio.sleep(2)
         
         val = msg.dice.value
@@ -2098,9 +2110,13 @@ async def cmd_dice_games(message: types.Message):
             async with aiosqlite.connect('manga.db') as db:
                 await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (win, user_id))
                 await db.commit()
-            return await message.answer(f"🎉 <b>ДЖЕКПОТ!</b>\nВы выиграли <b>{win}</b> монет! 💰", parse_mode="HTML")
+            msg = await message.answer(f"🎉 <b>ДЖЕКПОТ!</b>\nВы выиграли <b>{win}</b> монет! 💰", parse_mode="HTML")
+            if message.chat.type in ["group", "supergroup"]:
+                asyncio.create_task(delete_after(msg, 30))
         else:
-            return await message.answer(f"💨 <b>Вы проиграли ставку...</b>\nУдача обязательно вернется! 🎰", parse_mode="HTML")
+            msg = await message.answer(f"💨 <b>Вы проиграли ставку...</b>\nУдача обязательно вернется! 🎰", parse_mode="HTML")
+            if message.chat.type in ["group", "supergroup"]:
+                asyncio.create_task(delete_after(msg, 30))
             
     await message.answer_dice(emoji=emoji)
 
