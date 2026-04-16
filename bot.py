@@ -113,7 +113,7 @@ REGEX_DAILY = re.compile(r'(?i)^[/*\s]*(ежедневка|daily|🎁 Ежедн
 REGEX_LOOTBOX = re.compile(r'(?i)^[/*\s]*(lootbox|📦 Секретный лутбокс)')
 REGEX_REF = re.compile(r'(?i)^[/*\s]*(реф|ref|🔗 Рефералы)')
 REGEX_SLOT = re.compile(r'(?i)^[/*\s]*(казино|слоты|слот)(?:\s+(\d+))?')
-REGEX_ROB = re.compile(r'(?i)^[/*\s]*(украсть|ограбить)')
+REGEX_ROB = re.compile(r'(?i)^[/*\s]*(украсть|ограбить|rob)')
 
 ACTIVE_DROPS = {} # {chat_id: reward}
 
