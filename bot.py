@@ -48,7 +48,8 @@ from database import (
     add_to_harem, remove_from_harem, get_user_harem, update_loyalty_level,
     add_to_inventory, get_user_inventory, get_users_with_bookmark,
     add_referral, get_referral_stats, get_user_referred_by,
-    get_setting, set_setting, get_custom_name
+    get_setting, set_setting, get_custom_name,
+    upsert_user_profile, get_user_profile_by_username,
 )
 
 COOLDOWN_TIME = 30 
@@ -1465,19 +1466,28 @@ async def cmd_pay(message: types.Message):
     target_is_bot = False
 
     if mention:
-        try:
-            target_chat = await bot.get_chat(mention)
-        except Exception:
-            return await message.answer(
-                "❌ Не удалось найти пользователя по @username.\n"
-                "Попробуйте сделать перевод ответом на сообщение пользователя.",
-            )
-        if getattr(target_chat, "type", "") != "private":
-            return await message.answer("❌ Перевод доступен только пользователям (не каналам/чатам).")
-        target_id = target_chat.id
-        target_username = getattr(target_chat, "username", None)
-        target_first_name = getattr(target_chat, "first_name", None) or getattr(target_chat, "title", None)
-        target_is_bot = bool(getattr(target_chat, "is_bot", False))
+        username_key = mention.lstrip("@").lower()
+        profile = await get_user_profile_by_username(username_key)
+        if profile:
+            target_id, target_username, target_first_name = profile
+            target_is_bot = False
+        else:
+            # Fallback for rare cases when Telegram API can still resolve target directly
+            try:
+                target_chat = await bot.get_chat(mention)
+            except Exception:
+                return await message.answer(
+                    "❌ Не удалось найти пользователя по @username.\n"
+                    "Попросите его написать сообщение в чате с ботом и попробуйте снова, "
+                    "или сделайте перевод ответом на его сообщение."
+                )
+            if getattr(target_chat, "type", "") != "private":
+                return await message.answer("❌ Перевод доступен только пользователям (не каналам/чатам).")
+            target_id = target_chat.id
+            target_username = getattr(target_chat, "username", None)
+            target_first_name = getattr(target_chat, "first_name", None) or getattr(target_chat, "title", None)
+            target_is_bot = bool(getattr(target_chat, "is_bot", False))
+            await upsert_user_profile(target_id, target_username, target_first_name)
     else:
         if not message.reply_to_message:
             return await message.answer(
@@ -4347,6 +4357,7 @@ class StatsMiddleware(BaseMiddleware):
             # ----------------------------------
             
             try:
+                await upsert_user_profile(user_id, event.from_user.username, event.from_user.first_name)
                 async with aiosqlite.connect('manga.db') as db:
                     await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
                     if getattr(event, 'sticker', None):

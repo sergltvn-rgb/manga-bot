@@ -75,6 +75,12 @@ async def init_db():
         await db.execute('CREATE TABLE IF NOT EXISTS alya_settings (bot_id INTEGER PRIMARY KEY, mode TEXT DEFAULT "normal")')
         await db.execute('CREATE TABLE IF NOT EXISTS ai_blacklist (user_id INTEGER PRIMARY KEY)')
         await db.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT)')
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_profiles (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT DEFAULT '',
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )''')
         # Таблица для выбора провайдера ИИ (groq / gemma) для каждого чата
         await db.execute('CREATE TABLE IF NOT EXISTS chat_ai_provider (chat_id INTEGER PRIMARY KEY, provider TEXT DEFAULT "groq")')
         
@@ -156,6 +162,7 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_likes_chapter ON chapter_likes(chapter_key)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON user_bookmarks(user_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_reactions_chapter ON chapter_reactions(chapter_key)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_user_profiles_username ON user_profiles(username)')
             
         await db.commit()
 
@@ -239,6 +246,44 @@ async def get_setting(key: str, default: str = None) -> str | None:
         async with db.execute('SELECT value FROM bot_settings WHERE key = ?', (key,)) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else default
+
+
+async def upsert_user_profile(user_id: int, username: str | None, first_name: str | None):
+    """Upsert user profile for @username resolution in commands."""
+    normalized = username.lower() if username else None
+    safe_name = first_name or ""
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute(
+            '''
+            INSERT INTO user_profiles (user_id, username, first_name, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = COALESCE(excluded.username, user_profiles.username),
+                first_name = excluded.first_name,
+                updated_at = CURRENT_TIMESTAMP
+            ''',
+            (user_id, normalized, safe_name),
+        )
+        await db.commit()
+
+
+async def get_user_profile_by_username(username: str):
+    """Return tuple (user_id, username, first_name) by @username (case-insensitive)."""
+    if not username:
+        return None
+    normalized = username.lower().lstrip("@")
+    async with aiosqlite.connect('manga.db') as db:
+        async with db.execute(
+            '''
+            SELECT user_id, username, first_name
+            FROM user_profiles
+            WHERE username = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            ''',
+            (normalized,),
+        ) as cursor:
+            return await cursor.fetchone()
 
 async def set_setting(key: str, value: str):
     async with aiosqlite.connect('manga.db') as db:

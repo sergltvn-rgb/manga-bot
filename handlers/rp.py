@@ -6,7 +6,7 @@ from typing import Union
 import time
 import asyncio
 import aiohttp
-from database import update_rp_stat, get_admins
+from database import update_rp_stat, get_admins, get_user_profile_by_username
 
 rp_router = Router()
 
@@ -146,15 +146,12 @@ async def extract_mentioned_targets(message: types.Message) -> list[tuple[int, b
                 mention_usernames.append(username.lower())
 
     for username in dict.fromkeys(mention_usernames):
-        try:
-            chat = await message.bot.get_chat(username)
-        except Exception:
+        profile = await get_user_profile_by_username(username)
+        if not profile:
             continue
-        uid = getattr(chat, "id", None)
-        if uid is None:
-            continue
-        is_bot = bool(getattr(chat, "is_bot", False))
-        name = getattr(chat, "first_name", None) or getattr(chat, "username", None) or str(uid)
+        uid, uname, fname = profile
+        is_bot = False
+        name = fname or uname or str(uid)
         mention_html = f'<a href="tg://user?id={uid}">{html.escape(name, quote=False)}</a>'
         targets[uid] = (is_bot, mention_html)
 
