@@ -141,14 +141,19 @@ ACTIVE_DROPS = {} # {chat_id: reward}
 
 COOLDOWN_RULES = {
     # Heavy commands: strict hybrid anti-spam
-    "profile": {"user_cd": 600, "chat_cd": 20, "silent_in_groups": True, "delete_source_on_cd": True},
-    "shop": {"user_cd": 35, "chat_cd": 15, "silent_in_groups": True, "delete_source_on_cd": True},
-    "casino_cmd": {"user_cd": 20, "chat_cd": 8, "silent_in_groups": True, "delete_source_on_cd": True},
-    "stats": {"user_cd": 40, "chat_cd": 20, "silent_in_groups": True, "delete_source_on_cd": True},
-    "lootbox": {"user_cd": 20, "chat_cd": 10, "silent_in_groups": True, "delete_source_on_cd": True},
-    "pay": {"user_cd": 15, "chat_cd": 6, "silent_in_groups": True, "delete_source_on_cd": True},
-    # Shop callbacks: reduce button spam without noisy alerts
-    "shop_buy": {"user_cd": 2, "chat_cd": 1, "silent_in_groups": True},
+    "profile": {"user_cd": 600, "chat_cd": 20, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    "shop": {"user_cd": 35, "chat_cd": 15, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    "casino_cmd": {"user_cd": 20, "chat_cd": 8, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    "stats": {"user_cd": 40, "chat_cd": 20, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    "lootbox": {"user_cd": 20, "chat_cd": 10, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    "pay": {"user_cd": 15, "chat_cd": 6, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    # Mini-games: quiet in groups, informative in PM.
+    "iris_cmd": {"user_cd": 3, "chat_cd": 1, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    "roulette": {"user_cd": 5, "chat_cd": 2, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    "bottle": {"user_cd": 30, "chat_cd": 10, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    "alya_choose": {"user_cd": 10, "chat_cd": 4, "silent_in_groups": True, "delete_source_on_cd": True, "response_mode": "silent"},
+    # Shop callbacks: reduce button spam without chat messages.
+    "shop_buy": {"user_cd": 2, "chat_cd": 1, "silent_in_groups": True, "response_mode": "alert"},
 }
 
 
@@ -266,7 +271,10 @@ from utils import (
     is_on_cooldown,
     check_cd_and_warn,
     delete_after,
+    schedule_delete_once,
     temp_reply,
+    maybe_ephemeral_reply,
+    send_or_edit_quiet,
     run_git_sync,
     safe_edit_or_reply,
     validate_telegram_data,
@@ -1323,7 +1331,7 @@ async def cmd_lootbox(message: types.Message):
     ok, text = await purchase_and_roll_lootbox(message.from_user.id)
     msg = await message.answer(text, parse_mode="HTML")
     if ok and message.chat.type in ["group", "supergroup"]:
-        asyncio.create_task(delete_after(msg, 30))
+        schedule_delete_once(msg, 30)
 
 # --- Phase 3: Интерактивный гарем ---
 @dp.message(F.text & F.text.regexp(REGEX_FEED_HAREM))
@@ -1631,7 +1639,7 @@ async def cmd_rob(message: types.Message):
                     parse_mode="HTML"
                 )
                 if message.chat.type in ["group", "supergroup"]:
-                    asyncio.create_task(delete_after(msg, 30))
+                    schedule_delete_once(msg, 30)
                 return
 
             async with db.execute('SELECT balance FROM users_stats WHERE user_id = ?', (target.id,)) as cursor:
@@ -1655,7 +1663,7 @@ async def cmd_rob(message: types.Message):
         text = random.choice(success_templates).format(amount=amount, target=target_label)
         msg = await message.answer(text, parse_mode="HTML")
         if message.chat.type in ["group", "supergroup"]:
-            asyncio.create_task(delete_after(msg, 30))
+            schedule_delete_once(msg, 30)
     else:
         # Провал - штраф (рандом от 50 до 150 монет)
         penalty = random.randint(50, 150)
@@ -1673,7 +1681,7 @@ async def cmd_rob(message: types.Message):
         text = random.choice(failure_templates).format(penalty=penalty, target=target_label)
         msg = await message.answer(text, parse_mode="HTML")
         if message.chat.type in ["group", "supergroup"]:
-            asyncio.create_task(delete_after(msg, 30))
+            schedule_delete_once(msg, 30)
 
 @dp.callback_query(F.data.startswith("back_to_profile_"))
 async def callback_back_to_profile(callback: types.CallbackQuery):
@@ -1826,7 +1834,7 @@ async def cmd_stats(message: types.Message):
     text = f"📊 <b>Статистика чата:</b>\n\n🗣 <b>Топ болтунов:</b>\n{top_msg_text}\n\n🎭 <b>Самые любвеобильные:</b>\n{top_rp_text}"
     msg = await message.answer(text, parse_mode="HTML")
     if message.chat.type in ["group", "supergroup"]:
-        asyncio.create_task(delete_after(msg, 30))
+        schedule_delete_once(msg, 30)
 
 # РП команды теперь в handlers/rp.py
 
@@ -2047,7 +2055,7 @@ async def list_marriages(message: types.Message):
 # ==============================================================================
 @dp.message(F.text & F.text.regexp(REGEX_INFA))
 async def cmd_infa(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
+    if await check_action_cooldown(message, "iris_cmd"): return
     chance = random.randint(0, 100)
     match = REGEX_INFA.search(message.text)
     if not match:
@@ -2059,7 +2067,7 @@ async def cmd_infa(message: types.Message):
 
 @dp.message(F.text & F.text.regexp(REGEX_RANDOM))
 async def cmd_random(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 2): return
+    if await check_action_cooldown(message, "iris_cmd"): return
     match = REGEX_RANDOM.search(message.text)
     if not match:
         return await temp_reply(message, "❌ Формат: /рандом [число] или random [number]")
@@ -2069,7 +2077,7 @@ async def cmd_random(message: types.Message):
 
 @dp.message(F.text & F.text.regexp(REGEX_CHOOSE))
 async def cmd_choose(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
+    if await check_action_cooldown(message, "iris_cmd"): return
     match = REGEX_CHOOSE.search(message.text)
     if not match:
         return await temp_reply(message, "❌ Формат: /выбери [A] или [B] / choose [A] or [B]")
@@ -2078,7 +2086,7 @@ async def cmd_choose(message: types.Message):
 
 @dp.message(F.text & F.text.regexp(REGEX_ALYA_CHOOSE))
 async def cmd_alya_choose(message: types.Message):
-    if await check_cd_and_warn(message, "alya_choose", 10): return
+    if await check_action_cooldown(message, "alya_choose"): return
 
     match = REGEX_ALYA_CHOOSE.search(message.text)
     if not match:
@@ -2100,7 +2108,7 @@ async def cmd_alya_choose(message: types.Message):
 
 @dp.message(F.text & F.text.regexp(REGEX_COIN))
 async def cmd_coin(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 2): return
+    if await check_action_cooldown(message, "iris_cmd"): return
     coin = random.choice(["Орел", "Решка"])
     await message.answer(f"🪙 Выпало: <b>{coin}</b>", parse_mode="HTML")
 
@@ -2112,7 +2120,7 @@ BOTTLE_GAMES = {}
 @dp.message(F.text & F.text.regexp(REGEX_BOTTLE))
 async def cmd_bottle(message: types.Message):
     if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
-    if await check_cd_and_warn(message, "bottle", 30): return
+    if await check_action_cooldown(message, "bottle"): return
     
     chat_id = message.chat.id
     if chat_id in BOTTLE_GAMES:
@@ -2274,48 +2282,114 @@ async def cmd_shop(message: types.Message):
     if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
     if await check_action_cooldown(message, "shop"): return
     
-    msg = await message.answer(
-        await get_shop_text(message.from_user.id),
+    await message.answer(
+        await get_shop_text(message.from_user.id, page=0),
         parse_mode="HTML",
-        reply_markup=build_shop_keyboard(),
+        reply_markup=build_shop_keyboard(page=0),
     )
-    if message.chat.type in ["group", "supergroup"]:
-        asyncio.create_task(delete_after(msg, 30))
 
 
-def build_shop_keyboard() -> types.InlineKeyboardMarkup:
-    return types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text=f"🎁 Тайный Лутбокс ({LOOTBOX_PRICE} монет)", callback_data="buy_lootbox")],
-        [types.InlineKeyboardButton(text="👑 Кастомный титул (500 монет)", callback_data="buy_title")],
-        [types.InlineKeyboardButton(text="👻 Скрыть стату в топе (1000 монет)", callback_data="buy_hidden")],
-        [types.InlineKeyboardButton(text="🎖️ Значок VIP (2000 монет)", callback_data="buy_badge_vip")],
-        [types.InlineKeyboardButton(text="🛡️ Щит от ограбления (800 монет)", callback_data="buy_shield")],
-        [types.InlineKeyboardButton(text="✨ Пакет XP +120 (500 монет)", callback_data="buy_xp_pack")],
-        [types.InlineKeyboardButton(text="🌙 Значок «Лунный знак» (700)", callback_data="buy_badge_moon")],
-        [types.InlineKeyboardButton(text="💘 Значок «Купидон» (900)", callback_data="buy_badge_cupid")],
-        [types.InlineKeyboardButton(text="🔥 Значок «Пламя страсти» (1100)", callback_data="buy_badge_flame")],
-    ])
+SHOP_ITEMS_PER_PAGE = 4
+SHOP_ITEMS = [
+    ("🎁 Тайный Лутбокс", LOOTBOX_PRICE, "buy_lootbox"),
+    ("👑 Кастомный титул", 500, "buy_title"),
+    ("👻 Скрыть стату в топе", 1000, "buy_hidden"),
+    ("🎖️ Значок VIP", 2000, "buy_badge_vip"),
+    ("🛡️ Щит от ограбления", 800, "buy_shield"),
+    ("✨ Пакет XP +120", 500, "buy_xp_pack"),
+    ("🌙 Значок «Лунный знак»", 700, "buy_badge_moon"),
+    ("💘 Значок «Купидон»", 900, "buy_badge_cupid"),
+    ("🔥 Значок «Пламя страсти»", 1100, "buy_badge_flame"),
+]
 
 
-async def get_shop_text(user_id: int, note: str | None = None) -> str:
+def _pack_shop_buy(action: str, page: int) -> str:
+    return f"{action}:{page}"
+
+
+def _parse_shop_buy(raw_data: str) -> tuple[str, int]:
+    if ":" not in raw_data:
+        return raw_data, 0
+    action, page_raw = raw_data.rsplit(":", 1)
+    try:
+        return action, max(0, int(page_raw))
+    except ValueError:
+        return action, 0
+
+
+def build_shop_keyboard(page: int = 0) -> types.InlineKeyboardMarkup:
+    total_pages = max(1, math.ceil(len(SHOP_ITEMS) / SHOP_ITEMS_PER_PAGE))
+    page = max(0, min(page, total_pages - 1))
+    start = page * SHOP_ITEMS_PER_PAGE
+    end = start + SHOP_ITEMS_PER_PAGE
+    items = SHOP_ITEMS[start:end]
+
+    rows = [
+        [
+            types.InlineKeyboardButton(
+                text=f"{name} ({price} монет)",
+                callback_data=_pack_shop_buy(action, page),
+            )
+        ]
+        for name, price, action in items
+    ]
+
+    nav = []
+    if page > 0:
+        nav.append(types.InlineKeyboardButton(text="◀️", callback_data=f"shop_page:{page - 1}"))
+    nav.append(types.InlineKeyboardButton(text=f"{page + 1}/{total_pages}", callback_data="shop_page:noop"))
+    if page < total_pages - 1:
+        nav.append(types.InlineKeyboardButton(text="▶️", callback_data=f"shop_page:{page + 1}"))
+    rows.append(nav)
+
+    return types.InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def get_shop_text(user_id: int, note: str | None = None, page: int = 0) -> str:
     stats = await get_user_stats(user_id)
     balance = stats[7] if stats else 0
+    total_pages = max(1, math.ceil(len(SHOP_ITEMS) / SHOP_ITEMS_PER_PAGE))
+    page = max(0, min(page, total_pages - 1))
+    start = page * SHOP_ITEMS_PER_PAGE
+    end = start + SHOP_ITEMS_PER_PAGE
+    items = SHOP_ITEMS[start:end]
+    items_text = "\n".join([f"• {name} — <b>{price}</b>" for name, price, _ in items])
     text = (
         f"🛒 <b>Магазин Аля-бота</b>\n\n"
-        f"У вас <b>{balance}</b> монет."
+        f"У вас <b>{balance}</b> монет.\n"
+        f"Страница <b>{page + 1}/{total_pages}</b>.\n\n"
+        f"{items_text}"
     )
     if note:
         text += f"\n\n{note}"
-    text += "\n\nДоступные товары:"
     return text
 
 
-async def refresh_shop_message(callback: types.CallbackQuery, note: str | None = None):
-    await callback.message.edit_text(
-        await get_shop_text(callback.from_user.id, note=note),
+async def refresh_shop_message(callback: types.CallbackQuery, note: str | None = None, page: int = 0):
+    await send_or_edit_quiet(
+        callback,
+        await get_shop_text(callback.from_user.id, note=note, page=page),
         parse_mode="HTML",
-        reply_markup=build_shop_keyboard(),
+        reply_markup=build_shop_keyboard(page=page),
     )
+
+
+@dp.callback_query(F.data == "shop_page:noop")
+async def shop_page_noop(callback: types.CallbackQuery):
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("shop_page:"))
+async def shop_page_switch(callback: types.CallbackQuery):
+    if callback.data == "shop_page:noop":
+        return await callback.answer()
+    try:
+        page = max(0, int(callback.data.split(":", 1)[1]))
+    except (ValueError, IndexError):
+        return await callback.answer("Некорректная страница.", show_alert=True)
+
+    await refresh_shop_message(callback, page=page)
+    await callback.answer()
 
 
 async def try_buy_badge(user_id: int, badge_name: str, price: int) -> tuple[bool, str]:
@@ -2345,31 +2419,34 @@ async def try_buy_badge(user_id: int, badge_name: str, price: int) -> tuple[bool
         return True, f"Вы успешно приобрели значок {badge_name}!"
 
 
-@dp.callback_query(F.data == "buy_lootbox")
+@dp.callback_query(F.data.startswith("buy_lootbox"))
 async def shop_buy_lootbox_cb(callback: types.CallbackQuery):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     ok, text = await purchase_and_roll_lootbox(callback.from_user.id)
     if not ok:
         return await callback.answer(f"Недостаточно монет! Нужно {LOOTBOX_PRICE}.", show_alert=True)
-    await refresh_shop_message(callback, note=text)
+    await refresh_shop_message(callback, note=text, page=page)
     await callback.answer("Лутбокс открыт!")
 
-@dp.callback_query(F.data == "buy_title")
+@dp.callback_query(F.data.startswith("buy_title"))
 async def shop_buy_title_cb(callback: types.CallbackQuery, state: FSMContext):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     stats = await get_user_stats(callback.from_user.id)
     balance = stats[7] if stats else 0
     if balance < 500:
         return await callback.answer("Недостаточно монет! Нужно 500.", show_alert=True)
         
     await state.set_state(ShopBuyTitle.waiting_for_title)
-    await state.update_data(chat_id=callback.message.chat.id)
+    await state.update_data(chat_id=callback.message.chat.id, shop_page=page)
     await callback.message.edit_text("👑 Введите ваш новый титул (до 20 символов):", reply_markup=None)
 
 @dp.message(ShopBuyTitle.waiting_for_title)
 async def shop_process_title(message: types.Message, state: FSMContext):
     data = await state.get_data()
     chat_id = data.get("chat_id")
+    page = int(data.get("shop_page", 0) or 0)
     if chat_id != message.chat.id:
         return
         
@@ -2391,11 +2468,20 @@ async def shop_process_title(message: types.Message, state: FSMContext):
         await db.commit()
         
     await state.clear()
-    await message.answer(f"🎉 Вы успешно купили титул <b>{escape_html_text(title)}</b>!", parse_mode="HTML")
+    await message.answer(
+        await get_shop_text(
+            message.from_user.id,
+            note=f"🎉 Вы успешно купили титул <b>{escape_html_text(title)}</b>!",
+            page=page,
+        ),
+        parse_mode="HTML",
+        reply_markup=build_shop_keyboard(page=page),
+    )
 
-@dp.callback_query(F.data == "buy_hidden")
+@dp.callback_query(F.data.startswith("buy_hidden"))
 async def shop_buy_hidden_cb(callback: types.CallbackQuery):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     stats = await get_user_stats(callback.from_user.id)
     balance = stats[7] if stats else 0
     if balance < 1000:
@@ -2406,22 +2492,24 @@ async def shop_buy_hidden_cb(callback: types.CallbackQuery):
         if cursor.rowcount == 0:
             return await callback.answer("Недостаточно монет! Нужно 1000.", show_alert=True)
         await db.commit()
-    await refresh_shop_message(callback, note="👻 Ваша статистика теперь скрыта из глобального топа!")
+    await refresh_shop_message(callback, note="👻 Ваша статистика теперь скрыта из глобального топа!", page=page)
     await callback.answer("Готово!")
 
-@dp.callback_query(F.data == "buy_badge_vip")
+@dp.callback_query(F.data.startswith("buy_badge_vip"))
 async def shop_buy_badge_vip_cb(callback: types.CallbackQuery):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     ok, text = await try_buy_badge(callback.from_user.id, "VIP 🌟", 2000)
     if not ok:
         return await callback.answer(text, show_alert=True)
-    await refresh_shop_message(callback, note=f"🎖️ {escape_html_text(text)}")
+    await refresh_shop_message(callback, note=f"🎖️ {escape_html_text(text)}", page=page)
     await callback.answer("Покупка успешна!")
 
 
-@dp.callback_query(F.data == "buy_shield")
+@dp.callback_query(F.data.startswith("buy_shield"))
 async def shop_buy_shield_cb(callback: types.CallbackQuery):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     user_id = callback.from_user.id
     price = 800
     async with aiosqlite.connect('manga.db') as db:
@@ -2439,13 +2527,14 @@ async def shop_buy_shield_cb(callback: types.CallbackQuery):
             (user_id, "consumable", "anti_rob_shield")
         )
         await db.commit()
-    await refresh_shop_message(callback, note="🛡️ Куплен щит от ограбления (1 заряд).")
+    await refresh_shop_message(callback, note="🛡️ Куплен щит от ограбления (1 заряд).", page=page)
     await callback.answer("Покупка успешна!")
 
 
-@dp.callback_query(F.data == "buy_xp_pack")
+@dp.callback_query(F.data.startswith("buy_xp_pack"))
 async def shop_buy_xp_pack_cb(callback: types.CallbackQuery):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     user_id = callback.from_user.id
     price = 500
     xp_amount = 120
@@ -2460,37 +2549,40 @@ async def shop_buy_xp_pack_cb(callback: types.CallbackQuery):
             await db.rollback()
             return await callback.answer(f"Недостаточно монет! Нужно {price}.", show_alert=True)
         await db.commit()
-    await refresh_shop_message(callback, note=f"✨ Вы получили +{xp_amount} XP.")
+    await refresh_shop_message(callback, note=f"✨ Вы получили +{xp_amount} XP.", page=page)
     await callback.answer("Покупка успешна!")
 
 
-@dp.callback_query(F.data == "buy_badge_moon")
+@dp.callback_query(F.data.startswith("buy_badge_moon"))
 async def shop_buy_badge_moon_cb(callback: types.CallbackQuery):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     ok, text = await try_buy_badge(callback.from_user.id, "🌙 Лунный знак", 700)
     if not ok:
         return await callback.answer(text, show_alert=True)
-    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}")
+    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}", page=page)
     await callback.answer("Покупка успешна!")
 
 
-@dp.callback_query(F.data == "buy_badge_cupid")
+@dp.callback_query(F.data.startswith("buy_badge_cupid"))
 async def shop_buy_badge_cupid_cb(callback: types.CallbackQuery):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     ok, text = await try_buy_badge(callback.from_user.id, "💘 Купидон", 900)
     if not ok:
         return await callback.answer(text, show_alert=True)
-    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}")
+    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}", page=page)
     await callback.answer("Покупка успешна!")
 
 
-@dp.callback_query(F.data == "buy_badge_flame")
+@dp.callback_query(F.data.startswith("buy_badge_flame"))
 async def shop_buy_badge_flame_cb(callback: types.CallbackQuery):
     if await check_action_cooldown(callback, "shop_buy"): return
+    _, page = _parse_shop_buy(callback.data)
     ok, text = await try_buy_badge(callback.from_user.id, "🔥 Пламя страсти", 1100)
     if not ok:
         return await callback.answer(text, show_alert=True)
-    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}")
+    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}", page=page)
     await callback.answer("Покупка успешна!")
 
 REGEX_DICE_GAMES = re.compile(r'(?i)^[/*\s]*(?:кости|кубик|dice|cube|дартс|darts|баскетбол|basketball|футбол|football|казино|casino|слоты|slots|слот|slot|боулинг|bowling)\b')
@@ -2507,7 +2599,7 @@ async def cmd_dice_games(message: types.Message):
     if is_casino_text:
         if await check_action_cooldown(message, "casino_cmd"): return
     else:
-        if await check_cd_and_warn(message, "iris_cmd", 3): return
+        if await check_action_cooldown(message, "iris_cmd"): return
 
     emoji = "🎲"
     if "дартс" in text or "darts" in text: emoji = "🎯"
@@ -2521,34 +2613,42 @@ async def cmd_dice_games(message: types.Message):
         bet_str = match.group(1) if match else None
         
         if not bet_str:
-            return await message.answer(
+            return await maybe_ephemeral_reply(
+                message,
                 "🎰 <b>Формат:</b> /казино [ставка] или /casino [bet]\n<i>Пример: /казино 100</i>",
-                parse_mode="HTML"
+                parse_mode="HTML",
+                delay=5,
             )
             
         try:
             bet = int(bet_str)
-            if bet <= 0: return await message.answer("❌ Ставка должна быть больше 0!")
+            if bet <= 0:
+                return await maybe_ephemeral_reply(message, "❌ Ставка должна быть больше 0!", delay=4)
         except ValueError:
-            return await message.answer("❌ Введите корректное число для ставки!")
+            return await maybe_ephemeral_reply(message, "❌ Введите корректное число для ставки!", delay=4)
 
         user_id = message.from_user.id
         stats = await get_user_stats(user_id)
         balance = stats[7]
         
         if balance < bet:
-            return await message.answer(f"❌ <b>Недостаточно средств!</b>\nВаш баланс: {balance} монет.", parse_mode="HTML")
+            return await maybe_ephemeral_reply(
+                message,
+                f"❌ <b>Недостаточно средств!</b>\nВаш баланс: {balance} монет.",
+                parse_mode="HTML",
+                delay=5,
+            )
             
         # Списываем ставку
         async with aiosqlite.connect('manga.db') as db:
             cursor = await db.execute('UPDATE users_stats SET balance = balance - ?, casino_played = casino_played + 1 WHERE user_id = ? AND balance >= ?', (bet, user_id, bet))
             if cursor.rowcount == 0:
-                return await message.answer(f"❌ <b>Недостаточно средств!</b>", parse_mode="HTML")
+                return await maybe_ephemeral_reply(message, "❌ <b>Недостаточно средств!</b>", parse_mode="HTML", delay=4)
             await db.commit()
             
         msg = await message.answer_dice(emoji="🎰")
         if message.chat.type in ["group", "supergroup"]:
-            asyncio.create_task(delete_after(msg, 30))
+            schedule_delete_once(msg, 30)
         await asyncio.sleep(2)
         
         val = msg.dice.value
@@ -2564,24 +2664,21 @@ async def cmd_dice_games(message: types.Message):
                 await db.commit()
             msg = await message.answer(f"🎉 <b>ДЖЕКПОТ!</b>\nВы выиграли <b>{win}</b> монет! 💰", parse_mode="HTML")
             if message.chat.type in ["group", "supergroup"]:
-                asyncio.create_task(delete_after(msg, 30))
+                schedule_delete_once(msg, 30)
         else:
             msg = await message.answer(f"💨 <b>Вы проиграли ставку...</b>\nУдача обязательно вернется! 🎰", parse_mode="HTML")
             if message.chat.type in ["group", "supergroup"]:
-                asyncio.create_task(delete_after(msg, 30))
+                schedule_delete_once(msg, 30)
             
     else:
-        dice_msg = await message.answer(f"🎲 <b>Бросаю {text.replace('/', '')}...</b>", parse_mode="HTML")
-        if message.chat.type in ["group", "supergroup"]:
-            asyncio.create_task(delete_after(dice_msg, 5))
         dice_msg = await message.answer_dice(emoji=emoji)
         if message.chat.type in ["group", "supergroup"]:
-            asyncio.create_task(delete_after(dice_msg, 30))
+            schedule_delete_once(dice_msg, 30)
 
 
 @dp.message(F.text & F.text.regexp(REGEX_RPS))
 async def cmd_rps(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
+    if await check_action_cooldown(message, "iris_cmd"): return
     match = REGEX_RPS.search(message.text)
     if not match:
         return await temp_reply(message, "❌ Формат: /кнб [камень|ножницы|бумага] или /rps [rock|paper|scissors]")
@@ -2600,7 +2697,7 @@ async def cmd_rps(message: types.Message):
         builder.row(types.InlineKeyboardButton(text="📄 Бумага", callback_data="rps_бумага"))
         msg = await message.answer("✊✌️✋ <b>Выбери свой ход:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
         if message.chat.type in ["group", "supergroup"]:
-            asyncio.create_task(delete_after(msg, 30))
+            schedule_delete_once(msg, 30)
         return
 
     # Если выбор передан текстом (сохраняем старую логику)
@@ -2628,7 +2725,7 @@ async def process_rps_logic(target: Union[types.Message, types.CallbackQuery], u
     if isinstance(target, types.Message):
         msg = await target.answer(text, parse_mode="HTML")
         if target.chat.type in ["group", "supergroup"]:
-            asyncio.create_task(delete_after(msg, 30))
+            schedule_delete_once(msg, 30)
     else:
         await target.message.edit_text(text, parse_mode="HTML")
 
@@ -2639,7 +2736,7 @@ async def callback_rps(callback: types.CallbackQuery):
 
 @dp.message(F.text & F.text.regexp(REGEX_MAGIC_BALL))
 async def cmd_magic_ball(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
+    if await check_action_cooldown(message, "iris_cmd"): return
     match = REGEX_MAGIC_BALL.search(message.text)
     if not match:
         return await temp_reply(message, "❌ Формат: /шар [вопрос] или ball [question]")
@@ -2656,7 +2753,7 @@ async def cmd_magic_ball(message: types.Message):
 
 @dp.message(F.text & F.text.regexp(REGEX_COMPATIBILITY))
 async def cmd_compatibility(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
+    if await check_action_cooldown(message, "iris_cmd"): return
     if not message.reply_to_message:
         return await message.answer("Ответьте на сообщение пользователя, чтобы узнать вашу совместимость!")
         
@@ -2679,7 +2776,7 @@ async def cmd_compatibility(message: types.Message):
 
 @dp.message(F.text & F.text.regexp(REGEX_ROULETTE))
 async def cmd_roulette(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 5): return
+    if await check_action_cooldown(message, "roulette"): return
     chance = random.randint(1, 6)
     if chance == 1:
         await message.answer("💥 <b>БАХ!</b> Вы словили пулю. (Помянем 🕯)", parse_mode="HTML")

@@ -24,6 +24,9 @@ _ADMINS_CACHE_TTL: float = 60.0
 _call_counter: list[int] = [0]
 _CLEANUP_EVERY: int = 50
 
+# Track pending delete tasks to avoid duplicate scheduling for same message
+_PENDING_DELETES: set[tuple[int, int]] = set()
+
 # Serialize git syncs to avoid concurrent commit/push races
 _GIT_SYNC_LOCK = asyncio.Lock()
 
@@ -149,6 +152,7 @@ async def check_cd_and_warn(
     chat_cd: int | None = None,
     silent_in_groups: bool = False,
     delete_source_on_cd: bool = False,
+    response_mode: str = "ephemeral",
 ) -> bool:
     if isinstance(event, types.CallbackQuery):
         chat = event.message.chat if event.message else None
@@ -185,21 +189,46 @@ async def check_cd_and_warn(
             pass
 
     if isinstance(event, types.CallbackQuery):
+        if response_mode == "silent" and silent_in_groups and is_group_chat:
+            await event.answer()
+            return True
         await event.answer(
             f"⏳ Подожди {cd} сек.",
-            show_alert=not silent_in_groups,
+            show_alert=(response_mode == "alert"),
         )
         return True
 
-    if silent_in_groups and is_group_chat:
+    if response_mode == "silent" and silent_in_groups and is_group_chat:
         return True
 
     msg = await event.answer(
         f"⏳ <b>Подожди!</b> Это действие остывает. Осталось {cd} сек.",
         parse_mode="HTML",
     )
-    asyncio.create_task(delete_after(msg, 3))
+    if response_mode == "ephemeral":
+        schedule_delete_once(msg, 3)
     return True
+
+
+def schedule_delete_once(message: types.Message, delay: int):
+    chat_id = getattr(getattr(message, "chat", None), "id", None)
+    message_id = getattr(message, "message_id", None)
+    if chat_id is None or message_id is None:
+        asyncio.create_task(delete_after(message, delay))
+        return
+
+    key = (chat_id, message_id)
+    if key in _PENDING_DELETES:
+        return
+    _PENDING_DELETES.add(key)
+
+    async def _runner():
+        try:
+            await delete_after(message, delay)
+        finally:
+            _PENDING_DELETES.discard(key)
+
+    asyncio.create_task(_runner())
 
 
 async def delete_after(message: types.Message, delay: int):
@@ -214,7 +243,32 @@ async def delete_after(message: types.Message, delay: int):
 
 async def temp_reply(message: types.Message, text: str, delay: int = 5, **kwargs):
     msg = await message.answer(text, **kwargs)
-    asyncio.create_task(delete_after(msg, delay))
+    schedule_delete_once(msg, delay)
+
+
+async def maybe_ephemeral_reply(
+    target: Union[types.Message, types.CallbackQuery],
+    text: str,
+    delay: int = 3,
+    **kwargs,
+):
+    if isinstance(target, types.CallbackQuery):
+        await target.answer(text, show_alert=False)
+        return None
+
+    msg = await target.answer(text, **kwargs)
+    schedule_delete_once(msg, delay)
+    return msg
+
+
+async def send_or_edit_quiet(
+    target: Union[types.Message, types.CallbackQuery],
+    text: str,
+    **kwargs,
+) -> types.Message:
+    if isinstance(target, types.CallbackQuery):
+        return await safe_edit_or_reply(target, text, **kwargs)
+    return await target.answer(text, **kwargs)
 
 
 def validate_telegram_data(init_data: str, bot_token: str) -> dict | None:

@@ -2,6 +2,7 @@
 import html
 import re
 from aiogram import Router, types, F
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import Union
 import time
 import asyncio
@@ -129,6 +130,12 @@ from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply
 MAX_GROUP_TARGETS = 5
 
 
+def build_rp_gif_keyboard(owner_id: int) -> types.InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🙈 Скрыть GIF", callback_data=f"rp_hide_gif:{owner_id}")
+    return builder.as_markup()
+
+
 async def extract_mentioned_targets(message: types.Message) -> list[tuple[int, bool, str]]:
     """Resolve @mentions and text_mention entities to unique target tuples: (id, is_bot, mention_html)."""
     if not message.text or not message.entities:
@@ -156,6 +163,56 @@ async def extract_mentioned_targets(message: types.Message) -> list[tuple[int, b
         targets[uid] = (is_bot, mention_html)
 
     return [(uid, is_bot, mention_html) for uid, (is_bot, mention_html) in targets.items()]
+
+
+async def can_manage_rp_hide(callback: types.CallbackQuery, owner_id: int) -> bool:
+    uid = callback.from_user.id
+    if uid == owner_id:
+        return True
+
+    admins = await get_admins()
+    if uid in admins:
+        return True
+
+    if callback.message and callback.message.chat.type in ["group", "supergroup"]:
+        try:
+            member = await callback.bot.get_chat_member(callback.message.chat.id, uid)
+            if member.status in ["creator", "administrator"]:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+@rp_router.callback_query(F.data.startswith("rp_hide_gif:"))
+async def rp_hide_gif_callback(callback: types.CallbackQuery):
+    try:
+        owner_id = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return await callback.answer("Некорректная кнопка.", show_alert=True)
+
+    if not await can_manage_rp_hide(callback, owner_id):
+        return await callback.answer("Только автор команды или админ может скрыть GIF.", show_alert=True)
+
+    msg = callback.message
+    if not msg or not msg.animation:
+        return await callback.answer("Здесь нет GIF для скрытия.", show_alert=True)
+    if msg.animation.has_spoiler:
+        return await callback.answer("GIF уже скрыта 🙈")
+
+    try:
+        await msg.edit_media(
+            media=types.InputMediaAnimation(
+                media=msg.animation.file_id,
+                caption=msg.caption or "",
+                parse_mode="HTML",
+                has_spoiler=True,
+            ),
+            reply_markup=None,
+        )
+        await callback.answer("GIF скрыта.")
+    except Exception:
+        await callback.answer("Не получилось скрыть GIF. Попробуйте позже.", show_alert=True)
 
 @rp_router.message(F.text & F.text.regexp(REGEX_RP))
 async def rp_commands(message: types.Message):
@@ -222,6 +279,12 @@ async def rp_commands(message: types.Message):
         
     gif_url = await get_rp_gif(action_key)
     if gif_url:
-        await message.answer_animation(animation=gif_url, caption=caption, parse_mode="HTML")
+        await message.answer_animation(
+            animation=gif_url,
+            caption=caption,
+            parse_mode="HTML",
+            has_spoiler=(action_key in RP_18PLUS),
+            reply_markup=build_rp_gif_keyboard(user1.id),
+        )
     else:
         await message.answer(caption, parse_mode="HTML")
