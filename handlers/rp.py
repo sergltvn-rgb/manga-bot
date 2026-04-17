@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import html
 import re
+import logging
 from aiogram import Router, types, F
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from typing import Union
@@ -200,18 +201,52 @@ async def rp_hide_gif_callback(callback: types.CallbackQuery):
     if msg.animation.has_spoiler:
         return await callback.answer("GIF уже скрыта 🙈")
 
+    caption_text = msg.caption or ""
     try:
-        await callback.bot.send_animation(
+        # 1) Preferred path: hide current media in-place (keeps message position).
+        await msg.edit_media(
+            media=types.InputMediaAnimation(
+                media=msg.animation.file_id,
+                caption=caption_text,
+                has_spoiler=True,
+            ),
+            reply_markup=None,
+        )
+        return await callback.answer("GIF скрыта.")
+    except Exception as e:
+        # 2) Fallback: resend as spoiler and delete old message.
+        logging.warning(f"rp_hide_gif: edit_media failed, fallback to resend. err={e}")
+
+    try:
+        sent = await callback.bot.send_animation(
             chat_id=msg.chat.id,
             animation=msg.animation.file_id,
-            caption=msg.caption or "",
-            parse_mode="HTML",
+            caption=caption_text,
             has_spoiler=True,
-            message_thread_id=getattr(msg, "message_thread_id", None),
         )
+        try:
+            await msg.delete()
+        except Exception as de:
+            logging.warning(f"rp_hide_gif: old message delete failed after resend. err={de}")
+        return await callback.answer("GIF скрыта.")
+    except Exception as e2:
+        logging.warning(f"rp_hide_gif: resend spoiler failed, fallback to text. err={e2}")
+
+    try:
+        # 3) Last-resort fallback: remove GIF and keep only text.
         await msg.delete()
-        await callback.answer("GIF скрыта.")
-    except Exception:
+    except Exception as de2:
+        logging.warning(f"rp_hide_gif: delete for text fallback failed. err={de2}")
+        return await callback.answer("Не получилось скрыть GIF. Попробуйте позже.", show_alert=True)
+
+    try:
+        text_msg = "🙈 GIF скрыта."
+        if caption_text:
+            text_msg += f"\n\n{caption_text}"
+        await callback.bot.send_message(chat_id=msg.chat.id, text=text_msg)
+        await callback.answer("GIF скрыта (текстовый режим).")
+    except Exception as e3:
+        logging.warning(f"rp_hide_gif: text fallback send failed. err={e3}")
         await callback.answer("Не получилось скрыть GIF. Попробуйте позже.", show_alert=True)
 
 @rp_router.message(F.text & F.text.regexp(REGEX_RP))
