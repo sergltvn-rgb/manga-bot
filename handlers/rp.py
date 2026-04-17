@@ -201,15 +201,15 @@ async def rp_hide_gif_callback(callback: types.CallbackQuery):
         return await callback.answer("GIF уже скрыта 🙈")
 
     try:
-        await msg.edit_media(
-            media=types.InputMediaAnimation(
-                media=msg.animation.file_id,
-                caption=msg.caption or "",
-                parse_mode="HTML",
-                has_spoiler=True,
-            ),
-            reply_markup=None,
+        await callback.bot.send_animation(
+            chat_id=msg.chat.id,
+            animation=msg.animation.file_id,
+            caption=msg.caption or "",
+            parse_mode="HTML",
+            has_spoiler=True,
+            message_thread_id=getattr(msg, "message_thread_id", None),
         )
+        await msg.delete()
         await callback.answer("GIF скрыта.")
     except Exception:
         await callback.answer("Не получилось скрыть GIF. Попробуйте позже.", show_alert=True)
