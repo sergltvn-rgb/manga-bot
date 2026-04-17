@@ -134,6 +134,7 @@ REGEX_SLOT = re.compile(rf'(?i)^[/*\s]*(?:казино|casino|слоты|slots|�
 REGEX_ROB = re.compile(r'(?i)^[/*\s]*(?:украсть|ограбить|rob)\b')
 REGEX_FEED_HAREM = re.compile(rf'(?i)^[/*\s]*(?:feed|harem\s+feed|harem_feed|покорми\s+гарем|покормить\s+гарем){BOT_CMD_MENTION}\s*$')
 REGEX_PET_HAREM = re.compile(rf'(?i)^[/*\s]*(?:pet|harem\s+pet|harem_pet|погладь\s+гарем|погладить\s+гарем){BOT_CMD_MENTION}\s*$')
+REGEX_PAY = re.compile(rf'(?i)^[/*\s]*(?:pay|донат){BOT_CMD_MENTION}\s+(?:(@[A-Za-z0-9_]{{5,}})\s+)?(\d+)\s*$')
 
 ACTIVE_DROPS = {} # {chat_id: reward}
 
@@ -227,7 +228,16 @@ CONTENT_TYPES = {
 # ==============================================================================
 # БЛОК 2: АНТИСПАМ И КУЛДАУНЫ
 # ==============================================================================
-from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply, run_git_sync, safe_edit_or_reply, validate_telegram_data
+from utils import (
+    is_on_cooldown,
+    check_cd_and_warn,
+    delete_after,
+    temp_reply,
+    run_git_sync,
+    safe_edit_or_reply,
+    validate_telegram_data,
+    set_cooldown,
+)
 
 
 # ==============================================================================
@@ -488,6 +498,7 @@ _REPLY_KB_TEXTS = {"📖 Читать", "🎨 Арты", "🤖 ИИ чаты", "
 # Все регулярки игр/команд, которые не должны перехватываться ИИ
 _GAME_REGEXES = [
     REGEX_START, REGEX_HELP, REGEX_SHOP, REGEX_DAILY, REGEX_LOOTBOX, REGEX_REF, REGEX_ROB,
+    REGEX_PAY,
     REGEX_HAREM_ADD, REGEX_HAREM_REMOVE, REGEX_FEED_HAREM, REGEX_PET_HAREM, REGEX_BOTTLE,
     REGEX_INFA, REGEX_RANDOM, REGEX_CHOOSE, REGEX_ALYA_CHOOSE, REGEX_COIN,
     REGEX_DICE, REGEX_MARRY, REGEX_DIVORCE, REGEX_MARRIAGES, REGEX_PROFILE,
@@ -918,11 +929,13 @@ HELP_CATEGORIES = {
         "/help — Меню помощи\n"
         "/profile — Ваш профиль (ачивки, монеты, титул)\n"
         "/stats — Топ беседы\n"
-        "/shop — Магазин (покупка титулов и иммунитета)"
+        "/pay (/донат) — Передать монеты другому\n"
+        "/shop — Магазин (утилиты и косметика)"
     ),
     "rp": ("🎭 РП и Браки",
         "<b>РП-действия (реплаем, можно с текстом):</b>\n"
-        "<i>обнять, поцеловать, кусь, ударить, погладить, пнуть, лизнуть, убить, воскресить, пожать, пощекотать, тыкнуть, покормить, прижаться, станцевать</i> и др.\n\n"
+        "<i>обнять, поцеловать, кусь, ударить, погладить, пнуть, лизнуть, убить, воскресить, пожать, пощекотать, тыкнуть, покормить, прижаться, станцевать</i> и др.\n"
+        "Можно по реплаю или через упоминания: <code>обнять @user1 @user2</code>\n\n"
         "<b>Браки:</b>\n"
         "/marry (реплаем) — Предложить брак\n"
         "/divorce — Драматичный развод\n"
@@ -941,7 +954,6 @@ HELP_CATEGORIES = {
     ),
     "ai": ("🤖 ИИ",
         "/бутылочка — ИИ-игра в бутылочку\n"
-        "/шип — ИИ-шипперинг участников\n"
         "/аля выбери [А] или [Б]\n"
         "Напиши <i>\"аля [текст]\"</i> или <i>\"масачика [текст]\"</i> для общения."
     )
@@ -1228,43 +1240,54 @@ async def cmd_daily(message: types.Message):
         parse_mode="HTML"
     )
 
-@dp.message(F.text & F.text.regexp(REGEX_LOOTBOX))
-@dp.message(Command("lootbox"))
-async def cmd_lootbox(message: types.Message):
-    user_id = message.from_user.id
-    stats = await get_user_stats(user_id)
-    balance = stats[7]
-    
-    async with aiosqlite.connect('manga.db') as db:
-        cursor = await db.execute('UPDATE users_stats SET balance = balance - 300 WHERE user_id = ? AND balance >= 300', (user_id,))
-        if cursor.rowcount == 0:
-            return await message.answer("❌ У вас недостаточно монет! Лутбокс стоит <b>300</b> монет.", parse_mode="HTML")
-        await db.commit()
-        
-    res = random.random()
-    if res < 0.5:
-        msg = await message.answer("📦 <b>Лутбокс оказался пустым...</b> 😢\nПопробуйте в следующий раз!", parse_mode="HTML")
-        asyncio.create_task(delete_after(msg, 30))
-    elif res < 0.8:
+LOOTBOX_PRICE = 300
+LOOTBOX_BADGES = ["💎 Алмаз", "🔥 Огонь", "🌟 Звезда", "🍀 Клевер", "🧿 Амулет"]
+LOOTBOX_TITLES = ["Бог Рандома", "Счастливчик", "Охотник за Сокровищами", "Легенда Чатбота"]
+
+
+async def roll_lootbox_reward(user_id: int) -> str:
+    """Roll lootbox reward with unified probabilities: 45/35/15/5."""
+    roll = random.random()
+    if roll < 0.45:
+        return "📦 <b>Лутбокс оказался пустым...</b> 😢\nПопробуйте в следующий раз!"
+
+    if roll < 0.80:
         coins = random.randint(300, 700)
         async with aiosqlite.connect('manga.db') as db:
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (coins, user_id))
             await db.commit()
-        msg = await message.answer(f"📦 <b>Лутбокс!</b>\n\nВы нашли мешочек с монетами: <b>{coins}</b> монет! 💰", parse_mode="HTML")
-        asyncio.create_task(delete_after(msg, 30))
-    elif res < 0.95:
-        badges = ["💎 Алмаз", "🔥 Огонь", "🌟 Звезда", "🍀 Клевер", "🧿 Амулет"]
-        badge = random.choice(badges)
+        return f"📦 <b>Лутбокс!</b>\n\nВы нашли мешочек с монетами: <b>{coins}</b> монет! 💰"
+
+    if roll < 0.95:
+        badge = random.choice(LOOTBOX_BADGES)
         await add_to_inventory(user_id, "badge", badge)
-        msg = await message.answer(f"📦 <b>Лутбокс!</b>\n\nВы получили редкий значок: <b>{badge}</b>! 🏅", parse_mode="HTML")
-        asyncio.create_task(delete_after(msg, 30))
-    else:
-        titles = ["Бог Рандома", "Счастливчик", "Охотник за Сокровищами", "Легенда Чатбота"]
-        title = random.choice(titles)
-        async with aiosqlite.connect('manga.db') as db:
-            await db.execute('UPDATE users_stats SET custom_title = ? WHERE user_id = ?', (title, user_id))
-            await db.commit()
-        msg = await message.answer(f"📦 <b>Лутбокс!</b>\n\nЭПИЧЕСУИЙ ВЫИГРЫШ! Вы получили уникальный титул: <b>{title}</b>! 👑", parse_mode="HTML")
+        return f"📦 <b>Лутбокс!</b>\n\nВы получили редкий значок: <b>{badge}</b>! 🏅"
+
+    title = random.choice(LOOTBOX_TITLES)
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('UPDATE users_stats SET custom_title = ? WHERE user_id = ?', (title, user_id))
+        await db.commit()
+    return f"📦 <b>Лутбокс!</b>\n\nЭПИЧЕСКИЙ ВЫИГРЫШ! Вы получили уникальный титул: <b>{title}</b>! 👑"
+
+
+async def purchase_and_roll_lootbox(user_id: int) -> tuple[bool, str]:
+    async with aiosqlite.connect('manga.db') as db:
+        cursor = await db.execute(
+            'UPDATE users_stats SET balance = balance - ? WHERE user_id = ? AND balance >= ?',
+            (LOOTBOX_PRICE, user_id, LOOTBOX_PRICE)
+        )
+        if cursor.rowcount == 0:
+            return False, f"❌ У вас недостаточно монет! Лутбокс стоит <b>{LOOTBOX_PRICE}</b> монет."
+        await db.commit()
+
+    return True, await roll_lootbox_reward(user_id)
+
+
+@dp.message(F.text & F.text.regexp(REGEX_LOOTBOX))
+async def cmd_lootbox(message: types.Message):
+    ok, text = await purchase_and_roll_lootbox(message.from_user.id)
+    msg = await message.answer(text, parse_mode="HTML")
+    if ok and message.chat.type in ["group", "supergroup"]:
         asyncio.create_task(delete_after(msg, 30))
 
 # --- Phase 3: Интерактивный гарем ---
@@ -1413,6 +1436,95 @@ async def cmd_ref(message: types.Message):
     )
     await message.answer(text, parse_mode="HTML")
 
+
+@dp.message(F.text & F.text.regexp(REGEX_PAY))
+async def cmd_pay(message: types.Message):
+    if await check_cd_and_warn(message, "pay", 3): return
+    match = REGEX_PAY.search(message.text or "")
+    if not match:
+        return await message.answer(
+            "❌ <b>Формат:</b>\n"
+            "• reply: <code>/pay 1500</code>\n"
+            "• mention: <code>/pay @username 1500</code>",
+            parse_mode="HTML",
+        )
+
+    mention = match.group(1)
+    amount = int(match.group(2))
+    min_amount, max_amount = 100, 50000
+    if amount < min_amount or amount > max_amount:
+        return await message.answer(
+            f"❌ Сумма перевода должна быть от <b>{min_amount}</b> до <b>{max_amount}</b> монет.",
+            parse_mode="HTML",
+        )
+
+    sender_id = message.from_user.id
+    target_id = None
+    target_username = None
+    target_first_name = None
+    target_is_bot = False
+
+    if mention:
+        try:
+            target_chat = await bot.get_chat(mention)
+        except Exception:
+            return await message.answer(
+                "❌ Не удалось найти пользователя по @username.\n"
+                "Попробуйте сделать перевод ответом на сообщение пользователя.",
+            )
+        if getattr(target_chat, "type", "") != "private":
+            return await message.answer("❌ Перевод доступен только пользователям (не каналам/чатам).")
+        target_id = target_chat.id
+        target_username = getattr(target_chat, "username", None)
+        target_first_name = getattr(target_chat, "first_name", None) or getattr(target_chat, "title", None)
+        target_is_bot = bool(getattr(target_chat, "is_bot", False))
+    else:
+        if not message.reply_to_message:
+            return await message.answer(
+                "❌ Укажите получателя: ответьте на сообщение или используйте <code>@username</code>.",
+                parse_mode="HTML",
+            )
+        target_user = message.reply_to_message.from_user
+        target_id = target_user.id
+        target_username = target_user.username
+        target_first_name = target_user.first_name
+        target_is_bot = target_user.is_bot
+
+    if target_id == sender_id:
+        return await message.answer("🚷 Нельзя перевести монеты самому себе.")
+    if target_is_bot:
+        return await message.answer("🤖 Ботам переводы недоступны.")
+
+    fee = max(1, round(amount * 0.05))
+    receive_amount = amount - fee
+    if receive_amount <= 0:
+        return await message.answer("❌ Слишком маленькая сумма перевода с учетом комиссии.")
+
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('BEGIN IMMEDIATE')
+        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (sender_id,))
+        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (target_id,))
+        cursor = await db.execute(
+            'UPDATE users_stats SET balance = balance - ? WHERE user_id = ? AND balance >= ?',
+            (amount, sender_id, amount)
+        )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            return await message.answer("❌ Недостаточно монет для перевода.")
+        await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (receive_amount, target_id))
+        await db.commit()
+
+    target_label = format_user_tag(target_username, target_first_name, target_id)
+    await message.answer(
+        f"💸 <b>Перевод выполнен</b>\n"
+        f"Получатель: {target_label}\n"
+        f"Сумма: <b>{amount}</b>\n"
+        f"Комиссия (5%): <b>{fee}</b>\n"
+        f"Зачислено: <b>{receive_amount}</b>",
+        parse_mode="HTML"
+    )
+
+
 @dp.message(F.text & F.text.regexp(REGEX_ROB))
 async def cmd_rob(message: types.Message):
     if not message.reply_to_message:
@@ -1427,7 +1539,20 @@ async def cmd_rob(message: types.Message):
     if target.is_bot:
         return await message.answer("🤖 Роботы не носят с собой кошельки!")
         
-    if await check_cd_and_warn(message, "rob", 30): return
+    if await check_cd_and_warn(message, "rob", 30, ignore_admin_bypass=True): return
+
+    victim_cd = await is_on_cooldown(
+        target.id,
+        "rob_victim",
+        60,
+        ignore_admin_bypass=True,
+        touch=False,
+    )
+    if victim_cd:
+        return await message.answer(
+            f"🛡️ {target_label} под защитой от ограбления еще <b>{victim_cd}</b> сек.",
+            parse_mode="HTML",
+        )
     
     target_stats = await get_user_stats(target.id)
     target_balance = target_stats[7]
@@ -1437,10 +1562,6 @@ async def cmd_rob(message: types.Message):
         
     # Определяем шанс успеха
     success_chance = 0.30
-    if target.id == 6210312655:
-        success_chance = 0.05
-    elif initiator.id == 6210312655:
-        success_chance = 0.95
         
     # Шанс успеха
     if random.random() < success_chance:
@@ -1453,6 +1574,22 @@ async def cmd_rob(message: types.Message):
             await db.execute('BEGIN IMMEDIATE')
             await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (target.id,))
             await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (initiator.id,))
+            async with db.execute(
+                'SELECT id FROM user_inventory WHERE user_id = ? AND item_type = ? AND item_data = ? LIMIT 1',
+                (target.id, "consumable", "anti_rob_shield")
+            ) as cursor:
+                shield_row = await cursor.fetchone()
+            if shield_row:
+                await db.execute('DELETE FROM user_inventory WHERE id = ?', (shield_row[0],))
+                await db.commit()
+                msg = await message.answer(
+                    f"🛡️ <b>Щит сработал!</b>\n{target_label} блокирует попытку ограбления и теряет 1 заряд щита.",
+                    parse_mode="HTML"
+                )
+                if message.chat.type in ["group", "supergroup"]:
+                    asyncio.create_task(delete_after(msg, 30))
+                return
+
             async with db.execute('SELECT balance FROM users_stats WHERE user_id = ?', (target.id,)) as cursor:
                 row = await cursor.fetchone()
             current_target_balance = row[0] if row and row[0] is not None else 0
@@ -1463,6 +1600,7 @@ async def cmd_rob(message: types.Message):
             await db.execute('UPDATE users_stats SET balance = MAX(0, balance - ?) WHERE user_id = ?', (amount, target.id))
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (amount, initiator.id))
             await db.commit()
+        set_cooldown(target.id, "rob_victim", 60)
             
         success_templates = [
             "🥷 <b>Успешная кража!</b>\nТы незаметно вытащил <b>{amount} монет</b> из кармана {target}.",
@@ -1514,12 +1652,18 @@ async def callback_inventory(callback: types.CallbackQuery):
         items.append(f"👑 Кастомный титул: <b>{escape_html_text(custom_title)}</b>")
         
     db_items = await get_user_inventory(target_user_id)
+    shield_charges = 0
     for itype, idata in db_items:
+        if itype == "consumable" and idata == "anti_rob_shield":
+            shield_charges += 1
+            continue
         safe_idata = escape_html_text(idata)
         if itype == "badge":
             items.append(f"🏅 Значок: <b>{safe_idata}</b>")
         else:
             items.append(f"📦 <b>{safe_idata}</b>")
+    if shield_charges > 0:
+        items.append(f"🛡️ Щит от ограбления: <b>{shield_charges}</b> заряд(а)")
         
     if not items:
         inv_text = "🎒 В вашем инвентаре пока пусто..."
@@ -1557,7 +1701,12 @@ async def callback_roast_profile(callback: types.CallbackQuery):
     wait_msg = await callback.message.answer("<i>Аля изучает твое досье...</i>", parse_mode="HTML")
     
     name = callback.from_user.first_name
-    hugs, kisses, bites, slaps, pats, m_count, s_count, balance, custom_title, is_hidden, casino_played, divorces_count = await get_user_stats(target_user_id)
+    (
+        hugs, kisses, bites, slaps, pats,
+        m_count, s_count, balance, custom_title, is_hidden,
+        casino_played, divorces_count, last_daily, daily_streak,
+        referred_by, xp, level_db
+    ) = await get_user_stats(target_user_id)
     
     partner_text = "Одинок"
     if callback.message.chat.type in ["group", "supergroup"]:
@@ -1575,7 +1724,18 @@ async def callback_roast_profile(callback: types.CallbackQuery):
         f"Обязательно в конце добавь свою истинную (смущающую или искреннюю) мысль по-русски в квадратных скобках: *[шепчет по-русски: \"...\"]*. Максимум 3-4 предложения."
     )
     
-    response = await ask_groq("Оцени меня!", system_prompt)
+    try:
+        response = await ask_groq("Оцени меня!", system_prompt)
+    except Exception as e:
+        logging.error(f"roast_profile: AI request failed for {target_user_id}: {e}")
+        try:
+            await wait_msg.delete()
+        except Exception:
+            pass
+        return await callback.message.answer(
+            "⚠️ Аля сейчас немного смущена и не может дать мнение. Попробуйте еще раз через минутку."
+        )
+
     await wait_msg.delete()
     await callback.message.answer(
         f"📋 <b>Мнение Али о {escape_html_text(name)}:</b>\n{escape_html_text(response)}",
@@ -2069,66 +2229,84 @@ async def bottle_spin(callback: types.CallbackQuery):
 async def cmd_shop(message: types.Message):
     if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
     
-    stats = await get_user_stats(message.from_user.id)
-    balance = stats[7] if stats else 0
-    
-    text = (
-        f"🛒 <b>Магазин Аля-бота</b>\n\n"
-        f"У вас <b>{balance}</b> монет.\n\n"
-        f"Доступные товары:"
+    msg = await message.answer(
+        await get_shop_text(message.from_user.id),
+        parse_mode="HTML",
+        reply_markup=build_shop_keyboard(),
     )
-    
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="🎁 Тайный Лутбокс (300 монет)", callback_data="buy_lootbox")],
-        [types.InlineKeyboardButton(text="👑 Кастомный титул (500 монет)", callback_data="buy_title")],
-        [types.InlineKeyboardButton(text="👻 Скрыть стату в топе (1000 монет)", callback_data="buy_hidden")],
-        [types.InlineKeyboardButton(text="🎖️ Значок VIP (2000 монет)", callback_data="buy_badge_vip")]
-    ])
-    
-    msg = await message.answer(text, parse_mode="HTML", reply_markup=kb)
     if message.chat.type in ["group", "supergroup"]:
         asyncio.create_task(delete_after(msg, 30))
 
-@dp.callback_query(F.data == "buy_lootbox")
-async def shop_buy_lootbox_cb(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
+
+def build_shop_keyboard() -> types.InlineKeyboardMarkup:
+    return types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text=f"🎁 Тайный Лутбокс ({LOOTBOX_PRICE} монет)", callback_data="buy_lootbox")],
+        [types.InlineKeyboardButton(text="👑 Кастомный титул (500 монет)", callback_data="buy_title")],
+        [types.InlineKeyboardButton(text="👻 Скрыть стату в топе (1000 монет)", callback_data="buy_hidden")],
+        [types.InlineKeyboardButton(text="🎖️ Значок VIP (2000 монет)", callback_data="buy_badge_vip")],
+        [types.InlineKeyboardButton(text="🛡️ Щит от ограбления (800 монет)", callback_data="buy_shield")],
+        [types.InlineKeyboardButton(text="✨ Пакет XP +120 (500 монет)", callback_data="buy_xp_pack")],
+        [types.InlineKeyboardButton(text="🌙 Значок «Лунный знак» (700)", callback_data="buy_badge_moon")],
+        [types.InlineKeyboardButton(text="💘 Значок «Купидон» (900)", callback_data="buy_badge_cupid")],
+        [types.InlineKeyboardButton(text="🔥 Значок «Пламя страсти» (1100)", callback_data="buy_badge_flame")],
+    ])
+
+
+async def get_shop_text(user_id: int, note: str | None = None) -> str:
     stats = await get_user_stats(user_id)
     balance = stats[7] if stats else 0
-    
-    async with aiosqlite.connect('manga.db') as db:
-        cursor = await db.execute('UPDATE users_stats SET balance = balance - 300 WHERE user_id = ? AND balance >= 300', (user_id,))
-        if cursor.rowcount == 0:
-            return await callback.answer("Недостаточно монет! Нужно 300.", show_alert=True)
-        await db.commit()
-    
-    # Логика Готчи
-    rnd = random.random()
-    if rnd < 0.50: # 50% нифига
-        res_text = "💨 К сожалению, лутбокс оказался пустым... Повезет в следующий раз!"
-        res_emoji = "😢"
-    elif rnd < 0.80: # 30% монеты (возврат или бонус)
-        reward = random.randint(50, 600)
-        async with aiosqlite.connect('manga.db') as db:
-            await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (reward, user_id))
-            await db.commit()
-        res_text = f"💰 Внутри вы нашли мешочек с монетами: <b>{reward}</b>!"
-        res_emoji = "🤑"
-    elif rnd < 0.95: # 15% значок
-        badges = ["🍀 Счастливчик", "📦 Коллекционер", "🦄 Редкий зверь", "🔮 Мистик"]
-        badge = random.choice(badges)
-        await add_to_inventory(user_id, "badge", badge)
-        res_text = f"🏅 Ого! Вам выпал редкий значок: <b>{badge}</b>!"
-        res_emoji = "✨"
-    else: # 5% Титул
-        titles = ["🎲 Мастер Азарта", "🎩 Джентльмен", "🦊 Хитрый Лис", "🌟 Сияющий"]
-        title = random.choice(titles)
-        async with aiosqlite.connect('manga.db') as db:
-            await db.execute('UPDATE users_stats SET custom_title = ? WHERE user_id = ?', (title, user_id))
-            await db.commit()
-        res_text = f"👑 НЕВЕРОЯТНО! Вы получили уникальный титул: <b>{title}</b>!"
-        res_emoji = "🔥"
+    text = (
+        f"🛒 <b>Магазин Аля-бота</b>\n\n"
+        f"У вас <b>{balance}</b> монет."
+    )
+    if note:
+        text += f"\n\n{note}"
+    text += "\n\nДоступные товары:"
+    return text
 
-    await callback.message.edit_text(f"{res_emoji} <b>Результат открытия лутбокса:</b>\n\n{res_text}", parse_mode="HTML", reply_markup=None)
+
+async def refresh_shop_message(callback: types.CallbackQuery, note: str | None = None):
+    await callback.message.edit_text(
+        await get_shop_text(callback.from_user.id, note=note),
+        parse_mode="HTML",
+        reply_markup=build_shop_keyboard(),
+    )
+
+
+async def try_buy_badge(user_id: int, badge_name: str, price: int) -> tuple[bool, str]:
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('BEGIN IMMEDIATE')
+        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
+        async with db.execute(
+            'SELECT 1 FROM user_inventory WHERE user_id = ? AND item_type = ? AND item_data = ?',
+            (user_id, "badge", badge_name)
+        ) as cursor:
+            if await cursor.fetchone():
+                await db.rollback()
+                return False, "У вас уже есть этот значок!"
+
+        cursor = await db.execute(
+            'UPDATE users_stats SET balance = balance - ? WHERE user_id = ? AND balance >= ?',
+            (price, user_id, price)
+        )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            return False, f"Недостаточно монет! Нужно {price}."
+        await db.execute(
+            'INSERT INTO user_inventory (user_id, item_type, item_data) VALUES (?, ?, ?)',
+            (user_id, "badge", badge_name)
+        )
+        await db.commit()
+        return True, f"Вы успешно приобрели значок {badge_name}!"
+
+
+@dp.callback_query(F.data == "buy_lootbox")
+async def shop_buy_lootbox_cb(callback: types.CallbackQuery):
+    ok, text = await purchase_and_roll_lootbox(callback.from_user.id)
+    if not ok:
+        return await callback.answer(f"Недостаточно монет! Нужно {LOOTBOX_PRICE}.", show_alert=True)
+    await refresh_shop_message(callback, note=text)
+    await callback.answer("Лутбокс открыт!")
 
 @dp.callback_query(F.data == "buy_title")
 async def shop_buy_title_cb(callback: types.CallbackQuery, state: FSMContext):
@@ -2180,52 +2358,86 @@ async def shop_buy_hidden_cb(callback: types.CallbackQuery):
         if cursor.rowcount == 0:
             return await callback.answer("Недостаточно монет! Нужно 1000.", show_alert=True)
         await db.commit()
-        
-    await callback.message.edit_text("👻 Ваша статистика теперь скрыта из глобального топа!", reply_markup=None)
+    await refresh_shop_message(callback, note="👻 Ваша статистика теперь скрыта из глобального топа!")
+    await callback.answer("Готово!")
 
 @dp.callback_query(F.data == "buy_badge_vip")
 async def shop_buy_badge_vip_cb(callback: types.CallbackQuery):
+    ok, text = await try_buy_badge(callback.from_user.id, "VIP 🌟", 2000)
+    if not ok:
+        return await callback.answer(text, show_alert=True)
+    await refresh_shop_message(callback, note=f"🎖️ {escape_html_text(text)}")
+    await callback.answer("Покупка успешна!")
+
+
+@dp.callback_query(F.data == "buy_shield")
+async def shop_buy_shield_cb(callback: types.CallbackQuery):
     user_id = callback.from_user.id
+    price = 800
     async with aiosqlite.connect('manga.db') as db:
         await db.execute('BEGIN IMMEDIATE')
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
-        async with db.execute(
-            'SELECT 1 FROM user_inventory WHERE user_id = ? AND item_type = ? AND item_data = ?',
-            (user_id, "badge", "VIP 🌟")
-        ) as cursor:
-            if await cursor.fetchone():
-                await db.rollback()
-                return await callback.answer("У вас уже есть этот значок!", show_alert=True)
-
         cursor = await db.execute(
-            'UPDATE users_stats SET balance = balance - 2000 WHERE user_id = ? AND balance >= 2000',
-            (user_id,)
+            'UPDATE users_stats SET balance = balance - ? WHERE user_id = ? AND balance >= ?',
+            (price, user_id, price)
         )
         if cursor.rowcount == 0:
             await db.rollback()
-            return await callback.answer("Недостаточно монет! Нужно 2000.", show_alert=True)
-
+            return await callback.answer(f"Недостаточно монет! Нужно {price}.", show_alert=True)
         await db.execute(
             'INSERT INTO user_inventory (user_id, item_type, item_data) VALUES (?, ?, ?)',
-            (user_id, "badge", "VIP 🌟")
+            (user_id, "consumable", "anti_rob_shield")
         )
         await db.commit()
+    await refresh_shop_message(callback, note="🛡️ Куплен щит от ограбления (1 заряд).")
+    await callback.answer("Покупка успешна!")
 
-    await callback.answer("Вы успешно приобрели значок VIP 🌟!", show_alert=True)
-    
-    # Update the shop message to reflect new balance
-    stats = await get_user_stats(user_id)
-    balance = stats[7] if stats else 0
-    kb = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="👑 Кастомный титул (500 монет)", callback_data="buy_title")],
-        [types.InlineKeyboardButton(text="👻 Скрыть стату в топе (1000 монет)", callback_data="buy_hidden")],
-        [types.InlineKeyboardButton(text="🎖️ Значок VIP (2000 монет)", callback_data="buy_badge_vip")]
-    ])
-    await callback.message.edit_text(
-        f"🛒 <b>Магазин Аля-бота</b>\n\nУ вас <b>{balance}</b> монет.\n\nДоступные товары:",
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+
+@dp.callback_query(F.data == "buy_xp_pack")
+async def shop_buy_xp_pack_cb(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    price = 500
+    xp_amount = 120
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute('BEGIN IMMEDIATE')
+        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
+        cursor = await db.execute(
+            'UPDATE users_stats SET balance = balance - ?, xp = xp + ? WHERE user_id = ? AND balance >= ?',
+            (price, xp_amount, user_id, price)
+        )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            return await callback.answer(f"Недостаточно монет! Нужно {price}.", show_alert=True)
+        await db.commit()
+    await refresh_shop_message(callback, note=f"✨ Вы получили +{xp_amount} XP.")
+    await callback.answer("Покупка успешна!")
+
+
+@dp.callback_query(F.data == "buy_badge_moon")
+async def shop_buy_badge_moon_cb(callback: types.CallbackQuery):
+    ok, text = await try_buy_badge(callback.from_user.id, "🌙 Лунный знак", 700)
+    if not ok:
+        return await callback.answer(text, show_alert=True)
+    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}")
+    await callback.answer("Покупка успешна!")
+
+
+@dp.callback_query(F.data == "buy_badge_cupid")
+async def shop_buy_badge_cupid_cb(callback: types.CallbackQuery):
+    ok, text = await try_buy_badge(callback.from_user.id, "💘 Купидон", 900)
+    if not ok:
+        return await callback.answer(text, show_alert=True)
+    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}")
+    await callback.answer("Покупка успешна!")
+
+
+@dp.callback_query(F.data == "buy_badge_flame")
+async def shop_buy_badge_flame_cb(callback: types.CallbackQuery):
+    ok, text = await try_buy_badge(callback.from_user.id, "🔥 Пламя страсти", 1100)
+    if not ok:
+        return await callback.answer(text, show_alert=True)
+    await refresh_shop_message(callback, note=f"🏅 {escape_html_text(text)}")
+    await callback.answer("Покупка успешна!")
 
 REGEX_DICE_GAMES = re.compile(r'(?i)^[/*\s]*(?:кости|кубик|dice|cube|дартс|darts|баскетбол|basketball|футбол|football|казино|casino|слоты|slots|слот|slot|боулинг|bowling)\b')
 
@@ -5010,6 +5222,7 @@ async def main():
         BotCommand(command="help", description="Список всех команд"),
         BotCommand(command="profile", description="Твой профиль"),
         BotCommand(command="stats", description="Твоя статистика"),
+        BotCommand(command="pay", description="Перевести монеты"),
         BotCommand(command="marry", description="Вступить в брак (реплай)"),
         BotCommand(command="divorce", description="Расторгнуть брак"),
         BotCommand(command="marriages", description="Топ пар")

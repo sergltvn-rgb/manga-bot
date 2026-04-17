@@ -44,10 +44,16 @@ def invalidate_admins_cache():
     _ADMINS_CACHE_TS = 0.0
 
 
-async def is_on_cooldown(user_id: int, action: str = "global", custom_cooldown: int = 30) -> int:
+async def is_on_cooldown(
+    user_id: int,
+    action: str = "global",
+    custom_cooldown: int = 30,
+    ignore_admin_bypass: bool = False,
+    touch: bool = True,
+) -> int:
     global _call_counter
 
-    if user_id in await _get_admins_cached():
+    if not ignore_admin_bypass and user_id in await _get_admins_cached():
         return 0
 
     now = time.time()
@@ -66,12 +72,28 @@ async def is_on_cooldown(user_id: int, action: str = "global", custom_cooldown: 
         if elapsed < cd:
             return int(cd - elapsed)
 
-    COOLDOWNS[key] = (now, custom_cooldown)
+    if touch:
+        COOLDOWNS[key] = (now, custom_cooldown)
     return 0
 
 
-async def check_cd_and_warn(event: Union[types.Message, types.CallbackQuery], action: str, custom_cd: int = 30) -> bool:
-    cd = await is_on_cooldown(event.from_user.id, action, custom_cd)
+def set_cooldown(user_id: int, action: str, custom_cooldown: int) -> None:
+    """Force-set cooldown for a user action."""
+    COOLDOWNS[f"{user_id}_{action}"] = (time.time(), custom_cooldown)
+
+
+async def check_cd_and_warn(
+    event: Union[types.Message, types.CallbackQuery],
+    action: str,
+    custom_cd: int = 30,
+    ignore_admin_bypass: bool = False,
+) -> bool:
+    cd = await is_on_cooldown(
+        event.from_user.id,
+        action,
+        custom_cd,
+        ignore_admin_bypass=ignore_admin_bypass,
+    )
     if cd:
         if isinstance(event, types.CallbackQuery):
             await event.answer(f"⏳ Остынь! Подожди {cd} сек.", show_alert=True)

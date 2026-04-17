@@ -39,10 +39,20 @@ RP_ACTIONS = {
     "секс": ("kisses", "🔞", "занялся(ась) сексом с"),
     "минет": ("kisses", "🔞", "сделал(а) минет"),
     "отсосать": ("kisses", "🔞", "отсосал(а) у"),
-    "сосать": ("kisses", "🔞", "отсосал(а) у")
+    "сосать": ("kisses", "🔞", "отсосал(а) у"),
+    "соблазнить": ("kisses", "🔞", "соблазнил(а)"),
+    "заняться любовью": ("kisses", "🔞", "страстно занялся(ась) любовью с"),
+    "жестко взять": ("kisses", "🔞", "жестко взял(а)"),
+    "поласкать": ("kisses", "🔞", "нежно поласкал(а)"),
+    "глубокий минет": ("kisses", "🔞", "сделал(а) глубокий минет"),
+    "сделать приятно": ("kisses", "🔞", "сделал(а) приятно")
 }
 
-RP_18PLUS = ["трахаться", "трахнуть", "секс", "минет", "отсосать", "сосать"]
+RP_18PLUS = [
+    "трахаться", "трахнуть", "секс", "минет", "отсосать", "сосать",
+    "соблазнить", "заняться любовью", "жестко взять", "поласкать",
+    "глубокий минет", "сделать приятно",
+]
 
 # Эндпоинты nekos.best для аниме-гифок
 NEKOS_ENDPOINTS = {
@@ -71,9 +81,17 @@ NEKOS_ENDPOINTS = {
 # Эндпоинты PurrBot (SFW / NSFW)
 PURR_ENDPOINTS = {
     "трахаться": "nsfw/fuck",
+    "трахнуть": "nsfw/fuck",
     "секс": "nsfw/fuck",
+    "соблазнить": "nsfw/fuck",
+    "заняться любовью": "nsfw/fuck",
+    "жестко взять": "nsfw/fuck",
     "минет": "nsfw/blowjob",
     "отсосать": "nsfw/blowjob",
+    "сосать": "nsfw/blowjob",
+    "поласкать": "nsfw/blowjob",
+    "глубокий минет": "nsfw/blowjob",
+    "сделать приятно": "nsfw/blowjob",
     "спать вместе": "sfw/lay",
 }
 
@@ -108,12 +126,42 @@ keys_sorted = sorted(RP_ACTIONS.keys(), key=len, reverse=True)
 REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(keys_sorted) + r')(?:\s+(.+))?$')
 
 from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply
+MAX_GROUP_TARGETS = 5
+
+
+async def extract_mentioned_targets(message: types.Message) -> list[tuple[int, bool, str]]:
+    """Resolve @mentions and text_mention entities to unique target tuples: (id, is_bot, mention_html)."""
+    if not message.text or not message.entities:
+        return []
+
+    targets: dict[int, tuple[bool, str]] = {}
+    mention_usernames: list[str] = []
+    for ent in message.entities:
+        if ent.type == "text_mention" and ent.user:
+            user = ent.user
+            targets[user.id] = (bool(user.is_bot), user.mention_html())
+        elif ent.type == "mention":
+            username = message.text[ent.offset:ent.offset + ent.length]
+            if username:
+                mention_usernames.append(username.lower())
+
+    for username in dict.fromkeys(mention_usernames):
+        try:
+            chat = await message.bot.get_chat(username)
+        except Exception:
+            continue
+        uid = getattr(chat, "id", None)
+        if uid is None:
+            continue
+        is_bot = bool(getattr(chat, "is_bot", False))
+        name = getattr(chat, "first_name", None) or getattr(chat, "username", None) or str(uid)
+        mention_html = f'<a href="tg://user?id={uid}">{html.escape(name, quote=False)}</a>'
+        targets[uid] = (is_bot, mention_html)
+
+    return [(uid, is_bot, mention_html) for uid, (is_bot, mention_html) in targets.items()]
 
 @rp_router.message(F.text & F.text.regexp(REGEX_RP))
 async def rp_commands(message: types.Message):
-    if not message.reply_to_message:
-        return await temp_reply(message, "ℹ️ Ответьте на сообщение другого пользователя!")
-        
     match = REGEX_RP.search(message.text)
     if not match: return
     action_key = match.group(1).lower()
@@ -125,18 +173,55 @@ async def rp_commands(message: types.Message):
         if message.from_user.id not in admins:
             return await temp_reply(message, "🔞 18+ действия доступны только администраторам бота!", delay=5)
 
-    user1, user2 = message.from_user, message.reply_to_message.from_user
-    if user1.id == user2.id: return await temp_reply(message, "Ты не можешь применить это на себе!")
-    if user2.is_bot: return await temp_reply(message, "Боты ничего не почувствуют 🤖")
-
     if await check_cd_and_warn(message, "rp_commands", 3): return
 
+    user1 = message.from_user
+    targets: list[tuple[int, bool, str]] = []
+    if message.reply_to_message:
+        user2 = message.reply_to_message.from_user
+        targets = [(user2.id, bool(user2.is_bot), user2.mention_html())]
+    else:
+        targets = await extract_mentioned_targets(message)
+        if not targets:
+            return await temp_reply(
+                message,
+                f"ℹ️ Ответьте на сообщение пользователя или укажите до {MAX_GROUP_TARGETS} @username."
+            )
+
+    unique_targets: list[tuple[int, bool, str]] = []
+    seen_ids: set[int] = set()
+    for uid, is_bot, mention_html in targets:
+        if uid in seen_ids:
+            continue
+        seen_ids.add(uid)
+        if uid == user1.id:
+            continue
+        if is_bot:
+            continue
+        unique_targets.append((uid, is_bot, mention_html))
+
+    if not unique_targets:
+        return await temp_reply(message, "Нужны реальные цели: не вы сами и не боты 🤖")
+    if len(unique_targets) > MAX_GROUP_TARGETS:
+        return await temp_reply(message, f"Слишком много целей. Максимум: {MAX_GROUP_TARGETS}.")
+
     stat_type, emoji, text_act = RP_ACTIONS[action_key]
-    await update_rp_stat(user1.id, stat_type)
+    for _ in unique_targets:
+        await update_rp_stat(user1.id, stat_type)
     
-    caption = f"{emoji} {user1.mention_html()} {text_act} {user2.mention_html()}"
+    if len(unique_targets) == 1:
+        caption = f"{emoji} {user1.mention_html()} {text_act} {unique_targets[0][2]}"
+    else:
+        targets_list = "\n".join(f"• {mention_html}" for _, _, mention_html in unique_targets)
+        caption = (
+            f"{emoji} {user1.mention_html()} применил(а) действие "
+            f"«{html.escape(action_key, quote=False)}» к группе:\n{targets_list}"
+        )
+
     if custom_text:
-        caption += f"\n💬 <i>«{html.escape(custom_text, quote=False)}»</i>"
+        cleaned_custom = re.sub(r'@\w+', '', custom_text).strip()
+        if cleaned_custom:
+            caption += f"\n💬 <i>«{html.escape(cleaned_custom, quote=False)}»</i>"
         
     gif_url = await get_rp_gif(action_key)
     if gif_url:
