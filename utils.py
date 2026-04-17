@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 import asyncio
 import hashlib
 import hmac
@@ -13,22 +13,30 @@ from database import get_admins
 
 
 # Cache for cooldowns: key -> (timestamp, cooldown_duration)
-COOLDOWNS: dict = {}
+COOLDOWNS: dict[str, tuple[float, int]] = {}
 
 # Admin cache with TTL to reduce DB reads
-_ADMINS_CACHE: set = set()
+_ADMINS_CACHE: set[int] = set()
 _ADMINS_CACHE_TS: float = 0.0
 _ADMINS_CACHE_TTL: float = 60.0
 
 # Periodic cleanup counters for COOLDOWNS
-_call_counter: list = [0]
+_call_counter: list[int] = [0]
 _CLEANUP_EVERY: int = 50
 
 # Serialize git syncs to avoid concurrent commit/push races
 _GIT_SYNC_LOCK = asyncio.Lock()
 
 
-async def _get_admins_cached() -> set:
+def _build_user_cd_key(user_id: int, action: str) -> str:
+    return f"u:{user_id}:{action}"
+
+
+def _build_chat_cd_key(chat_id: int, action: str) -> str:
+    return f"c:{chat_id}:{action}"
+
+
+async def _get_admins_cached() -> set[int]:
     """Return admins list using a short TTL cache."""
     global _ADMINS_CACHE, _ADMINS_CACHE_TS
     now = time.monotonic()
@@ -44,6 +52,34 @@ def invalidate_admins_cache():
     _ADMINS_CACHE_TS = 0.0
 
 
+def _cleanup_expired_cooldowns(now: float):
+    global _call_counter
+    _call_counter[0] += 1
+    if _call_counter[0] < _CLEANUP_EVERY:
+        return
+
+    _call_counter[0] = 0
+    expired = [k for k, (ts, cd) in COOLDOWNS.items() if now - ts > cd]
+    for key in expired:
+        COOLDOWNS.pop(key, None)
+
+
+def _check_key_cooldown(key: str, now: float, cooldown: int, touch: bool = True) -> int:
+    if cooldown <= 0:
+        return 0
+
+    state = COOLDOWNS.get(key)
+    if state:
+        ts, cd = state
+        elapsed = now - ts
+        if elapsed < cd:
+            return int(cd - elapsed)
+
+    if touch:
+        COOLDOWNS[key] = (now, cooldown)
+    return 0
+
+
 async def is_on_cooldown(
     user_id: int,
     action: str = "global",
@@ -51,35 +87,56 @@ async def is_on_cooldown(
     ignore_admin_bypass: bool = False,
     touch: bool = True,
 ) -> int:
-    global _call_counter
-
     if not ignore_admin_bypass and user_id in await _get_admins_cached():
         return 0
 
     now = time.time()
+    _cleanup_expired_cooldowns(now)
+    return _check_key_cooldown(
+        _build_user_cd_key(user_id, action),
+        now,
+        custom_cooldown,
+        touch=touch,
+    )
 
-    _call_counter[0] += 1
-    if _call_counter[0] >= _CLEANUP_EVERY:
-        _call_counter[0] = 0
-        expired = [k for k, (ts, cd) in COOLDOWNS.items() if now - ts > cd]
-        for k in expired:
-            COOLDOWNS.pop(k, None)
 
-    key = f"{user_id}_{action}"
-    if key in COOLDOWNS:
-        ts, cd = COOLDOWNS[key]
-        elapsed = now - ts
-        if elapsed < cd:
-            return int(cd - elapsed)
+async def is_on_scoped_cooldown(
+    user_id: int,
+    action: str,
+    user_cooldown: int = 0,
+    chat_id: int | None = None,
+    chat_cooldown: int = 0,
+    ignore_admin_bypass: bool = False,
+    touch: bool = True,
+) -> int:
+    if not ignore_admin_bypass and user_id in await _get_admins_cached():
+        return 0
 
-    if touch:
-        COOLDOWNS[key] = (now, custom_cooldown)
-    return 0
+    now = time.time()
+    _cleanup_expired_cooldowns(now)
+
+    user_remaining = _check_key_cooldown(
+        _build_user_cd_key(user_id, action),
+        now,
+        user_cooldown,
+        touch=touch,
+    )
+
+    chat_remaining = 0
+    if chat_id is not None and chat_cooldown > 0:
+        chat_remaining = _check_key_cooldown(
+            _build_chat_cd_key(chat_id, action),
+            now,
+            chat_cooldown,
+            touch=touch,
+        )
+
+    return max(user_remaining, chat_remaining)
 
 
 def set_cooldown(user_id: int, action: str, custom_cooldown: int) -> None:
     """Force-set cooldown for a user action."""
-    COOLDOWNS[f"{user_id}_{action}"] = (time.time(), custom_cooldown)
+    COOLDOWNS[_build_user_cd_key(user_id, action)] = (time.time(), custom_cooldown)
 
 
 async def check_cd_and_warn(
@@ -87,24 +144,62 @@ async def check_cd_and_warn(
     action: str,
     custom_cd: int = 30,
     ignore_admin_bypass: bool = False,
+    *,
+    user_cd: int | None = None,
+    chat_cd: int | None = None,
+    silent_in_groups: bool = False,
+    delete_source_on_cd: bool = False,
 ) -> bool:
-    cd = await is_on_cooldown(
-        event.from_user.id,
-        action,
-        custom_cd,
-        ignore_admin_bypass=ignore_admin_bypass,
-    )
-    if cd:
-        if isinstance(event, types.CallbackQuery):
-            await event.answer(f"⏳ Остынь! Подожди {cd} сек.", show_alert=True)
-        else:
-            msg = await event.answer(
-                f"⏳ <b>Подожди!</b> Это действие остывает. Осталось {cd} сек.",
-                parse_mode="HTML",
-            )
-            asyncio.create_task(delete_after(msg, 3))
+    if isinstance(event, types.CallbackQuery):
+        chat = event.message.chat if event.message else None
+    else:
+        chat = event.chat
+
+    is_group_chat = bool(chat and chat.type in ["group", "supergroup"])
+    chat_id = chat.id if chat else None
+
+    if user_cd is not None or chat_cd is not None:
+        cd = await is_on_scoped_cooldown(
+            user_id=event.from_user.id,
+            action=action,
+            user_cooldown=user_cd or 0,
+            chat_id=chat_id,
+            chat_cooldown=chat_cd or 0,
+            ignore_admin_bypass=ignore_admin_bypass,
+        )
+    else:
+        cd = await is_on_cooldown(
+            event.from_user.id,
+            action,
+            custom_cd,
+            ignore_admin_bypass=ignore_admin_bypass,
+        )
+
+    if not cd:
+        return False
+
+    if delete_source_on_cd and is_group_chat and isinstance(event, types.Message):
+        try:
+            await event.delete()
+        except Exception:
+            pass
+
+    if isinstance(event, types.CallbackQuery):
+        await event.answer(
+            f"⏳ Подожди {cd} сек.",
+            show_alert=not silent_in_groups,
+        )
         return True
-    return False
+
+    if silent_in_groups and is_group_chat:
+        return True
+
+    msg = await event.answer(
+        f"⏳ <b>Подожди!</b> Это действие остывает. Осталось {cd} сек.",
+        parse_mode="HTML",
+    )
+    asyncio.create_task(delete_after(msg, 3))
+    return True
 
 
 async def delete_after(message: types.Message, delay: int):

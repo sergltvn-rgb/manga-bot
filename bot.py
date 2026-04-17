@@ -139,6 +139,39 @@ REGEX_PAY = re.compile(rf'(?i)^[/*\s]*(?:pay|донат){BOT_CMD_MENTION}\s+(?:(
 
 ACTIVE_DROPS = {} # {chat_id: reward}
 
+COOLDOWN_RULES = {
+    # Heavy commands: strict hybrid anti-spam
+    "profile": {"user_cd": 600, "chat_cd": 20, "silent_in_groups": True, "delete_source_on_cd": True},
+    "shop": {"user_cd": 35, "chat_cd": 15, "silent_in_groups": True, "delete_source_on_cd": True},
+    "casino_cmd": {"user_cd": 20, "chat_cd": 8, "silent_in_groups": True, "delete_source_on_cd": True},
+    "stats": {"user_cd": 40, "chat_cd": 20, "silent_in_groups": True, "delete_source_on_cd": True},
+    "lootbox": {"user_cd": 20, "chat_cd": 10, "silent_in_groups": True, "delete_source_on_cd": True},
+    "pay": {"user_cd": 15, "chat_cd": 6, "silent_in_groups": True, "delete_source_on_cd": True},
+    # Shop callbacks: reduce button spam without noisy alerts
+    "shop_buy": {"user_cd": 2, "chat_cd": 1, "silent_in_groups": True},
+}
+
+
+async def check_action_cooldown(
+    event: Union[types.Message, types.CallbackQuery],
+    action: str,
+    *,
+    ignore_admin_bypass: bool = False,
+) -> bool:
+    rule = COOLDOWN_RULES.get(action)
+    if rule:
+        return await check_cd_and_warn(
+            event,
+            action,
+            ignore_admin_bypass=ignore_admin_bypass,
+            **rule,
+        )
+    return await check_cd_and_warn(
+        event,
+        action,
+        ignore_admin_bypass=ignore_admin_bypass,
+    )
+
 class NotifyUsers(StatesGroup):
     waiting_for_decision = State()
 
@@ -1286,6 +1319,7 @@ async def purchase_and_roll_lootbox(user_id: int) -> tuple[bool, str]:
 
 @dp.message(F.text & F.text.regexp(REGEX_LOOTBOX))
 async def cmd_lootbox(message: types.Message):
+    if await check_action_cooldown(message, "lootbox"): return
     ok, text = await purchase_and_roll_lootbox(message.from_user.id)
     msg = await message.answer(text, parse_mode="HTML")
     if ok and message.chat.type in ["group", "supergroup"]:
@@ -1410,7 +1444,7 @@ async def get_profile_content(chat_type: str, chat_id: int, user: types.User):
 
 @dp.message(F.text & F.text.regexp(REGEX_PROFILE))
 async def cmd_profile(message: types.Message):
-    if await check_cd_and_warn(message, "profile", 5): return
+    if await check_action_cooldown(message, "profile"): return
     text, markup = await get_profile_content(message.chat.type, message.chat.id, message.from_user)
     msg = await message.answer(text, parse_mode="HTML", reply_markup=markup)
     # Удаление отключено для сохранения интерактивных кнопок
@@ -1440,7 +1474,7 @@ async def cmd_ref(message: types.Message):
 
 @dp.message(F.text & F.text.regexp(REGEX_PAY))
 async def cmd_pay(message: types.Message):
-    if await check_cd_and_warn(message, "pay", 3): return
+    if await check_action_cooldown(message, "pay"): return
     match = REGEX_PAY.search(message.text or "")
     if not match:
         return await message.answer(
@@ -1756,7 +1790,7 @@ async def callback_roast_profile(callback: types.CallbackQuery):
 async def cmd_stats(message: types.Message):
     if message.chat.type == "private":
         return await message.answer("Статистика чата доступна только в группах.")
-    if await check_cd_and_warn(message, "stats", 10): return
+    if await check_action_cooldown(message, "stats"): return
     
     async with aiosqlite.connect('manga.db') as db:
         # Запрос с балансом
@@ -2238,6 +2272,7 @@ async def bottle_spin(callback: types.CallbackQuery):
 @dp.message(F.text & F.text.regexp(REGEX_SHOP))
 async def cmd_shop(message: types.Message):
     if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
+    if await check_action_cooldown(message, "shop"): return
     
     msg = await message.answer(
         await get_shop_text(message.from_user.id),
@@ -2312,6 +2347,7 @@ async def try_buy_badge(user_id: int, badge_name: str, price: int) -> tuple[bool
 
 @dp.callback_query(F.data == "buy_lootbox")
 async def shop_buy_lootbox_cb(callback: types.CallbackQuery):
+    if await check_action_cooldown(callback, "shop_buy"): return
     ok, text = await purchase_and_roll_lootbox(callback.from_user.id)
     if not ok:
         return await callback.answer(f"Недостаточно монет! Нужно {LOOTBOX_PRICE}.", show_alert=True)
@@ -2320,6 +2356,7 @@ async def shop_buy_lootbox_cb(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "buy_title")
 async def shop_buy_title_cb(callback: types.CallbackQuery, state: FSMContext):
+    if await check_action_cooldown(callback, "shop_buy"): return
     stats = await get_user_stats(callback.from_user.id)
     balance = stats[7] if stats else 0
     if balance < 500:
@@ -2358,6 +2395,7 @@ async def shop_process_title(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "buy_hidden")
 async def shop_buy_hidden_cb(callback: types.CallbackQuery):
+    if await check_action_cooldown(callback, "shop_buy"): return
     stats = await get_user_stats(callback.from_user.id)
     balance = stats[7] if stats else 0
     if balance < 1000:
@@ -2373,6 +2411,7 @@ async def shop_buy_hidden_cb(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "buy_badge_vip")
 async def shop_buy_badge_vip_cb(callback: types.CallbackQuery):
+    if await check_action_cooldown(callback, "shop_buy"): return
     ok, text = await try_buy_badge(callback.from_user.id, "VIP 🌟", 2000)
     if not ok:
         return await callback.answer(text, show_alert=True)
@@ -2382,6 +2421,7 @@ async def shop_buy_badge_vip_cb(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "buy_shield")
 async def shop_buy_shield_cb(callback: types.CallbackQuery):
+    if await check_action_cooldown(callback, "shop_buy"): return
     user_id = callback.from_user.id
     price = 800
     async with aiosqlite.connect('manga.db') as db:
@@ -2405,6 +2445,7 @@ async def shop_buy_shield_cb(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "buy_xp_pack")
 async def shop_buy_xp_pack_cb(callback: types.CallbackQuery):
+    if await check_action_cooldown(callback, "shop_buy"): return
     user_id = callback.from_user.id
     price = 500
     xp_amount = 120
@@ -2425,6 +2466,7 @@ async def shop_buy_xp_pack_cb(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "buy_badge_moon")
 async def shop_buy_badge_moon_cb(callback: types.CallbackQuery):
+    if await check_action_cooldown(callback, "shop_buy"): return
     ok, text = await try_buy_badge(callback.from_user.id, "🌙 Лунный знак", 700)
     if not ok:
         return await callback.answer(text, show_alert=True)
@@ -2434,6 +2476,7 @@ async def shop_buy_badge_moon_cb(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "buy_badge_cupid")
 async def shop_buy_badge_cupid_cb(callback: types.CallbackQuery):
+    if await check_action_cooldown(callback, "shop_buy"): return
     ok, text = await try_buy_badge(callback.from_user.id, "💘 Купидон", 900)
     if not ok:
         return await callback.answer(text, show_alert=True)
@@ -2443,6 +2486,7 @@ async def shop_buy_badge_cupid_cb(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "buy_badge_flame")
 async def shop_buy_badge_flame_cb(callback: types.CallbackQuery):
+    if await check_action_cooldown(callback, "shop_buy"): return
     ok, text = await try_buy_badge(callback.from_user.id, "🔥 Пламя страсти", 1100)
     if not ok:
         return await callback.answer(text, show_alert=True)
@@ -2453,9 +2497,18 @@ REGEX_DICE_GAMES = re.compile(r'(?i)^[/*\s]*(?:кости|кубик|dice|cube|�
 
 @dp.message(F.text & F.text.regexp(REGEX_DICE_GAMES))
 async def cmd_dice_games(message: types.Message):
-    if await check_cd_and_warn(message, "iris_cmd", 3): return
-    
     text = message.text.lower()
+    is_casino_text = (
+        "казино" in text
+        or "casino" in text
+        or "слот" in text
+        or "slot" in text
+    )
+    if is_casino_text:
+        if await check_action_cooldown(message, "casino_cmd"): return
+    else:
+        if await check_cd_and_warn(message, "iris_cmd", 3): return
+
     emoji = "🎲"
     if "дартс" in text or "darts" in text: emoji = "🎯"
     elif "баскетбол" in text or "basketball" in text: emoji = "🏀"
