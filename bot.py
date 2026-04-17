@@ -74,7 +74,23 @@ def fmt_name(uid, name):
     clean_name = name.lstrip("@").strip()
     if clean_name.startswith("<a"): return f"<b>{name}</b>"
     if clean_name.startswith("Пользователь"): clean_name = "Пользователь"
-    return f'<b><a href="tg://user?id={uid}">{clean_name}</a></b>'
+    return f'<b><a href="tg://user?id={uid}">{html.escape(clean_name, quote=False)}</a></b>'
+
+
+def escape_html_text(value) -> str:
+    """Escape user/content text before embedding into HTML parse_mode messages."""
+    return html.escape(str(value), quote=False)
+
+
+def format_user_tag(username: str | None, first_name: str | None, fallback_id: int | str | None = None) -> str:
+    """Return safe user display for HTML messages: @username when available, otherwise escaped first name."""
+    if username:
+        return f"@{escape_html_text(username)}"
+    if first_name:
+        return escape_html_text(first_name)
+    if fallback_id is None:
+        return "Пользователь"
+    return escape_html_text(str(fallback_id))
 
 LANGUAGES = {"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "jp": "🇯🇵 日本語", "color": "🎨 Цветная манга"}
 RANOBE_LANGUAGES = {"alya": "⚔️ Воительница-Аля", "ru": "🇷🇺 Русский (Ранобэ)"}
@@ -83,37 +99,41 @@ ITEMS_PER_PAGE = 15
 ART_CACHE: dict = {}
 MARRIAGE_PROPOSALS: dict = {}
 HAREM_PROPOSALS: dict = {}
-REGEX_INFA = re.compile(r'(?i)^[/*\s]*инфа\s+(.+)$')
-REGEX_RANDOM = re.compile(r'(?i)^[/*\s]*рандом\s+(\d+)$')
-REGEX_CHOOSE = re.compile(r'(?i)^[/*\s]*выбери\s+(.+)\s+или\s+(.+)$')
-REGEX_ALYA_CHOOSE = re.compile(r'(?i)^[/*\s]*аля[, ]+выбери\s+(.+)\s+или\s+(.+)$')
-REGEX_COIN = re.compile(r'(?i)^[/*\s]*(монетка|орел или решка)')
-REGEX_DICE = re.compile(r'(?i)^[/*\s]*(кости|кубик)')
-REGEX_MARRY = re.compile(r'(?i)^[/*\s]*(брак|свадьба|marry)')
-REGEX_DIVORCE = re.compile(r'(?i)^[/*\s]*(развод|divorce)')
-REGEX_MARRIAGES = re.compile(r'(?i)^[/*\s]*(браки|marriages)')
-REGEX_PROFILE = re.compile(r'(?i)^[/*\s]*(профиль|profile)')
-REGEX_STATS = re.compile(r'(?i)^[/*\s]*(статистика|стата|stats)')
-REGEX_DARTS = re.compile(r'(?i)^[/*\s]*(дартс)')
-REGEX_BASKETBALL = re.compile(r'(?i)^[/*\s]*(баскетбол)')
-REGEX_FOOTBALL = re.compile(r'(?i)^[/*\s]*(футбол)')
-REGEX_SLOT = re.compile(r'(?i)^[/*\s]*(казино|слоты|слот)')
-REGEX_BOWLING = re.compile(r'(?i)^[/*\s]*(боулинг)')
-REGEX_RPS = re.compile(r'(?i)^[/*\s]*(камень ножницы бумага|кнб)\s*(камень|ножницы|бумага)?')
-REGEX_COMPATIBILITY = re.compile(r'(?i)^[/*\s]*совместимость')
-REGEX_MAGIC_BALL = re.compile(r'(?i)^[/*\s]*шар\s+(.+)')
-REGEX_ROULETTE = re.compile(r'(?i)^[/*\s]*рулетка')
-REGEX_BOTTLE = re.compile(r'(?i)^[/*\s]*(бутылочка|bottle)')
-REGEX_SHIP = re.compile(r'(?i)^[/*\s]*(шип|пейринг|ship)')
-REGEX_SHOP = re.compile(r'(?i)^[/*\s]*(магазин|shop)')
-REGEX_HELP = re.compile(r'(?i)^[/*\s]*(помощь|меню|help)')
-REGEX_HAREM_ADD = re.compile(r'(?i)^[/*\s]*(гарем\s+добавить|harem\s+add|harem_add)')
-REGEX_HAREM_REMOVE = re.compile(r'(?i)^[/*\s]*(гарем\s+удалить|harem\s+remove|harem_remove)')
-REGEX_DAILY = re.compile(r'(?i)^[/*\s]*(ежедневка|daily|🎁 Ежедневная награда)')
-REGEX_LOOTBOX = re.compile(r'(?i)^[/*\s]*(lootbox|📦 Секретный лутбокс)')
-REGEX_REF = re.compile(r'(?i)^[/*\s]*(реф|ref|🔗 Рефералы)')
-REGEX_SLOT = re.compile(r'(?i)^[/*\s]*(казино|слоты|слот)(?:\s+(\d+))?')
-REGEX_ROB = re.compile(r'(?i)^[/*\s]*(украсть|ограбить|rob)')
+BOT_CMD_MENTION = r"(?:@[A-Za-z0-9_]{3,})?"
+
+REGEX_START = re.compile(rf'(?i)^[/*\s]*(?:start|старт){BOT_CMD_MENTION}\s*$')
+REGEX_INFA = re.compile(rf'(?i)^[/*\s]*(?:инфа|infa|info){BOT_CMD_MENTION}\s+(.+)$')
+REGEX_RANDOM = re.compile(rf'(?i)^[/*\s]*(?:рандом|random){BOT_CMD_MENTION}\s+(\d+)$')
+REGEX_CHOOSE = re.compile(rf'(?i)^[/*\s]*(?:выбери|choose){BOT_CMD_MENTION}\s+(.+)\s+(?:или|or)\s+(.+)$')
+REGEX_ALYA_CHOOSE = re.compile(rf'(?i)^[/*\s]*(?:аля|alya){BOT_CMD_MENTION}[, ]+(?:выбери|choose){BOT_CMD_MENTION}\s+(.+)\s+(?:или|or)\s+(.+)$')
+REGEX_COIN = re.compile(rf'(?i)^[/*\s]*(?:монетка|орел или решка|coin|heads or tails){BOT_CMD_MENTION}\s*$')
+REGEX_DICE = re.compile(r'(?i)^[/*\s]*(?:кости|кубик|dice|cube)\b')
+REGEX_MARRY = re.compile(r'(?i)^[/*\s]*(?:брак|свадьба|marry)\b')
+REGEX_DIVORCE = re.compile(r'(?i)^[/*\s]*(?:развод|divorce)\b')
+REGEX_MARRIAGES = re.compile(r'(?i)^[/*\s]*(?:браки|marriages)\b')
+REGEX_PROFILE = re.compile(r'(?i)^[/*\s]*(?:профиль|profile)\b')
+REGEX_STATS = re.compile(r'(?i)^[/*\s]*(?:статистика|стата|stats)\b')
+REGEX_DARTS = re.compile(r'(?i)^[/*\s]*(?:дартс|darts)\b')
+REGEX_BASKETBALL = re.compile(r'(?i)^[/*\s]*(?:баскетбол|basketball)\b')
+REGEX_FOOTBALL = re.compile(r'(?i)^[/*\s]*(?:футбол|football)\b')
+REGEX_BOWLING = re.compile(r'(?i)^[/*\s]*(?:боулинг|bowling)\b')
+REGEX_RPS = re.compile(rf'(?i)^[/*\s]*(?:камень ножницы бумага|кнб|rock paper scissors|rps){BOT_CMD_MENTION}\s*(камень|ножницы|бумага|rock|paper|scissors)?\s*$')
+REGEX_COMPATIBILITY = re.compile(r'(?i)^[/*\s]*(?:совместимость|compatibility)\b')
+REGEX_MAGIC_BALL = re.compile(rf'(?i)^[/*\s]*(?:шар|ball|8ball){BOT_CMD_MENTION}\s+(.+)$')
+REGEX_ROULETTE = re.compile(r'(?i)^[/*\s]*(?:рулетка|roulette)\b')
+REGEX_BOTTLE = re.compile(r'(?i)^[/*\s]*(?:бутылочка|bottle)\b')
+REGEX_SHIP = re.compile(r'(?i)^[/*\s]*(?:шип|пейринг|ship)\b')
+REGEX_SHOP = re.compile(r'(?i)^[/*\s]*(?:магазин|shop)\b')
+REGEX_HELP = re.compile(r'(?i)^[/*\s]*(?:помощь|меню|help|menu)\b')
+REGEX_HAREM_ADD = re.compile(r'(?i)^[/*\s]*(?:гарем\s+добавить|harem\s+add|harem_add)\b')
+REGEX_HAREM_REMOVE = re.compile(r'(?i)^[/*\s]*(?:гарем\s+удалить|harem\s+remove|harem_remove)\b')
+REGEX_DAILY = re.compile(rf'(?i)^[/*\s]*(?:ежедневка|ежедневная награда|daily|🎁 Ежедневная награда){BOT_CMD_MENTION}\s*$')
+REGEX_LOOTBOX = re.compile(rf'(?i)^[/*\s]*(?:лутбокс|lootbox|📦 Секретный лутбокс){BOT_CMD_MENTION}\s*$')
+REGEX_REF = re.compile(rf'(?i)^[/*\s]*(?:реф|рефералы|ref|🔗 Рефералы){BOT_CMD_MENTION}\s*$')
+REGEX_SLOT = re.compile(rf'(?i)^[/*\s]*(?:казино|casino|слоты|slots|слот|slot){BOT_CMD_MENTION}(?:\s+(\d+))?$')
+REGEX_ROB = re.compile(r'(?i)^[/*\s]*(?:украсть|ограбить|rob)\b')
+REGEX_FEED_HAREM = re.compile(rf'(?i)^[/*\s]*(?:feed|harem\s+feed|harem_feed|покорми\s+гарем|покормить\s+гарем){BOT_CMD_MENTION}\s*$')
+REGEX_PET_HAREM = re.compile(rf'(?i)^[/*\s]*(?:pet|harem\s+pet|harem_pet|погладь\s+гарем|погладить\s+гарем){BOT_CMD_MENTION}\s*$')
 
 ACTIVE_DROPS = {} # {chat_id: reward}
 
@@ -457,17 +477,23 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
 
     await wait_msg.delete()
     builder = InlineKeyboardBuilder().row(types.InlineKeyboardButton(text="🚪 Выйти из чата", callback_data="main_menu"))
-    await message.answer(f"{emoji} <b>{char_name}:</b>\n{response}", parse_mode="HTML", reply_markup=builder.as_markup())
+    await message.answer(
+        f"{emoji} <b>{char_name}:</b>\n{escape_html_text(response)}",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup()
+    )
 
 _REPLY_KB_TEXTS = {"📖 Читать", "🎨 Арты", "🤖 ИИ чаты", "ℹ️ Проект", "📋 Меню"}
 
 # Все регулярки игр/команд, которые не должны перехватываться ИИ
 _GAME_REGEXES = [
+    REGEX_START, REGEX_HELP, REGEX_SHOP, REGEX_DAILY, REGEX_LOOTBOX, REGEX_REF, REGEX_ROB,
+    REGEX_HAREM_ADD, REGEX_HAREM_REMOVE, REGEX_FEED_HAREM, REGEX_PET_HAREM, REGEX_BOTTLE,
     REGEX_INFA, REGEX_RANDOM, REGEX_CHOOSE, REGEX_ALYA_CHOOSE, REGEX_COIN,
     REGEX_DICE, REGEX_MARRY, REGEX_DIVORCE, REGEX_MARRIAGES, REGEX_PROFILE,
     REGEX_STATS, REGEX_DARTS, REGEX_BASKETBALL, REGEX_FOOTBALL, REGEX_SLOT,
     REGEX_BOWLING, REGEX_RPS, REGEX_COMPATIBILITY, REGEX_MAGIC_BALL, REGEX_ROULETTE,
-    REGEX_SHIP, # <--- ADDED THIS
+    REGEX_SHIP,
 ]
 
 def is_ai_trigger(message: types.Message):
@@ -483,7 +509,7 @@ def is_ai_trigger(message: types.Message):
         if rx.search(message.text):
             return False
     text_lower = message.text.lower()
-    if text_lower.startswith("аля") or text_lower.startswith("масачика"): 
+    if text_lower.startswith(("аля", "масачика", "alya", "masachika")):
         return True
     if message.reply_to_message and message.reply_to_message.from_user.id == message.bot.id: 
         return True
@@ -494,8 +520,8 @@ async def process_group_ai_chat(message: types.Message):
     text_lower = message.text.lower()
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == message.bot.id
     
-    is_alya = text_lower.startswith("аля")
-    is_masachika = text_lower.startswith("масачика")
+    is_alya = text_lower.startswith(("аля", "alya"))
+    is_masachika = text_lower.startswith(("масачика", "masachika"))
 
     char_id = "alya"
     if is_masachika:
@@ -534,7 +560,7 @@ async def process_group_ai_chat(message: types.Message):
     response = await ask_ai(message.text, system_prompt, history=history, provider=provider)
     await wait_msg.delete()
     
-    await message.reply(f"{emoji} <b>{char_name}:</b>\n{response}", parse_mode="HTML")
+    await message.reply(f"{emoji} <b>{char_name}:</b>\n{escape_html_text(response)}", parse_mode="HTML")
 
 
 # ==============================================================================
@@ -586,7 +612,8 @@ async def process_section_arts(callback: types.CallbackQuery):
         builder.row(types.InlineKeyboardButton(text="➡️ Арты (в ЛС)", url=f"https://t.me/{me.username}?start=arts"))
         try:
             await callback.message.edit_text("<i>Арты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
-        except Exception:
+        except Exception as e:
+            logging.debug(f"section_arts: edit_text failed, sending new message: {e}")
             await callback.message.answer("<i>Арты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
         return await callback.answer()
     builder = InlineKeyboardBuilder()
@@ -605,7 +632,8 @@ async def process_section_ai(callback: types.CallbackQuery):
         builder.row(types.InlineKeyboardButton(text="➡️ ИИ чаты (в ЛС)", url=f"https://t.me/{me.username}?start=ai"))
         try:
             await callback.message.edit_text("<i>ИИ чаты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
-        except Exception:
+        except Exception as e:
+            logging.debug(f"section_ai: edit_text failed, sending new message: {e}")
             await callback.message.answer("<i>ИИ чаты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
         return await callback.answer()
     builder = InlineKeyboardBuilder()
@@ -625,7 +653,8 @@ async def process_project_info_menu(callback: types.CallbackQuery):
         builder.row(types.InlineKeyboardButton(text="➡️ Проект (в ЛС)", url=f"https://t.me/{me.username}?start=project"))
         try:
             await callback.message.edit_text("<i>Информация доступна в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
-        except Exception:
+        except Exception as e:
+            logging.debug(f"project_info_menu: group edit_text failed, sending new message: {e}")
             await callback.message.answer("<i>Информация доступна в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
         return await callback.answer()
     builder = InlineKeyboardBuilder()
@@ -640,8 +669,10 @@ async def process_project_info_menu(callback: types.CallbackQuery):
     try:
         await callback.message.edit_text("✨ <b>Информационный центр проекта</b>\n────────────────\n<i>Здесь вы можете найти всю необходимую информацию, график релизов и многое другое.</i>\n\n👇 <b>Выберите раздел:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
     except Exception:
-        try: await callback.message.delete()
-        except Exception: pass
+        try:
+            await callback.message.delete()
+        except Exception as e:
+            logging.debug(f"project_info_menu: failed to delete stale message: {e}")
         await callback.message.answer("✨ <b>Информационный центр проекта</b>\n────────────────\n<i>Здесь вы можете найти всю необходимую информацию, график релизов и многое другое.</i>\n\n👇 <b>Выберите раздел:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
 
 def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
@@ -655,6 +686,7 @@ async def process_empty_callback(callback: types.CallbackQuery):
 async def callback_claim_drop(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
     user_id = callback.from_user.id
+    winner_label = format_user_tag(callback.from_user.username, callback.from_user.first_name, user_id)
     
     if chat_id not in ACTIVE_DROPS:
         return await callback.answer("❌ Этот дроп уже забрали или он истек!", show_alert=True)
@@ -663,11 +695,12 @@ async def callback_claim_drop(callback: types.CallbackQuery):
     
     # Начисляем награду
     async with aiosqlite.connect('manga.db') as db:
+        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
         await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (reward, user_id))
         await db.commit()
     
     await callback.message.edit_text(
-        f"🎊 🏆 <b>Победа!</b>\n\nМолниеносный @{callback.from_user.username} забирает <b>{reward} монет</b> из мешка!\n\n"
+        f"🎊 🏆 <b>Победа!</b>\n\nМолниеносный {winner_label} забирает <b>{reward} монет</b> из мешка!\n\n"
         f"💼 <i>Твой баланс пополнен.</i>",
         parse_mode="HTML"
     )
@@ -705,14 +738,20 @@ async def cmd_start(message: types.Message, state: FSMContext):
                     is_new_user = not already_referred and stats[5] <= 1
                     
                     if is_new_user:
-                        await add_referral(referrer_id, user_id)
-                        await message.answer(f"🎉 Вы перешли по реферальной ссылке! Вам начислено <b>500 монет</b>.", parse_mode="HTML")
-                        try:
-                            await bot.send_message(referrer_id, f"👤 У вас новый реферал! За приглашение @{message.from_user.username} вам начислено <b>1000 монет</b> и <b>3 XP</b>.", parse_mode="HTML")
-                        except Exception:
-                            pass
+                        applied = await add_referral(referrer_id, user_id)
+                        if applied:
+                            await message.answer(f"🎉 Вы перешли по реферальной ссылке! Вам начислено <b>500 монет</b>.", parse_mode="HTML")
+                            try:
+                                ref_label = format_user_tag(message.from_user.username, message.from_user.first_name, user_id)
+                                await bot.send_message(
+                                    referrer_id,
+                                    f"👤 У вас новый реферал! За приглашение {ref_label} вам начислено <b>1000 монет</b> и <b>3 XP</b>.",
+                                    parse_mode="HTML"
+                                )
+                            except Exception as e:
+                                logging.debug(f"referral: failed to notify referrer {referrer_id}: {e}")
             except (ValueError, IndexError):
-                pass
+                logging.debug(f"referral: invalid deep_link format: {deep_link}")
             
     if deep_link and deep_link.startswith("ren_"):
         admins = await get_admins()
@@ -724,14 +763,16 @@ async def cmd_start(message: types.Message, state: FSMContext):
             return await message.answer("❌ Ошибка: ссылка устарела или недействительна. Попробуйте еще раз из WebApp.")
             
         obj_id = RENAME_CACHE[short_id]
+        safe_obj_id = escape_html_text(obj_id)
             
         await state.update_data(rename_id=obj_id)
         await state.set_state(AdminRename.waiting_for_name)
         from database import get_custom_name
         current_name = await get_custom_name(obj_id)
-        cur_text = f"\nТекущее кастомное название: <b>{current_name}</b>" if current_name else "\nСейчас используется стандартное название."
+        safe_current_name = escape_html_text(current_name) if current_name else ""
+        cur_text = f"\nТекущее кастомное название: <b>{safe_current_name}</b>" if safe_current_name else "\nСейчас используется стандартное название."
         return await message.answer(
-            f"✏️ <b>Режим редактора</b>\n\nВы хотите переименовать элемент: <code>{obj_id}</code>{cur_text}\n\nОтправьте в чат <b>НОВОЕ</b> текстовое название, которое вы хотите увидеть в WebApp (или отправьте <code>/cancel</code> для отмены):",
+            f"✏️ <b>Режим редактора</b>\n\nВы хотите переименовать элемент: <code>{safe_obj_id}</code>{cur_text}\n\nОтправьте в чат <b>НОВОЕ</b> текстовое название, которое вы хотите увидеть в WebApp (или отправьте <code>/cancel</code> для отмены):",
             parse_mode="HTML"
         )
 
@@ -741,16 +782,18 @@ async def cmd_start(message: types.Message, state: FSMContext):
             return await message.answer("❌ У вас нет прав администратора.")
             
         obj_id = deep_link[len("rename_"):]
+        safe_obj_id = escape_html_text(obj_id)
         await state.update_data(rename_id=obj_id)
         await state.set_state(AdminRename.waiting_for_name)
         
         # Попытаемся достать текущее или старое название для подсказки
         from database import get_custom_name
         current_name = await get_custom_name(obj_id)
-        cur_text = f"\nТекущее кастомное название: <b>{current_name}</b>" if current_name else "\nСейчас используется стандартное название."
+        safe_current_name = escape_html_text(current_name) if current_name else ""
+        cur_text = f"\nТекущее кастомное название: <b>{safe_current_name}</b>" if safe_current_name else "\nСейчас используется стандартное название."
         
         return await message.answer(
-            f"✏️ <b>Режим редактора</b>\n\nВы хотите переименовать элемент: <code>{obj_id}</code>{cur_text}\n\nОтправьте в чат <b>НОВОЕ</b> текстовое название, которое вы хотите увидеть в WebApp (или отправьте <code>/cancel</code> для отмены):",
+            f"✏️ <b>Режим редактора</b>\n\nВы хотите переименовать элемент: <code>{safe_obj_id}</code>{cur_text}\n\nОтправьте в чат <b>НОВОЕ</b> текстовое название, которое вы хотите увидеть в WebApp (или отправьте <code>/cancel</code> для отмены):",
             parse_mode="HTML"
         )
     
@@ -790,6 +833,10 @@ async def cmd_start(message: types.Message, state: FSMContext):
     else:
         await message.answer("🏠 <b>Главное меню</b>\n\nВыберите раздел для продолжения:", parse_mode="HTML", reply_markup=get_main_menu())
 
+@dp.message(F.text & F.text.regexp(REGEX_START), StateFilter("*"))
+async def cmd_start_text_alias(message: types.Message, state: FSMContext):
+    await cmd_start(message, state)
+
 async def _redirect_to_dm(message: types.Message, section: str, label: str):
     """В группе отправляет кнопку-ссылку на ЛС бота."""
     me = await bot.get_me()
@@ -801,8 +848,10 @@ async def _redirect_to_dm(message: types.Message, section: str, label: str):
         reply_markup=builder.as_markup()
     )
     await delete_after(msg, 8)
-    try: await message.delete()
-    except Exception: pass
+    try:
+        await message.delete()
+    except Exception as e:
+        logging.debug(f"redirect_to_dm: failed to delete source message: {e}")
 
 # --- Обработчики reply-кнопок ---
 @dp.message(F.text == "📖 Читать", StateFilter("*"))
@@ -931,15 +980,23 @@ async def process_help_cat(callback: types.CallbackQuery):
     text, markup = await get_help_menu(cat, callback.from_user.id in admins)
     try:
         await callback.message.edit_text(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=markup)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"help_cat: edit failed, sending new message: {e}")
+        await callback.message.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=markup)
     await callback.answer()
 
 @dp.callback_query(F.data == "show_help")
 async def process_show_help(callback: types.CallbackQuery):
     admins = await get_admins()
     text, markup = await get_help_menu("main", callback.from_user.id in admins)
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+    await safe_edit_or_reply(
+        callback,
+        text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=markup
+    )
+    await callback.answer()
 
 @dp.callback_query(F.data == "main_menu")
 async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
@@ -949,8 +1006,10 @@ async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
     except Exception:
         # Не удалось edit_text (например, сообщение — фото из галереи артов)
-        try: await callback.message.delete()
-        except Exception: pass
+        try:
+            await callback.message.delete()
+        except Exception as e:
+            logging.debug(f"main_menu: failed to delete non-text message: {e}")
         await callback.message.answer("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
 
 def get_langs_menu(prefix="lang"):
@@ -999,8 +1058,12 @@ async def process_rename_name(message: types.Message, state: FSMContext):
         from database import set_custom_name
         await set_custom_name(obj_id, new_name)
         await state.clear()
+        safe_new_name = escape_html_text(new_name)
         
-        msg = await message.answer(f"✅ Успешно! Новое название:\n<b>{new_name}</b>\n\n🔄 <i>Синхронизирую изменения с Github Pages...</i>", parse_mode="HTML")
+        msg = await message.answer(
+            f"✅ Успешно! Новое название:\n<b>{safe_new_name}</b>\n\n🔄 <i>Синхронизирую изменения с Github Pages...</i>",
+            parse_mode="HTML"
+        )
         
         # Синхронизация JSON
         import aiosqlite
@@ -1014,12 +1077,19 @@ async def process_rename_name(message: types.Message, state: FSMContext):
         if success:
             await msg.edit_text("✅ <b>Готово!</b> Название сохранено.\n\nВы можете открыть читалку и проверить результат.", parse_mode="HTML")
         else:
-            await msg.edit_text(f"⚠️ База обновлена локально, но <code>git push</code> не прошел.\n\n<b>Ответ сервера:</b>\n<pre>{output}</pre>", parse_mode="HTML")
+            await msg.edit_text(
+                f"⚠️ База обновлена локально, но <code>git push</code> не прошел.\n\n"
+                f"<b>Ответ сервера:</b>\n<pre>{escape_html_text(output)}</pre>",
+                parse_mode="HTML"
+            )
             
     except Exception as e:
         import traceback
         err_msg = traceback.format_exc()
-        await message.answer(f"❌ <b>Ошибка:</b> {e}\n<pre>{err_msg}</pre>", parse_mode="HTML")
+        await message.answer(
+            f"❌ <b>Ошибка:</b> {escape_html_text(e)}\n<pre>{escape_html_text(err_msg)}</pre>",
+            parse_mode="HTML"
+        )
 
 @dp.callback_query(F.data == "schedule")
 async def process_schedule(callback: types.CallbackQuery):
@@ -1077,11 +1147,13 @@ async def handle_tech_support_message(message: types.Message, state: FSMContext)
     await state.clear()
     user = message.from_user
     username = f"@{user.username}" if user.username else user.first_name
+    safe_username = escape_html_text(username or str(user.id))
+    safe_message = escape_html_text(message.text)
     
     support_text = (
         f"🆘 <b>НОВОЕ ОБРАЩЕНИЕ В ПОДДЕРЖКУ!</b>\n\n"
-        f"<b>От:</b> {username} (ID: <code>{user.id}</code>)\n"
-        f"<b>Сообщение:</b>\n{message.text}"
+        f"<b>От:</b> {safe_username} (ID: <code>{user.id}</code>)\n"
+        f"<b>Сообщение:</b>\n{safe_message}"
     )
     
     admins = await get_admins()
@@ -1103,46 +1175,55 @@ async def cmd_daily(message: types.Message):
     user_id = message.from_user.id
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
-    
+
     async with aiosqlite.connect('manga.db') as db:
+        await db.execute('BEGIN IMMEDIATE')
+        await db.execute(
+            'INSERT OR IGNORE INTO users_stats (user_id, balance, daily_streak, last_daily) VALUES (?, 0, 0, NULL)',
+            (user_id,),
+        )
         async with db.execute('SELECT last_daily, daily_streak, balance FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
             row = await cursor.fetchone()
-            
-    if not row:
-        async with aiosqlite.connect('manga.db') as db:
-            await db.execute('INSERT OR IGNORE INTO users_stats (user_id, balance) VALUES (?, 0)', (user_id,))
-            await db.commit()
-        last_daily, streak, balance = None, 0, 0
-    else:
-        last_daily, streak, balance = row
 
-    if last_daily == today_str:
-        return await message.answer("🎁 Вы уже получили свою награду сегодня! Приходите завтра. ✨")
+        last_daily, streak, balance = row if row else (None, 0, 0)
+        streak = streak or 0
+        balance = balance or 0
 
-    if last_daily:
-        last_date = datetime.strptime(last_daily, '%Y-%m-%d')
-        delta = (now - last_date).days
-        if delta == 1:
-            streak = min(streak + 1, 30)
+        if last_daily == today_str:
+            await db.rollback()
+            return await message.answer("🎁 Вы уже получили свою награду сегодня! Приходите завтра. ✨")
+
+        if last_daily:
+            try:
+                last_date = datetime.strptime(last_daily, '%Y-%m-%d')
+                delta = (now.date() - last_date.date()).days
+                if delta == 1:
+                    streak = min(streak + 1, 30)
+                else:
+                    streak = 1
+            except ValueError:
+                # Защитный fallback на случай старых/битых значений даты в БД
+                streak = 1
         else:
             streak = 1
-    else:
-        streak = 1
-        
-    reward = 50 + (streak * 10)
-    
-    async with aiosqlite.connect('manga.db') as db:
-        await db.execute(
-            'UPDATE users_stats SET balance = balance + ?, last_daily = ?, daily_streak = ? WHERE user_id = ?',
-            (reward, today_str, streak, user_id)
+
+        reward = 50 + (streak * 10)
+        cursor = await db.execute(
+            'UPDATE users_stats SET balance = balance + ?, last_daily = ?, daily_streak = ? '
+            'WHERE user_id = ? AND COALESCE(last_daily, "") != ?',
+            (reward, today_str, streak, user_id, today_str)
         )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            return await message.answer("🎁 Вы уже получили свою награду сегодня! Приходите завтра. ✨")
         await db.commit()
-        
+        new_balance = balance + reward
+
     streak_text = f"\n🔥 Стрик: <b>{streak}</b> дн." if streak > 1 else ""
     await message.answer(
         f"🎁 <b>Ежедневная награда!</b>\n\n"
         f"Вы получили <b>{reward}</b> монет!\n"
-        f"Ваш баланс: <b>{balance + reward}</b> монет.{streak_text}\n\n"
+        f"Ваш баланс: <b>{new_balance}</b> монет.{streak_text}\n\n"
         f"<i>Приходите завтра, чтобы увеличить награду!</i>",
         parse_mode="HTML"
     )
@@ -1187,6 +1268,7 @@ async def cmd_lootbox(message: types.Message):
         asyncio.create_task(delete_after(msg, 30))
 
 # --- Phase 3: Интерактивный гарем ---
+@dp.message(F.text & F.text.regexp(REGEX_FEED_HAREM))
 @dp.message(Command("feed"))
 async def cmd_feed_harem(message: types.Message):
     if not message.reply_to_message:
@@ -1208,6 +1290,7 @@ async def cmd_feed_harem(message: types.Message):
     await update_loyalty_level(owner_id, target_id, 2)
     await message.answer(f"🍏 Вы покормили {message.reply_to_message.from_user.first_name}! (+2 💖 к лояльности)")
 
+@dp.message(F.text & F.text.regexp(REGEX_PET_HAREM))
 @dp.message(Command("pet"))
 async def cmd_pet_harem(message: types.Message):
     if not message.reply_to_message:
@@ -1234,7 +1317,7 @@ async def cmd_pet_harem(message: types.Message):
 # БЛОК 6: ПРОФИЛИ И РП-КОМАНДЫ
 async def get_profile_content(chat_type: str, chat_id: int, user: types.User):
     user_id = user.id
-    name = user.first_name
+    safe_name = escape_html_text(user.first_name)
     
     partner_text = "Одинок(а) 💔"
     if chat_type in ["group", "supergroup"]:
@@ -1270,13 +1353,14 @@ async def get_profile_content(chat_type: str, chat_id: int, user: types.User):
     if divorces_count >= 3: achievements.append("💔")
     if casino_played > 50: achievements.append("🎰")
     
-    title_str = f" [{custom_title}]" if custom_title else ""
+    safe_custom_title = escape_html_text(custom_title) if custom_title else ""
+    title_str = f" [{safe_custom_title}]" if safe_custom_title else ""
     achievements_str = " " + "".join(achievements) if achievements else ""
     
     ref_count = await get_referral_stats(user_id)
     
     profile_text = (
-        f"👤 <b>Ваш профиль:</b> {name}{title_str}{achievements_str}\n"
+        f"👤 <b>Ваш профиль:</b> {safe_name}{title_str}{achievements_str}\n"
         f"┣ 📊 <b>Уровень:</b> {level} ({rank})\n"
         f"┣ ✨ <b>XP:</b> {xp}\n"
         f"┣ 💰 <b>Монеты:</b> {balance}\n"
@@ -1336,6 +1420,7 @@ async def cmd_rob(message: types.Message):
         
     target = message.reply_to_message.from_user
     initiator = message.from_user
+    target_label = format_user_tag(target.username, target.first_name, target.id)
     
     if target.id == initiator.id:
         return await message.answer("🚷 Вы не можете ограбить самого себя!")
@@ -1348,7 +1433,7 @@ async def cmd_rob(message: types.Message):
     target_balance = target_stats[7]
     
     if target_balance <= 0:
-        return await message.answer(f"📦 У @{target.username} совсем пусто в карманах... Нечего красть!")
+        return await message.answer(f"📦 У {target_label} совсем пусто в карманах... Нечего красть!")
         
     # Определяем шанс успеха
     success_chance = 0.30
@@ -1360,23 +1445,32 @@ async def cmd_rob(message: types.Message):
     # Шанс успеха
     if random.random() < success_chance:
         # Увеличиваем вариативность суммы кражи (от 5% до 15% от баланса жертвы)
-        amount = int(target_balance * random.uniform(0.05, 0.15))
-        if amount < 1: amount = 1
+        amount_candidate = int(target_balance * random.uniform(0.05, 0.15))
+        if amount_candidate < 1:
+            amount_candidate = 1
         
         async with aiosqlite.connect('manga.db') as db:
+            await db.execute('BEGIN IMMEDIATE')
             await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (target.id,))
             await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (initiator.id,))
+            async with db.execute('SELECT balance FROM users_stats WHERE user_id = ?', (target.id,)) as cursor:
+                row = await cursor.fetchone()
+            current_target_balance = row[0] if row and row[0] is not None else 0
+            amount = min(amount_candidate, current_target_balance)
+            if amount <= 0:
+                await db.rollback()
+                return await message.answer(f"📦 У {target_label} совсем пусто в карманах... Нечего красть!")
             await db.execute('UPDATE users_stats SET balance = MAX(0, balance - ?) WHERE user_id = ?', (amount, target.id))
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (amount, initiator.id))
             await db.commit()
             
         success_templates = [
-            "🥷 <b>Успешная кража!</b>\nТы незаметно вытащил <b>{amount} монет</b> из кармана @{target}.",
-            "😏 <b>План 'Г' сработал!</b>\nПока Аля отвлеклась, ты стянул <b>{amount} монет</b> у @{target}.",
-            "✨ <b>Фортуна на твоей стороне!</b>\nТы ловко обчистил @{target} на <b>{amount} монет</b>.",
-            "🤫 <b>Тихо и чисто!</b>\n@{target} даже не заметил(а) потери <b>{amount} монет</b>."
+            "🥷 <b>Успешная кража!</b>\nТы незаметно вытащил <b>{amount} монет</b> из кармана {target}.",
+            "😏 <b>План 'Г' сработал!</b>\nПока Аля отвлеклась, ты стянул <b>{amount} монет</b> у {target}.",
+            "✨ <b>Фортуна на твоей стороне!</b>\nТы ловко обчистил {target} на <b>{amount} монет</b>.",
+            "🤫 <b>Тихо и чисто!</b>\n{target} даже не заметил(а) потери <b>{amount} монет</b>."
         ]
-        text = random.choice(success_templates).format(amount=amount, target=target.username)
+        text = random.choice(success_templates).format(amount=amount, target=target_label)
         msg = await message.answer(text, parse_mode="HTML")
         if message.chat.type in ["group", "supergroup"]:
             asyncio.create_task(delete_after(msg, 30))
@@ -1391,10 +1485,10 @@ async def cmd_rob(message: types.Message):
         failure_templates = [
             "🚨 <b>Провал!</b>\nВас поймала <b>Аля</b> на месте преступления! За нарушение порядка вы оштрафованы на <b>{penalty} монет</b>.",
             "👮‍♂️ <b>Масачика заметил!</b>\nОн не любит воришек. Ты оштрафован на <b>{penalty} монет</b>.",
-            "😡 <b>Неудачная попытка!</b>\n@{target} оказался слишком внимательным. Твой кошелек полегчал на <b>{penalty} монет</b>.",
+            "😡 <b>Неудачная попытка!</b>\n{target} оказался слишком внимательным. Твой кошелек полегчал на <b>{penalty} монет</b>.",
             "🤦‍♂️ <b>Эх, спалился...</b>\nАля увидела, как ты лезешь в карман. Штраф <b>{penalty} монет</b>."
         ]
-        text = random.choice(failure_templates).format(penalty=penalty, target=target.username)
+        text = random.choice(failure_templates).format(penalty=penalty, target=target_label)
         msg = await message.answer(text, parse_mode="HTML")
         if message.chat.type in ["group", "supergroup"]:
             asyncio.create_task(delete_after(msg, 30))
@@ -1417,14 +1511,15 @@ async def callback_inventory(callback: types.CallbackQuery):
     
     items = []
     if custom_title:
-        items.append(f"👑 Кастомный титул: <b>{custom_title}</b>")
+        items.append(f"👑 Кастомный титул: <b>{escape_html_text(custom_title)}</b>")
         
     db_items = await get_user_inventory(target_user_id)
     for itype, idata in db_items:
+        safe_idata = escape_html_text(idata)
         if itype == "badge":
-            items.append(f"🏅 Значок: <b>{idata}</b>")
+            items.append(f"🏅 Значок: <b>{safe_idata}</b>")
         else:
-            items.append(f"📦 <b>{idata}</b>")
+            items.append(f"📦 <b>{safe_idata}</b>")
         
     if not items:
         inv_text = "🎒 В вашем инвентаре пока пусто..."
@@ -1482,7 +1577,10 @@ async def callback_roast_profile(callback: types.CallbackQuery):
     
     response = await ask_groq("Оцени меня!", system_prompt)
     await wait_msg.delete()
-    await callback.message.answer(f"📋 <b>Мнение Али о {name}:</b>\n{response}", parse_mode="HTML")
+    await callback.message.answer(
+        f"📋 <b>Мнение Али о {escape_html_text(name)}:</b>\n{escape_html_text(response)}",
+        parse_mode="HTML"
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_STATS))
 async def cmd_stats(message: types.Message):
@@ -1514,7 +1612,7 @@ async def cmd_stats(message: types.Message):
                 continue
             
             # Убрали лишние эмодзи, оставили только кошелек
-            res.append(f"{rank}. <b>{name}</b> — {count} {unit} | {balance} 💰")
+            res.append(f"{rank}. <b>{escape_html_text(name)}</b> — {count} {unit} | {balance} 💰")
             rank += 1
         return "\n".join(res) if res else "<i>Пока пусто...</i>"
 
@@ -1571,7 +1669,8 @@ async def process_marriage_callback(callback: types.CallbackQuery):
         try:
             chat_member = await bot.get_chat_member(chat_id, int(init_id))
             init_name = chat_member.user.first_name
-        except Exception:
+        except Exception as e:
+            logging.debug(f"marriage_callback: failed to resolve initiator name {init_id}: {e}")
             init_name = 'Пользователь'
             
     targ_user = callback.from_user
@@ -1583,7 +1682,10 @@ async def process_marriage_callback(callback: types.CallbackQuery):
         await db.execute('INSERT INTO marriages (chat_id, user1_id, user1_name, user2_id, user2_name, date) VALUES (?, ?, ?, ?, ?, ?)', 
                          (chat_id, int(init_id), init_name, int(targ_id), targ_name, date_now))
         await db.commit()
-    await callback.message.edit_text(f"🎉 <b>Объявляю вас мужем и женой!</b>\n\nТеперь {init_name} и {targ_name} официально в браке 💍", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"🎉 <b>Объявляю вас мужем и женой!</b>\n\nТеперь {escape_html_text(init_name)} и {escape_html_text(targ_name)} официально в браке 💍",
+        parse_mode="HTML"
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_DIVORCE))
 async def process_divorce(message: types.Message):
@@ -1612,7 +1714,8 @@ async def process_divorce(message: types.Message):
     else:
         try:
             response = await ask_groq("Прокомментируй развод", system_prompt)
-        except Exception:
+        except Exception as e:
+            logging.debug(f"divorce: ask_groq fallback used: {e}")
             response = f"Ты действительно хочешь развестись с {partner_name}? Подумай хорошенько, бака!"
         
     await wait_msg.delete()
@@ -1622,7 +1725,7 @@ async def process_divorce(message: types.Message):
         [types.InlineKeyboardButton(text="❌ Передумал(а)", callback_data=f"divorce_no:{message.from_user.id}")]
     ])
     
-    await message.answer(f"🌸 <b>Аля:</b>\n{response}", parse_mode="HTML", reply_markup=kb)
+    await message.answer(f"🌸 <b>Аля:</b>\n{escape_html_text(response)}", parse_mode="HTML", reply_markup=kb)
 
 @dp.callback_query(F.data.startswith("divorce_"))
 async def handle_divorce_cb(callback: types.CallbackQuery):
@@ -1693,14 +1796,18 @@ async def process_harem_callback(callback: types.CallbackQuery):
         try:
             chat_member = await bot.get_chat_member(callback.message.chat.id, int(init_id))
             init_name = chat_member.user.first_name
-        except Exception:
+        except Exception as e:
+            logging.debug(f"harem_callback: failed to resolve initiator name {init_id}: {e}")
             init_name = 'Пользователь'
             
     targ_user = callback.from_user
     targ_name = targ_user.first_name
         
     await add_to_harem(int(init_id), int(targ_id), targ_name)
-    await callback.message.edit_text(f"🎉 <b>Новое пополнение гарема!</b>\n\nТеперь {targ_name} принадлежит {init_name} 👑", parse_mode="HTML")
+    await callback.message.edit_text(
+        f"🎉 <b>Новое пополнение гарема!</b>\n\nТеперь {escape_html_text(targ_name)} принадлежит {escape_html_text(init_name)} 👑",
+        parse_mode="HTML"
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_HAREM_REMOVE))
 async def remove_harem_member(message: types.Message):
@@ -1739,12 +1846,19 @@ async def cmd_infa(message: types.Message):
     if await check_cd_and_warn(message, "iris_cmd", 3): return
     chance = random.randint(0, 100)
     match = REGEX_INFA.search(message.text)
-    await message.answer(f"🔮 Вероятность того, что {match.group(1).strip()} — <b>{chance}%</b>", parse_mode="HTML")
+    if not match:
+        return await temp_reply(message, "❌ Формат: /инфа [текст] или infa [text]")
+    await message.answer(
+        f"🔮 Вероятность того, что {escape_html_text(match.group(1).strip())} — <b>{chance}%</b>",
+        parse_mode="HTML"
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_RANDOM))
 async def cmd_random(message: types.Message):
     if await check_cd_and_warn(message, "iris_cmd", 2): return
     match = REGEX_RANDOM.search(message.text)
+    if not match:
+        return await temp_reply(message, "❌ Формат: /рандом [число] или random [number]")
     limit = int(match.group(1))
     if limit <= 0: return await temp_reply(message, "Число должно быть больше нуля!")
     await message.answer(f"🎲 Выпало число: <b>{random.randint(1, limit)}</b>", parse_mode="HTML")
@@ -1753,14 +1867,18 @@ async def cmd_random(message: types.Message):
 async def cmd_choose(message: types.Message):
     if await check_cd_and_warn(message, "iris_cmd", 3): return
     match = REGEX_CHOOSE.search(message.text)
+    if not match:
+        return await temp_reply(message, "❌ Формат: /выбери [A] или [B] / choose [A] or [B]")
     choice = random.choice([match.group(1).strip(), match.group(2).strip()])
-    await message.answer(f"🤔 Я думаю, лучше:\n👉 <b>{choice}</b>", parse_mode="HTML")
+    await message.answer(f"🤔 Я думаю, лучше:\n👉 <b>{escape_html_text(choice)}</b>", parse_mode="HTML")
 
 @dp.message(F.text & F.text.regexp(REGEX_ALYA_CHOOSE))
 async def cmd_alya_choose(message: types.Message):
     if await check_cd_and_warn(message, "alya_choose", 10): return
 
     match = REGEX_ALYA_CHOOSE.search(message.text)
+    if not match:
+        return await temp_reply(message, "❌ Формат: Аля, выбери [A] или [B] / Alya choose [A] or [B]")
     item1, item2 = match.group(1).strip(), match.group(2).strip()
 
     if message.chat.type in ["group", "supergroup"] and not await is_ai_enabled(message.chat.id):
@@ -1774,7 +1892,7 @@ async def cmd_alya_choose(message: types.Message):
     )
     response = await ask_groq("Что лучше?", system_prompt)
     await wait_msg.delete()
-    await message.answer(f"🌸 <b>Выбор Али:</b>\n{response}", parse_mode="HTML")
+    await message.answer(f"🌸 <b>Выбор Али:</b>\n{escape_html_text(response)}", parse_mode="HTML")
 
 @dp.message(F.text & F.text.regexp(REGEX_COIN))
 async def cmd_coin(message: types.Message):
@@ -1832,8 +1950,8 @@ async def bottle_join(callback: types.CallbackQuery):
     ])
     try:
         await callback.message.edit_reply_markup(reply_markup=kb)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"bottle_join: failed to edit reply markup: {e}")
     await callback.answer("Вы присоединились!")
 
 @dp.callback_query(F.data == "bottle_spin")
@@ -1851,8 +1969,8 @@ async def bottle_spin(callback: types.CallbackQuery):
     del BOTTLE_GAMES[chat_id]
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"bottle_spin: failed to clear reply markup: {e}")
     
     p_ids = list(participants.keys())
     p1 = random.choice(p_ids)
@@ -1860,8 +1978,13 @@ async def bottle_spin(callback: types.CallbackQuery):
     p2 = random.choice(p_ids)
     
     n1, n2 = participants[p1], participants[p2]
+    safe_n1 = escape_html_text(n1)
+    safe_n2 = escape_html_text(n2)
     
-    wait_msg = await callback.message.answer(f"🍾 Бутылочка крутится... выпадают <b>{n1}</b> и <b>{n2}</b>!\n<i>Аля придумывает фант...</i>", parse_mode="HTML")
+    wait_msg = await callback.message.answer(
+        f"🍾 Бутылочка крутится... выпадают <b>{safe_n1}</b> и <b>{safe_n2}</b>!\n<i>Аля придумывает фант...</i>",
+        parse_mode="HTML"
+    )
     
     system_prompt = (
         "Ты Аля (из аниме Roshidere). Цундере. Придумай одно смешное или романтичное задание-фант "
@@ -1874,11 +1997,17 @@ async def bottle_spin(callback: types.CallbackQuery):
     else:
         try:
             task = await ask_groq("Придумай фант для бутылочки", system_prompt)
-        except Exception:
+        except Exception as e:
+            logging.debug(f"bottle_spin: ask_groq fallback used: {e}")
             task = "Обнимите друг друга, баки! И не думайте, что я хочу на это смотреть!"
         
     await wait_msg.delete()
-    await callback.message.answer(f"🍾 <b>Бутылочка!</b>\n\nПара: <a href='tg://user?id={p1}'>{n1}</a> и <a href='tg://user?id={p2}'>{n2}</a>\n\n🌸 <b>Задание от Али:</b>\n{task}", parse_mode="HTML")
+    await callback.message.answer(
+        f"🍾 <b>Бутылочка!</b>\n\n"
+        f"Пара: <a href='tg://user?id={p1}'>{safe_n1}</a> и <a href='tg://user?id={p2}'>{safe_n2}</a>\n\n"
+        f"🌸 <b>Задание от Али:</b>\n{escape_html_text(task)}",
+        parse_mode="HTML"
+    )
 
 # @dp.message(F.text.regexp(REGEX_SHIP))
 # async def cmd_ship(message: types.Message):
@@ -2037,7 +2166,7 @@ async def shop_process_title(message: types.Message, state: FSMContext):
         await db.commit()
         
     await state.clear()
-    await message.answer(f"🎉 Вы успешно купили титул <b>{title}</b>!", parse_mode="HTML")
+    await message.answer(f"🎉 Вы успешно купили титул <b>{escape_html_text(title)}</b>!", parse_mode="HTML")
 
 @dp.callback_query(F.data == "buy_hidden")
 async def shop_buy_hidden_cb(callback: types.CallbackQuery):
@@ -2056,34 +2185,49 @@ async def shop_buy_hidden_cb(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "buy_badge_vip")
 async def shop_buy_badge_vip_cb(callback: types.CallbackQuery):
-    stats = await get_user_stats(callback.from_user.id)
-    balance = stats[7] if stats else 0
-    if balance < 2000:
-        return await callback.answer("Недостаточно монет! Нужно 2000.", show_alert=True)
-        
-    # Check if they already have it
-    inv = await get_user_inventory(callback.from_user.id, item_type="badge")
-    if any(i[1] == "VIP 🌟" for i in inv):
-        return await callback.answer("У вас уже есть этот значок!", show_alert=True)
-        
+    user_id = callback.from_user.id
     async with aiosqlite.connect('manga.db') as db:
-        cursor = await db.execute('UPDATE users_stats SET balance = balance - 2000 WHERE user_id = ? AND balance >= 2000', (callback.from_user.id,))
+        await db.execute('BEGIN IMMEDIATE')
+        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
+        async with db.execute(
+            'SELECT 1 FROM user_inventory WHERE user_id = ? AND item_type = ? AND item_data = ?',
+            (user_id, "badge", "VIP 🌟")
+        ) as cursor:
+            if await cursor.fetchone():
+                await db.rollback()
+                return await callback.answer("У вас уже есть этот значок!", show_alert=True)
+
+        cursor = await db.execute(
+            'UPDATE users_stats SET balance = balance - 2000 WHERE user_id = ? AND balance >= 2000',
+            (user_id,)
+        )
         if cursor.rowcount == 0:
+            await db.rollback()
             return await callback.answer("Недостаточно монет! Нужно 2000.", show_alert=True)
+
+        await db.execute(
+            'INSERT INTO user_inventory (user_id, item_type, item_data) VALUES (?, ?, ?)',
+            (user_id, "badge", "VIP 🌟")
+        )
         await db.commit()
-        
-    await add_to_inventory(callback.from_user.id, "badge", "VIP 🌟")
+
     await callback.answer("Вы успешно приобрели значок VIP 🌟!", show_alert=True)
     
     # Update the shop message to reflect new balance
+    stats = await get_user_stats(user_id)
+    balance = stats[7] if stats else 0
     kb = types.InlineKeyboardMarkup(inline_keyboard=[
         [types.InlineKeyboardButton(text="👑 Кастомный титул (500 монет)", callback_data="buy_title")],
         [types.InlineKeyboardButton(text="👻 Скрыть стату в топе (1000 монет)", callback_data="buy_hidden")],
         [types.InlineKeyboardButton(text="🎖️ Значок VIP (2000 монет)", callback_data="buy_badge_vip")]
     ])
-    await callback.message.edit_text(f"🛒 <b>Магазин Аля-бота</b>\n\nУ вас <b>{balance-2000}</b> монет.\n\nДоступные товары:", parse_mode="HTML", reply_markup=kb)
+    await callback.message.edit_text(
+        f"🛒 <b>Магазин Аля-бота</b>\n\nУ вас <b>{balance}</b> монет.\n\nДоступные товары:",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
 
-REGEX_DICE_GAMES = re.compile(r'(?i)^[/*\s]*(кости|кубик|дартс|баскетбол|футбол|казино|слоты|слот|боулинг)')
+REGEX_DICE_GAMES = re.compile(r'(?i)^[/*\s]*(?:кости|кубик|dice|cube|дартс|darts|баскетбол|basketball|футбол|football|казино|casino|слоты|slots|слот|slot|боулинг|bowling)\b')
 
 @dp.message(F.text & F.text.regexp(REGEX_DICE_GAMES))
 async def cmd_dice_games(message: types.Message):
@@ -2091,18 +2235,21 @@ async def cmd_dice_games(message: types.Message):
     
     text = message.text.lower()
     emoji = "🎲"
-    if "дартс" in text: emoji = "🎯"
-    elif "баскетбол" in text: emoji = "🏀"
-    elif "футбол" in text: emoji = "⚽"
-    elif "казино" in text or "слот" in text: emoji = "🎰"
-    elif "боулинг" in text: emoji = "🎳"
+    if "дартс" in text or "darts" in text: emoji = "🎯"
+    elif "баскетбол" in text or "basketball" in text: emoji = "🏀"
+    elif "футбол" in text or "football" in text: emoji = "⚽"
+    elif "казино" in text or "casino" in text or "слот" in text or "slot" in text: emoji = "🎰"
+    elif "боулинг" in text or "bowling" in text: emoji = "🎳"
     
     if emoji == "🎰":
         match = REGEX_SLOT.search(message.text)
-        bet_str = match.group(2) if match else None
+        bet_str = match.group(1) if match else None
         
         if not bet_str:
-            return await message.answer("🎰 <b>Формат:</b> /казино [ставка]\n<i>Пример: /казино 100</i>", parse_mode="HTML")
+            return await message.answer(
+                "🎰 <b>Формат:</b> /казино [ставка] или /casino [bet]\n<i>Пример: /казино 100</i>",
+                parse_mode="HTML"
+            )
             
         try:
             bet = int(bet_str)
@@ -2161,7 +2308,15 @@ async def cmd_dice_games(message: types.Message):
 async def cmd_rps(message: types.Message):
     if await check_cd_and_warn(message, "iris_cmd", 3): return
     match = REGEX_RPS.search(message.text)
-    user_choice = match.group(2).lower() if match and match.group(2) else None
+    if not match:
+        return await temp_reply(message, "❌ Формат: /кнб [камень|ножницы|бумага] или /rps [rock|paper|scissors]")
+    user_choice = match.group(1).lower() if match.group(1) else None
+    if user_choice:
+        user_choice = {
+            "rock": "камень",
+            "paper": "бумага",
+            "scissors": "ножницы",
+        }.get(user_choice, user_choice)
     
     if not user_choice:
         builder = InlineKeyboardBuilder()
@@ -2211,13 +2366,18 @@ async def callback_rps(callback: types.CallbackQuery):
 async def cmd_magic_ball(message: types.Message):
     if await check_cd_and_warn(message, "iris_cmd", 3): return
     match = REGEX_MAGIC_BALL.search(message.text)
+    if not match:
+        return await temp_reply(message, "❌ Формат: /шар [вопрос] или ball [question]")
     question = match.group(1).strip()
     answers = ["Бесспорно", "Предрешено", "Никаких сомнений", "Определённо да", "Можешь быть уверен в этом", 
                "Мне кажется - да", "Вероятнее всего", "Хорошие перспективы", "Знаки говорят - да", "Да", 
                "Пока не ясно, попробуй снова", "Спроси позже", "Лучше не рассказывать", "Сейчас нельзя предсказать", 
                "Сконцентрируйся и спроси опять", "Даже не думай", "Мой ответ - нет", "По моим данным - нет", 
                "Перспективы не очень хорошие", "Весьма сомнительно"]
-    await message.answer(f"🎱 <b>Вопрос:</b> <i>{question}</i>\n<b>Ответ:</b> {random.choice(answers)}", parse_mode="HTML")
+    await message.answer(
+        f"🎱 <b>Вопрос:</b> <i>{escape_html_text(question)}</i>\n<b>Ответ:</b> {random.choice(answers)}",
+        parse_mode="HTML"
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_COMPATIBILITY))
 async def cmd_compatibility(message: types.Message):
@@ -2237,7 +2397,10 @@ async def cmd_compatibility(message: types.Message):
     compat = random.randint(0, 100)
     random.seed()
     
-    await message.answer(f"💞 Совместимость <b>{user1.first_name}</b> и <b>{user2.first_name}</b> на сегодня — <b>{compat}%</b>", parse_mode="HTML")
+    await message.answer(
+        f"💞 Совместимость <b>{escape_html_text(user1.first_name)}</b> и <b>{escape_html_text(user2.first_name)}</b> на сегодня — <b>{compat}%</b>",
+        parse_mode="HTML"
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_ROULETTE))
 async def cmd_roulette(message: types.Message):
@@ -2301,8 +2464,10 @@ async def process_read_langs(callback: types.CallbackQuery):
     try:
         await callback.message.edit_text("🌐 <b>Каталог Манги</b>\nВыберите раздел для чтения:", parse_mode="HTML", reply_markup=get_langs_menu("readlang"))
     except Exception:
-        try: await callback.message.delete()
-        except Exception: pass
+        try:
+            await callback.message.delete()
+        except Exception as e:
+            logging.debug(f"read_langs: failed to delete stale message: {e}")
         await callback.message.answer("🌐 <b>Каталог Манги</b>\nВыберите раздел для чтения:", parse_mode="HTML", reply_markup=get_langs_menu("readlang"))
 
 @dp.callback_query(F.data.startswith("readlang_"))
@@ -2316,8 +2481,10 @@ async def process_read_ranobe_langs(callback: types.CallbackQuery):
     try:
         await callback.message.edit_text("📖 <b>Каталог Ранобэ</b>\nВыберите тайтл или язык для чтения:", parse_mode="HTML", reply_markup=get_ranobe_langs_menu("readranobelang"))
     except Exception:
-        try: await callback.message.delete()
-        except Exception: pass
+        try:
+            await callback.message.delete()
+        except Exception as e:
+            logging.debug(f"read_ranobe_langs: failed to delete stale message: {e}")
         await callback.message.answer("📖 <b>Каталог Ранобэ</b>\nВыберите тайтл или язык для чтения:", parse_mode="HTML", reply_markup=get_ranobe_langs_menu("readranobelang"))
 
 @dp.callback_query(F.data.startswith("readranobelang_"))
@@ -2374,7 +2541,7 @@ async def send_chapter(callback: types.CallbackQuery):
 
         msg_text = "✅ Приятного чтения!"
         if not is_url and link and link != "-" and link.lower() != "нет" and link.lower() != "none":
-            msg_text = f"✅ Глава {chapter_num}\n\n📝 <b>Текст:</b>\n{link}"
+            msg_text = f"✅ Глава {chapter_num}\n\n📝 <b>Текст:</b>\n{escape_html_text(link)}"
 
         await callback.message.answer(msg_text, reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
     else:
@@ -2401,6 +2568,9 @@ async def process_admin_del_chapter_item(callback: types.CallbackQuery):
          deleted = cursor.rowcount > 0
 
     if deleted:
+         await sync_reader_snapshot(
+             f"delete chapter via tg: {'ranobe' if is_ranobe else 'manga'}_{lang}_{chapter_num}"
+         )
          await callback.answer("✅ Глава успешно удалена!", show_alert=True)
          await callback.message.delete()
     else:
@@ -2451,7 +2621,7 @@ async def akashic_read_chapter(callback: types.CallbackQuery, callback_data: Aka
         await callback.message.delete()
         msg_text = f"✅ <b>Хроники Акаши</b> — Том {callback_data.volume}, Глава {callback_data.chapter}"
         if not is_url and url and url != "-" and url.lower() != "нет" and url.lower() != "none":
-            msg_text += f"\n\n📝 <b>Текст:</b>\n{url}"
+            msg_text += f"\n\n📝 <b>Текст:</b>\n{escape_html_text(url)}"
         else:
             msg_text += "\nПриятного чтения!"
         await callback.message.answer(msg_text, reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
@@ -2470,6 +2640,7 @@ async def process_admin_del_akashic_item(callback: types.CallbackQuery):
          await db.commit()
          deleted = cursor.rowcount > 0
     if deleted:
+         await sync_reader_snapshot(f"delete chapter via tg: akashic_{volume}_{chapter}")
          await callback.answer("✅ Глава успешно удалена!", show_alert=True)
          await callback.message.delete()
     else:
@@ -2519,7 +2690,7 @@ async def british_read_chapter(callback: types.CallbackQuery, callback_data: Bri
 
         msg_text = f"✅ <b>Британская красавица</b> — Том {callback_data.volume}, Глава {callback_data.chapter}"
         if not is_url and url and url != "-" and url.lower() != "нет" and url.lower() != "none":
-            msg_text += f"\n\n📝 <b>Текст:</b>\n{url}"
+            msg_text += f"\n\n📝 <b>Текст:</b>\n{escape_html_text(url)}"
         else:
             msg_text += "\nПриятного чтения!"
         await callback.message.answer(msg_text, reply_markup=builder.adjust(1).as_markup(), parse_mode="HTML")
@@ -2538,6 +2709,7 @@ async def process_admin_del_british_item(callback: types.CallbackQuery):
          await db.commit()
          deleted = cursor.rowcount > 0
     if deleted:
+         await sync_reader_snapshot(f"delete chapter via tg: british_{volume}_{chapter}")
          await callback.answer("✅ Глава успешно удалена!", show_alert=True)
          await callback.message.delete()
     else:
@@ -2611,8 +2783,10 @@ async def send_user_art_item(chat_id: int, index: int, user_id: int, message_to_
     arts = await get_all_arts()
     if not arts:
         if message_to_edit:
-            try: await message_to_edit.delete() 
-            except Exception: pass
+            try:
+                await message_to_edit.delete()
+            except Exception as e:
+                logging.debug(f"user_art_item: failed to delete empty-gallery message: {e}")
         await bot.send_message(chat_id, "Галерея пуста 😔", reply_markup=get_back_button())
         return
 
@@ -2650,8 +2824,10 @@ async def send_user_art_item(chat_id: int, index: int, user_id: int, message_to_
         except Exception as e:
             if "not modified" not in str(e).lower():
                 await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
-                try: await message_to_edit.delete() 
-                except Exception: pass
+                try:
+                    await message_to_edit.delete()
+                except Exception as e:
+                    logging.debug(f"user_art_item: failed to delete outdated media message: {e}")
     else:
         await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -2667,8 +2843,10 @@ async def process_user_art_view(callback: types.CallbackQuery, state: FSMContext
     data = await state.get_data()
     if "user_grid_photos" in data:
         for mid in data.get("user_grid_photos", []):
-            try: await bot.delete_message(callback.message.chat.id, mid)
-            except Exception: pass
+            try:
+                await bot.delete_message(callback.message.chat.id, mid)
+            except Exception as e:
+                logging.debug(f"user_art_view: failed to cleanup grid photo {mid}: {e}")
         await state.update_data(user_grid_photos=[])
 
     index = int(callback.data.split(":")[1])
@@ -2708,8 +2886,10 @@ async def process_user_art_grid(callback: types.CallbackQuery, state: FSMContext
     # Очистка предыдущей сетки
     data = await state.get_data()
     for mid in data.get("user_grid_photos", []):
-        try: await bot.delete_message(callback.message.chat.id, mid)
-        except Exception: pass
+        try:
+            await bot.delete_message(callback.message.chat.id, mid)
+        except Exception as e:
+            logging.debug(f"user_art_grid: failed to cleanup previous grid photo {mid}: {e}")
 
     page = int(callback.data.split(":")[1])
     arts = await get_all_arts()
@@ -2770,8 +2950,10 @@ async def process_user_art_grid(callback: types.CallbackQuery, state: FSMContext
         if set(ids) != set(current_ids):
             return  # Устаревшая таска, данные уже удалены при перелистывании
         for mid in ids:
-            try: await bot.delete_message(chat_id, mid)
-            except Exception: pass
+            try:
+                await bot.delete_message(chat_id, mid)
+            except Exception as e:
+                logging.debug(f"user_art_grid:auto_cleanup failed for message {mid}: {e}")
     asyncio.create_task(auto_cleanup(callback.message.chat.id, all_ids, state))
 
 # --- Ввод номера страницы в сетке ---
@@ -2966,7 +3148,11 @@ async def admin_menu_ai_settings(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "admin_sync_webapp")
 async def admin_menu_sync_webapp(callback: types.CallbackQuery):
     await callback.message.delete()
-    await cmd_sync_webapp(callback.message)
+    try:
+        msg = callback.message.model_copy(update={"from_user": callback.from_user, "text": "/sync_webapp"})
+    except AttributeError:
+        msg = callback.message.copy(update={"from_user": callback.from_user, "text": "/sync_webapp"})
+    await cmd_sync_webapp(msg)
     await callback.answer()
 
 @dp.callback_query(F.data.startswith("admin_cmd_"))
@@ -2996,9 +3182,13 @@ async def admin_menu_commands(callback: types.CallbackQuery, state: FSMContext):
         "unblacklist_ai": cmd_unblacklist_ai,
         "test_notification": cmd_test_notification
     }
+    stateful_commands = {
+        "add_chapter", "add_ranobe", "add_akashic", "add_british", "add_art",
+        "delete_chapter", "delete_ranobe", "delete_akashic", "delete_british",
+    }
     
     if cmd in commands:
-        if "add" in cmd or "delete" in cmd:
+        if cmd in stateful_commands:
             await commands[cmd](msg, state)
         else:
             await commands[cmd](msg)
@@ -3018,8 +3208,8 @@ async def build_reader_data() -> dict:
     try:
         me = await bot.get_me()
         bot_username = me.username
-    except:
-        pass
+    except Exception as e:
+        logging.debug(f"build_reader_data: failed to get bot username, using fallback: {e}")
 
     result = {"series": [], "bot_username": bot_username}
     
@@ -3147,9 +3337,21 @@ async def build_reader_data() -> dict:
             # Сортируем главы
             try:
                 target_vol["chapters"].sort(key=lambda x: (float(x["chapter"]) if str(x["chapter"]).replace('.','',1).isdigit() else 0))
-            except: pass
+            except Exception as e:
+                logging.debug(f"build_reader_data: chapter sort fallback for {s_id}/{vol}: {e}")
 
     return result
+
+
+async def sync_reader_snapshot(commit_message: str) -> None:
+    """Rebuild WebApp chapters snapshot and trigger background git sync."""
+    try:
+        result = await build_reader_data()
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(commit_message))
+    except Exception as e:
+        logging.error(f"Reader sync error: {e}")
 
 
 def _clean_urls(url_text: str) -> list:
@@ -3193,8 +3395,9 @@ async def cmd_sync_webapp(message: types.Message):
                 row = await cursor.fetchone()
                 if row and row[0]:
                     return await message.answer("🔒 Синхронизация сейчас заблокирована. Разблокируйте её командой /toggle_sync перед использованием.", parse_mode="HTML")
-        except Exception:
-            pass # Таблица еще не создана
+        except Exception as e:
+            # Таблица может отсутствовать на старых инсталляциях до первого /toggle_sync
+            logging.debug(f"sync_webapp: sync_settings table check skipped: {e}")
     
     msg = await message.answer("🔄 <i>Собираем данные из БД для WebApp...</i>", parse_mode="HTML")
     try:
@@ -3213,12 +3416,20 @@ async def cmd_sync_webapp(message: types.Message):
         if success:
             await msg.edit_text("✅ <b>Успешно!</b> Главы синхронизированы с WebApp. (Они появятся в приложении в течение 1-2 минут)", parse_mode="HTML")
         else:
-            await msg.edit_text(f"⚠️ База обновлена локально. <code>git push</code> не прошел.\n\n<b>Ответ сервера:</b>\n<pre>{output}</pre>\n\nСкорее всего, у бота на сервере нет прав для git push.", parse_mode="HTML")
+            await msg.edit_text(
+                f"⚠️ База обновлена локально. <code>git push</code> не прошел.\n\n"
+                f"<b>Ответ сервера:</b>\n<pre>{escape_html_text(output)}</pre>\n\n"
+                f"Скорее всего, у бота на сервере нет прав для git push.",
+                parse_mode="HTML"
+            )
             
     except Exception as e:
         import traceback
         err_msg = traceback.format_exc()
-        await msg.edit_text(f"❌ <b>Ошибка:</b> {e}\n<pre>{err_msg}</pre>", parse_mode="HTML")
+        await msg.edit_text(
+            f"❌ <b>Ошибка:</b> {escape_html_text(e)}\n<pre>{escape_html_text(err_msg)}</pre>",
+            parse_mode="HTML"
+        )
 
 @dp.message(Command("alya_mode"))
 async def cmd_alya_mode(message: types.Message):
@@ -3285,8 +3496,10 @@ async def send_admin_art_item(chat_id: int, index: int, message_to_edit: types.M
     arts = await get_all_arts()
     if not arts:
         if message_to_edit:
-            try: await message_to_edit.delete() 
-            except: pass
+            try:
+                await message_to_edit.delete()
+            except Exception as e:
+                logging.debug(f"admin_art_item: failed to delete empty-gallery message: {e}")
         await bot.send_message(chat_id, "Галерея артов пуста 😔")
         return
 
@@ -3319,8 +3532,10 @@ async def send_admin_art_item(chat_id: int, index: int, message_to_edit: types.M
             if "not modified" not in str(e).lower():
                 # На случай осечки
                 await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
-                try: await message_to_edit.delete() 
-                except Exception: pass
+                try:
+                    await message_to_edit.delete()
+                except Exception as e:
+                    logging.debug(f"admin_art_item: failed to delete outdated media message: {e}")
     else:
         await bot.send_photo(chat_id, photo=file_id, caption=caption, parse_mode="HTML", reply_markup=builder.as_markup())
 
@@ -3374,8 +3589,10 @@ async def process_admin_art_grid(callback: types.CallbackQuery, state: FSMContex
     data = await state.get_data()
     prev_photos = data.get("grid_photos", [])
     for mid in prev_photos:
-        try: await bot.delete_message(callback.message.chat.id, mid)
-        except: pass
+        try:
+            await bot.delete_message(callback.message.chat.id, mid)
+        except Exception as e:
+            logging.debug(f"admin_art_grid: failed to cleanup previous photo {mid}: {e}")
 
     page = int(callback.data.split(":")[1])
     arts = await get_all_arts()
@@ -3423,8 +3640,10 @@ async def process_admin_art_grid(callback: types.CallbackQuery, state: FSMContex
         if set(ids) != set(current_ids):
             return  # Устаревшая таска, данные уже удалены при перелистывании
         for mid in ids:
-            try: await bot.delete_message(chat_id, mid)
-            except Exception: pass
+            try:
+                await bot.delete_message(chat_id, mid)
+            except Exception as e:
+                logging.debug(f"admin_art_grid:auto_cleanup failed for message {mid}: {e}")
 
     asyncio.create_task(auto_cleanup(callback.message.chat.id, photo_ids + [control_msg.message_id], state))
 
@@ -3433,8 +3652,10 @@ async def process_admin_art_view_back(callback: types.CallbackQuery, state: FSMC
     # Удаляем фото при возврате к списку
     data = await state.get_data()
     for mid in data.get("grid_photos", []):
-        try: await bot.delete_message(callback.message.chat.id, mid)
-        except: pass
+        try:
+            await bot.delete_message(callback.message.chat.id, mid)
+        except Exception as e:
+            logging.debug(f"admin_art_view_back: failed to delete grid photo {mid}: {e}")
     await state.update_data(grid_photos=[]) # Очищаем
     
     await callback.message.delete()
@@ -3467,8 +3688,8 @@ async def cmd_toggle_ai(message: types.Message):
         try:
             member = await bot.get_chat_member(message.chat.id, message.from_user.id)
             is_group_admin = member.status in ["creator", "administrator"]
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug(f"toggle_ai: failed to get chat member status: {e}")
             
     if not is_bot_admin and not is_group_admin:
         return await message.answer("Только администраторы могут использовать эту команду.")
@@ -3492,8 +3713,8 @@ async def process_cancel_state(callback: types.CallbackQuery, state: FSMContext)
     await state.clear()
     try:
         await callback.message.delete()
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"cancel_state: failed to delete message: {e}")
     await callback.answer("Действие отменено ❌", show_alert=True)
 
 @dp.message(Command("add_chapter"))
@@ -3635,11 +3856,21 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
     builder.button(text="📢 Разослать ВСЕМ", callback_data="notify_all")
     builder.button(text="❌ Отмена", callback_data="notify_no")
     builder.adjust(1)
+    series_key = (
+        f"manga_{content_id}" if ctype == "manga" else
+        f"ranobe_{content_id}" if ctype == "ranobe" else
+        "akashic_records" if ctype == "akashic" else
+        "british_belle" if ctype == "british" else
+        str(content_id)
+    )
     
     await state.set_state(NotifyUsers.waiting_for_decision)
+    safe_id_label = escape_html_text(id_label)
+    safe_chapter = escape_html_text(chapter)
+    safe_link = escape_html_text(link)
     await state.update_data(
-        notify_text=f"{ct['emoji']} <b>Вышла новая глава {ct['name']}!</b>\n{id_label}, Глава {chapter}\n🔗 {link}",
-        series_id=str(content_id)
+        notify_text=f"{ct['emoji']} <b>Вышла новая глава {ct['name']}!</b>\n{safe_id_label}, Глава {safe_chapter}\n🔗 {safe_link}",
+        series_id=series_key
     )
     await message.answer("Выберите способ уведомления:", reply_markup=builder.as_markup())
 
@@ -3669,8 +3900,8 @@ async def process_notification_decision(callback: types.CallbackQuery, state: FS
             await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
             count += 1
             await asyncio.sleep(0.05)
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug(f"notifications: failed to send to {user_id}: {e}")
             
     await callback.message.answer(f"✅ Рассылка завершена!\nСообщение получили <b>{count}</b> пользователей.", parse_mode="HTML")
 
@@ -3739,12 +3970,15 @@ async def uc_delete_chapter(message: types.Message, state: FSMContext):
             f'DELETE FROM {ct["table"]} WHERE {ct["chapter_col"]} = ? AND {ct["id_col"]} = ?',
             (chapter, content_id)
         )
+        deleted = cursor.rowcount > 0
         id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
-        if cursor.rowcount > 0:
+        if deleted:
             await message.answer(f"✅ {ct['emoji']} {ct['name']}: глава {chapter} ({id_label}) успешно удалена из базы!")
         else:
             await message.answer(f"❌ {ct['emoji']} {ct['name']}: глава {chapter} ({id_label}) не найдена!")
         await db.commit()
+    if deleted:
+        await sync_reader_snapshot(f"delete chapter via fsm: {ctype}_{content_id}_{chapter}")
     await state.clear()
 # ----------------------------------------
 
@@ -3793,7 +4027,7 @@ async def cmd_suggest_art(message: types.Message, state: FSMContext):
 async def process_suggested_art(message: types.Message, state: FSMContext):
     file_id = message.photo[-1].file_id
     user_id = message.from_user.id
-    username = message.from_user.username or message.from_user.first_name
+    safe_user_label = format_user_tag(message.from_user.username, message.from_user.first_name, user_id)
     
     async with aiosqlite.connect('manga.db') as db:
         cursor = await db.execute('INSERT INTO suggested_arts (user_id, file_id) VALUES (?, ?)', (user_id, file_id))
@@ -3814,12 +4048,12 @@ async def process_suggested_art(message: types.Message, state: FSMContext):
             await bot.send_photo(
                 chat_id=admin_id,
                 photo=file_id,
-                caption=f"📝 <b>Новая предложка арта!</b>\nОт: @{username} (ID: <code>{user_id}</code>)\nВыберите действие:",
+                caption=f"📝 <b>Новая предложка арта!</b>\nОт: {safe_user_label} (ID: <code>{user_id}</code>)\nВыберите действие:",
                 parse_mode="HTML",
                 reply_markup=builder.as_markup()
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug(f"suggested_art: failed to notify admin {admin_id}: {e}")
 
 @dp.callback_query(F.data.startswith("artaccept_"))
 async def process_art_accept(callback: types.CallbackQuery):
@@ -3841,8 +4075,8 @@ async def process_art_accept(callback: types.CallbackQuery):
     
     try:
         await bot.send_message(chat_id=user_id, text="🎉 <b>Поздравляем!</b> Ваш предложенный арт прошел проверку и был добавлен в галерею бота!", parse_mode="HTML")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"art_accept: failed to notify user {user_id}: {e}")
 
 @dp.callback_query(F.data.startswith("artreject_"))
 async def process_art_reject(callback: types.CallbackQuery):
@@ -3863,8 +4097,8 @@ async def process_art_reject(callback: types.CallbackQuery):
     
     try:
         await bot.send_message(chat_id=user_id, text="😔 <b>К сожалению</b>, ваш предложенный арт был отклонен администрацией (возможно, не подошел по качеству или стилистике).", parse_mode="HTML")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"art_reject: failed to notify user {user_id}: {e}")
 
 
 # ==============================================================================
@@ -3929,8 +4163,12 @@ class StatsMiddleware(BaseMiddleware):
                                             await db.execute('UPDATE users_stats SET level = ?, balance = balance + ? WHERE user_id = ?', (target_level, reward, user_id))
                                             async with db.execute('SELECT balance FROM users_stats WHERE user_id = ?', (user_id,)) as b_cursor:
                                                 new_balance = (await b_cursor.fetchone())[0]
-                                            user_name = event.from_user.first_name
-                                            await event.answer(f"🎉 <b>Поздравляем!</b> {user_name} достигает <b>{target_level} уровня</b>!\n💰 Награда: {reward} монет\n💳 Текущий баланс: {new_balance}", parse_mode="HTML")
+                                            user_name = escape_html_text(event.from_user.first_name)
+                                            await event.answer(
+                                                f"🎉 <b>Поздравляем!</b> {user_name} достигает <b>{target_level} уровня</b>!\n"
+                                                f"💰 Награда: {reward} монет\n💳 Текущий баланс: {new_balance}",
+                                                parse_mode="HTML"
+                                            )
                                 # -----------------------
                             else:
                                 await db.execute('UPDATE users_stats SET messages_count = messages_count + 1 WHERE user_id = ?', (user_id,))
@@ -4512,8 +4750,8 @@ async def handle_comments_report(request: aiohttp.web.Request) -> aiohttp.web.Re
         for admin_id in admins:
             try:
                 await bot.send_message(admin_id, report_text, parse_mode="HTML")
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"comments_report: failed to notify admin {admin_id}: {e}")
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:

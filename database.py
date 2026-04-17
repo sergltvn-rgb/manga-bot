@@ -459,20 +459,33 @@ async def get_user_inventory(user_id: int, item_type: str = None):
             return await cursor.fetchall()
 
 # --- Referral Functions ---
-async def add_referral(referrer_id: int, referred_id: int):
+async def add_referral(referrer_id: int, referred_id: int) -> bool:
+    if referrer_id == referred_id:
+        return False
+
     async with aiosqlite.connect('manga.db') as db:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+        await db.execute('BEGIN IMMEDIATE')
+
         # Гарантируем наличие записей в users_stats
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (referred_id,))
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (referrer_id,))
-        
+
+        # Защита от повторной выдачи бонусов: награда только при первом реферале пользователя
+        cursor = await db.execute(
+            'UPDATE users_stats SET referred_by = ? WHERE user_id = ? AND COALESCE(referred_by, 0) = 0',
+            (referrer_id, referred_id)
+        )
+        if cursor.rowcount == 0:
+            await db.rollback()
+            return False
+
         await db.execute('INSERT INTO referrals (referrer_id, referred_id, timestamp) VALUES (?, ?, ?)',
                          (referrer_id, referred_id, now))
-        await db.execute('UPDATE users_stats SET referred_by = ? WHERE user_id = ?', (referrer_id, referred_id))
         await db.execute('UPDATE users_stats SET balance = balance + 1000, xp = xp + 3 WHERE user_id = ?', (referrer_id,))
         await db.execute('UPDATE users_stats SET balance = balance + 500 WHERE user_id = ?', (referred_id,))
         await db.commit()
+        return True
 
 async def get_referral_stats(user_id: int):
     async with aiosqlite.connect('manga.db') as db:

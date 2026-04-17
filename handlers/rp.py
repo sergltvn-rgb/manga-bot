@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import html
 import re
 from aiogram import Router, types, F
 from typing import Union
@@ -135,7 +136,7 @@ async def rp_commands(message: types.Message):
     
     caption = f"{emoji} {user1.mention_html()} {text_act} {user2.mention_html()}"
     if custom_text:
-        caption += f"\n💬 <i>«{custom_text}»</i>"
+        caption += f"\n💬 <i>«{html.escape(custom_text, quote=False)}»</i>"
         
     gif_url = await get_rp_gif(action_key)
     if gif_url:
