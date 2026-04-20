@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "check:js": "node scripts/check-js.mjs"
+  },
   "dependencies": {
     "jsdom": "^29.0.2"
   }

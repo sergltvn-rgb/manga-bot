@@ -595,7 +595,8 @@ body {
 }
 
 /* Immersive state - removed progress bar shift */
-.immersive .reader-top-bar { transform: translateY(-100%); }
+.immersive .reader-top-bar,
+.immersive .reader-header { transform: translateY(-100%); }
 .immersive .reader-bottom-bar { transform: translateY(100%); }
 
 /* === ПАНЕЛЬ НАСТРОЕК === */
@@ -2453,6 +2454,7 @@ input:checked + .slider:before { transform: translateX(20px); }
    ========================================================================== */
 
 .reader-top-bar,
+.reader-header,
 .reader-bottom-bar {
     transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
                 opacity 0.25s ease,
@@ -2460,7 +2462,8 @@ input:checked + .slider:before { transform: translateX(20px); }
     will-change: transform, opacity;
 }
 
-.reader-top-bar.bars-hidden {
+.reader-top-bar.bars-hidden,
+.reader-header.bars-hidden {
     transform: translateY(-100%);
     opacity: 0;
     pointer-events: none;
