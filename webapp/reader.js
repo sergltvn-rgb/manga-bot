@@ -28,6 +28,9 @@ let currentCommentSort = 'top';
 let allCommentsCache = []; 
 let activeCommentEditId = null;
 let isImmersive = false;
+let prefetchedChapter = { idx: -1, html: null };
+let _prefetchingIdx = -1;
+let _chapterAbortController = null;
 
 function toggleAdminMode(enabled) {
     return readerMeta.toggleAdminMode(enabled);
