@@ -1,0 +1,127 @@
+name: Reader Regression
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"
+  pull_request:
+    paths:
+      - "bot.py"
+      - "database.py"
+      - "scratch/**"
+      - "webapp/**"
+      - ".github/workflows/reader-regression.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  pr_smoke:
+    name: PR Smoke (API Regression)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BOT_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+      WEBAPP_URL: "http://localhost:8080"
+      API_HOST: "http://localhost:8080"
+      TMA_AUTH: ${{ secrets.TMA_AUTH }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install aiogram aiohttp aiosqlite python-dotenv
+
+      - name: Run PR smoke regression
+        run: python scratch/run_regression_suite.py
+
+  nightly_full:
+    name: Nightly/Manual Full Regression
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      BOT_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+      WEBAPP_URL: "http://localhost:8080"
+      API_HOST: "http://localhost:8080"
+      TMA_AUTH: ${{ secrets.TMA_AUTH }}
+      SERVER_READER_TELEMETRY_SAMPLE_RATE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "webapp/package-lock.json"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install aiogram aiohttp aiosqlite python-dotenv
+
+      - name: Install Webapp deps
+        working-directory: webapp
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: webapp
+        run: npx playwright install --with-deps chromium
+
+      - name: Ensure TMA_AUTH secret is configured
+        run: |
+          if [ -z "${TMA_AUTH}" ]; then
+            echo "TMA_AUTH secret is required for full nightly/manual regression."
+            echo "Set repository secret TMA_AUTH and re-run the workflow."
+            exit 1
+          fi
+
+      - name: Run full regression
+        run: python scratch/run_regression_suite.py --with-e2e --with-auth-limits
+
+      - name: Build KPI dashboard + enforce absolute gate
+        run: |
+          python scratch/telemetry_kpi_dashboard.py \
+            --window-days 7 \
+            --output-json artifacts/kpi-dashboard.json \
+            --output-md artifacts/kpi-dashboard.md \
+            --enforce-absolute-gate \
+            --min-client-chapter-open-events 1 \
+            --min-server-reader-events 3 \
+            --max-client-chapter-open-p95-ms 2500 \
+            --max-server-api-reader-p95-ms 1500
+
+      - name: Upload KPI dashboard artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kpi-dashboard
+          path: |
+            artifacts/kpi-dashboard.json
+            artifacts/kpi-dashboard.md
+          if-no-files-found: warn
+
+      - name: Upload Playwright artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            webapp/playwright-report
+            webapp/test-results
+          if-no-files-found: ignore

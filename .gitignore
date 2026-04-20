@@ -30,6 +30,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+playwright-report/
+test-results/
+webapp/playwright-report/
+webapp/test-results/
 
 # Other
 .DS_Store
@@ -38,6 +42,7 @@ Desktop.ini
 .cache/
 dist/
 build/
+artifacts/
 *.bak
 *.rar
 *.zip
