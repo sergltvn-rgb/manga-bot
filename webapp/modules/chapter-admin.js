@@ -288,7 +288,7 @@
             const container = global.document.getElementById('chapters-list');
             if (!container) return;
 
-            const items = container.querySelectorAll('.chapter-item[draggable="true"]');
+            const items = container.querySelectorAll('.chapter-item');
             items.forEach((item) => {
                 item.removeEventListener('dragstart', handleDragStart);
                 item.removeEventListener('dragover', handleDragOver);
@@ -315,14 +315,16 @@
 
             cleanupChapterDnD();
 
-            const items = container.querySelectorAll('.chapter-item[draggable="true"]');
+            const items = container.querySelectorAll('.chapter-item');
             items.forEach((item) => {
-                item.addEventListener('dragstart', handleDragStart);
-                item.addEventListener('dragover', handleDragOver);
-                item.addEventListener('drop', handleDrop);
-                item.addEventListener('dragend', handleDragEnd);
-                item.addEventListener('dragenter', handleDragEnter);
-                item.addEventListener('dragleave', handleDragLeave);
+                if (item.getAttribute('draggable') === 'true') {
+                    item.addEventListener('dragstart', handleDragStart);
+                    item.addEventListener('dragover', handleDragOver);
+                    item.addEventListener('drop', handleDrop);
+                    item.addEventListener('dragend', handleDragEnd);
+                    item.addEventListener('dragenter', handleDragEnter);
+                    item.addEventListener('dragleave', handleDragLeave);
+                }
 
                 const handle = item.querySelector('.drag-handle');
                 if (handle) {
