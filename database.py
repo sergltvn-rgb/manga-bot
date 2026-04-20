@@ -148,6 +148,27 @@ async def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (comment_id, user_id))''')
 
+        await db.execute('''CREATE TABLE IF NOT EXISTS webapp_telemetry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            user_id TEXT DEFAULT '',
+            source_module TEXT DEFAULT '',
+            message TEXT DEFAULT '',
+            stack TEXT DEFAULT '',
+            page_url TEXT DEFAULT '',
+            user_agent TEXT DEFAULT '',
+            payload_json TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS admin_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT NOT NULL,
+            actor_user_id TEXT NOT NULL,
+            target TEXT DEFAULT '',
+            payload_json TEXT DEFAULT '',
+            result TEXT NOT NULL,
+            error TEXT DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+
         # Инициализация режима Али по умолчанию (если пусто)
         await db.execute('INSERT OR IGNORE INTO alya_settings (bot_id, mode) VALUES (1, "normal")')
         
@@ -156,6 +177,9 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_likes_chapter ON chapter_likes(chapter_key)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON user_bookmarks(user_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_reactions_chapter ON chapter_reactions(chapter_key)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_webapp_telemetry_event_time ON webapp_telemetry(event_type, created_at)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_admin_audit_actor_time ON admin_audit_log(actor_user_id, created_at)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_admin_audit_action_time ON admin_audit_log(action, created_at)')
             
         await db.commit()
 
@@ -506,3 +530,30 @@ async def get_user_referred_by(user_id: int):
         async with db.execute('SELECT referred_by FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+async def write_admin_audit_log(
+    action: str,
+    actor_user_id: str,
+    target: str = "",
+    payload_json: str = "",
+    result: str = "ok",
+    error: str = "",
+):
+    """Пишет запись об admin-действии в аудит-лог."""
+    async with aiosqlite.connect('manga.db') as db:
+        await db.execute(
+            '''
+            INSERT INTO admin_audit_log
+            (action, actor_user_id, target, payload_json, result, error)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                str(action),
+                str(actor_user_id),
+                str(target or ""),
+                str(payload_json or ""),
+                str(result or "ok"),
+                str(error or ""),
+            ),
+        )
+        await db.commit()

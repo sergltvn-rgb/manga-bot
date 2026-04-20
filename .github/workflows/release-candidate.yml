@@ -1,0 +1,143 @@
+name: Release Candidate Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: "API/WebApp base URL for canary probe"
+        required: true
+        default: "http://localhost:8080"
+        type: string
+      allowed_origin:
+        description: "Allowed Origin header for CORS checks"
+        required: true
+        default: "http://localhost:8080"
+        type: string
+      canary_samples:
+        description: "Number of /api/reader samples for canary probe"
+        required: true
+        default: "20"
+        type: string
+      canary_interval_ms:
+        description: "Delay between canary samples (ms)"
+        required: true
+        default: "500"
+        type: string
+      canary_p95_budget_ms:
+        description: "Canary p95 budget for /api/reader (ms)"
+        required: true
+        default: "1200"
+        type: string
+      kpi_window_days:
+        description: "KPI comparison window in days"
+        required: true
+        default: "7"
+        type: string
+      kpi_client_p95_ms:
+        description: "Absolute KPI gate: client chapter open p95 threshold (ms)"
+        required: true
+        default: "2500"
+        type: string
+      kpi_server_p95_ms:
+        description: "Absolute KPI gate: server /api/reader p95 threshold (ms)"
+        required: true
+        default: "1500"
+        type: string
+      kpi_min_client_events:
+        description: "Minimum client events for KPI gate"
+        required: true
+        default: "1"
+        type: string
+      kpi_min_server_events:
+        description: "Minimum server events for KPI gate"
+        required: true
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release_candidate:
+    name: Release Candidate Checklist
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      BOT_TOKEN: "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+      WEBAPP_URL: ${{ inputs.allowed_origin }}
+      API_HOST: ${{ inputs.api_url }}
+      API_URL: ${{ inputs.api_url }}
+      TEST_ALLOWED_ORIGIN: ${{ inputs.allowed_origin }}
+      TMA_AUTH: ${{ secrets.TMA_AUTH }}
+      SERVER_READER_TELEMETRY_SAMPLE_RATE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "webapp/package-lock.json"
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install aiogram aiohttp aiosqlite python-dotenv
+
+      - name: Install Webapp deps
+        working-directory: webapp
+        run: npm ci
+
+      - name: Install Playwright browser
+        working-directory: webapp
+        run: npx playwright install --with-deps chromium
+
+      - name: Ensure TMA_AUTH secret is configured
+        run: |
+          if [ -z "${TMA_AUTH}" ]; then
+            echo "TMA_AUTH secret is required for release candidate gate."
+            echo "Set repository secret TMA_AUTH and re-run workflow."
+            exit 1
+          fi
+
+      - name: Run release-candidate gate
+        run: |
+          python scratch/run_release_candidate_gate.py \
+            --api-url "${API_URL}" \
+            --allowed-origin "${TEST_ALLOWED_ORIGIN}" \
+            --with-e2e \
+            --with-auth-limits \
+            --canary-samples "${{ inputs.canary_samples }}" \
+            --canary-interval-ms "${{ inputs.canary_interval_ms }}" \
+            --canary-p95-budget-ms "${{ inputs.canary_p95_budget_ms }}" \
+            --kpi-window-days "${{ inputs.kpi_window_days }}" \
+            --kpi-client-p95-ms "${{ inputs.kpi_client_p95_ms }}" \
+            --kpi-server-p95-ms "${{ inputs.kpi_server_p95_ms }}" \
+            --kpi-min-client-events "${{ inputs.kpi_min_client_events }}" \
+            --kpi-min-server-events "${{ inputs.kpi_min_server_events }}" \
+            --output-dir artifacts/release-candidate
+
+      - name: Append checklist summary
+        if: always()
+        run: |
+          if [ -f artifacts/release-candidate/release-candidate-report.md ]; then
+            cat artifacts/release-candidate/release-candidate-report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload release-candidate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-artifacts
+          path: |
+            artifacts/release-candidate
+            webapp/playwright-report
+            webapp/test-results
+          if-no-files-found: warn

@@ -32,11 +32,20 @@ let currentCommentSort = 'top';
 let allCommentsCache = []; 
 let commentsData = []; 
 let isImmersive = false;
+const LIBRARY_FILTER_KEY = 'reader_library_filter';
+const LIBRARY_FILTERS = {
+    IN_PROGRESS: 'in_progress',
+    NOT_STARTED: 'not_started',
+    COMPLETED: 'completed'
+};
+let libraryFilter = LIBRARY_FILTERS.IN_PROGRESS;
 
 // === Typo Report State ===
 let typoSelectedText = '';
 let typoContextText = '';
 let typoSelectionRange = null;
+let _networkStatusHideTimer = null;
+let _networkStatusBound = false;
 
 function toggleAdminMode(enabled) {
     isAdminMode = enabled;
@@ -228,6 +237,116 @@ function safeSetLocal(key, val) {
     } catch (e) {}
 }
 
+const READER_API_CACHE_KEY = 'reader_api_snapshot_v1';
+const OFFLINE_CHAPTER_PREFETCH_COUNT = 3;
+
+function getCachedReaderApiSnapshot() {
+    const snapshot = safeGetLocal(READER_API_CACHE_KEY, null);
+    if (!snapshot || typeof snapshot !== 'object') return null;
+    if (!snapshot.payload || typeof snapshot.payload !== 'object') return null;
+    return {
+        etag: typeof snapshot.etag === 'string' ? snapshot.etag : '',
+        payload: snapshot.payload
+    };
+}
+
+function saveReaderApiSnapshot(payload, etag = '') {
+    if (!payload || typeof payload !== 'object') return;
+    safeSetLocal(READER_API_CACHE_KEY, {
+        etag: typeof etag === 'string' ? etag : '',
+        payload,
+        ts: Date.now()
+    });
+}
+
+function getChapterSourceUrls(chapter) {
+    if (!chapter || typeof chapter !== 'object') return [];
+    const urls = [];
+    if (Array.isArray(chapter.urls)) {
+        urls.push(...chapter.urls);
+    } else if (typeof chapter.url === 'string' && chapter.url) {
+        urls.push(chapter.url);
+    }
+    return urls
+        .map((u) => String(u || '').trim())
+        .filter((u) => /^https?:\/\//i.test(u));
+}
+
+function toServiceWorkerCacheUrl(rawUrl) {
+    if (!rawUrl) return '';
+    const src = String(rawUrl).trim();
+    const telegraphMatch = src.match(/^https?:\/\/telegra\.ph\/(.+)$/i);
+    if (telegraphMatch) {
+        return `https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`;
+    }
+    return src;
+}
+
+async function queueChapterUrlsForOfflineCache(startIdx = currentChapterIdx, count = OFFLINE_CHAPTER_PREFETCH_COUNT) {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    if (!Array.isArray(currentChapters) || currentChapters.length === 0) return;
+
+    const maxIdx = Math.min(currentChapters.length - 1, Number(startIdx) + Number(count) - 1);
+    const queue = [];
+    for (let idx = Number(startIdx); idx <= maxIdx; idx += 1) {
+        const chapter = currentChapters[idx];
+        const sourceUrls = getChapterSourceUrls(chapter);
+        sourceUrls.forEach((url) => {
+            const cacheUrl = toServiceWorkerCacheUrl(url);
+            if (cacheUrl) queue.push(cacheUrl);
+        });
+    }
+    const uniqueUrls = Array.from(new Set(queue));
+    if (uniqueUrls.length === 0) return;
+
+    try {
+        let controller = navigator.serviceWorker.controller;
+        if (!controller) {
+            const registration = await navigator.serviceWorker.ready;
+            controller = registration.active || registration.waiting || registration.installing || null;
+        }
+        if (!controller) return;
+        controller.postMessage({
+            type: 'CACHE_CHAPTER_URLS',
+            urls: uniqueUrls
+        });
+    } catch (e) {
+        console.warn('Service worker chapter cache queue failed:', e);
+    }
+}
+
+async function registerReaderServiceWorker() {
+    if (typeof window === 'undefined') return;
+    if (!('serviceWorker' in navigator)) return;
+    if (!window.isSecureContext && location.hostname !== 'localhost') return;
+
+    try {
+        const reg = await navigator.serviceWorker.register('./sw.js');
+        if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+        reg.addEventListener('updatefound', () => {
+            const installing = reg.installing;
+            if (!installing) return;
+            installing.addEventListener('statechange', () => {
+                if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                    showToast('\u0414\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0438\u0435 \u0447\u0438\u0442\u0430\u043b\u043a\u0438');
+                }
+            });
+        });
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            console.log('Service worker controller updated');
+        });
+    } catch (e) {
+        console.warn('Service worker registration failed:', e);
+    }
+}
+
+libraryFilter = safeGetLocal(LIBRARY_FILTER_KEY, LIBRARY_FILTERS.IN_PROGRESS);
+if (!Object.values(LIBRARY_FILTERS).includes(libraryFilter)) {
+    libraryFilter = LIBRARY_FILTERS.IN_PROGRESS;
+}
+
 // === Получение API URL из параметров URL ===
 // Приоритет: 1) ?api=... из URL 2) window.location.origin (если бот и WebApp на одном хосте)
 // На GitHub Pages (без ?api=) остаётся '' — функции, зависящие от API, корректно отключаются
@@ -244,6 +363,234 @@ async function apiFetch(url, options = {}) {
         options.headers['Authorization'] = 'tma ' + tg.initData;
     }
     return fetch(url, options);
+}
+
+const TELEMETRY_DEDUP_WINDOW_MS = 60_000;
+const MAX_CLIENT_ERROR_EVENTS_PER_SESSION = 20;
+const TELEMETRY_ALLOWED_EVENTS = new Set([
+    'client_runtime_error',
+    'client_unhandled_rejection',
+    'client_state_contract_violation',
+    'client_chapter_open_ms'
+]);
+const _telemetryDedupCache = new Map();
+let _sentClientErrorEvents = 0;
+let _errorTelemetryBound = false;
+
+function sendClientTelemetry(eventType, payload = {}) {
+    if (!API_URL || !TELEMETRY_ALLOWED_EVENTS.has(eventType)) return;
+    if (typeof fetch !== 'function') return;
+
+    const body = JSON.stringify({
+        event_type: eventType,
+        payload,
+        page_url: typeof window !== 'undefined' ? window.location.href : ''
+    });
+
+    const endpoint = `${API_URL}/api/telemetry`;
+    const headers = { 'Content-Type': 'application/json' };
+
+    // sendBeacon keeps telemetry delivery resilient during unload/navigation.
+    if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+        try {
+            const beaconPayload = new Blob([body], { type: 'application/json' });
+            if (navigator.sendBeacon(endpoint, beaconPayload)) return;
+        } catch (e) {}
+    }
+
+    apiFetch(endpoint, { method: 'POST', headers, body, keepalive: true }).catch(() => {});
+}
+
+function getModuleFromSource(source = '') {
+    const src = String(source || '');
+    if (!src) return 'unknown';
+    if (src.includes('/webapp/')) {
+        return src.split('/webapp/').pop().split('?')[0] || 'unknown';
+    }
+    if (src.includes('\\webapp\\')) {
+        return src.split('\\webapp\\').pop().split('?')[0] || 'unknown';
+    }
+    return src.split('/').pop().split('?')[0] || 'unknown';
+}
+
+function toErrorObject(reason) {
+    if (reason instanceof Error) return reason;
+    if (typeof reason === 'string') return new Error(reason);
+    try {
+        return new Error(JSON.stringify(reason));
+    } catch (e) {
+        return new Error(String(reason));
+    }
+}
+
+function getTelemetryFingerprint(eventType, errorObj, source, module) {
+    return [
+        eventType,
+        String(errorObj?.message || ''),
+        String(errorObj?.stack || '').slice(0, 200),
+        source || '',
+        module || ''
+    ].join('|');
+}
+
+function getReaderStateSnapshot() {
+    return {
+        seriesId: currentSeries?.id || null,
+        volume: currentVolume?.volume || null,
+        chapterIdx: Number.isInteger(currentChapterIdx) ? currentChapterIdx : null,
+        chaptersCount: Array.isArray(currentChapters) ? currentChapters.length : null,
+        prefetchIdx: Number.isInteger(prefetchedChapter?.idx) ? prefetchedChapter.idx : null,
+        hasAbortController: !!_chapterAbortController
+    };
+}
+
+function reportClientError(eventType, reason, extra = {}) {
+    if (_sentClientErrorEvents >= MAX_CLIENT_ERROR_EVENTS_PER_SESSION) return;
+    const errorObj = toErrorObject(reason);
+    const source = String(extra.source || '');
+    const module = String(extra.module || getModuleFromSource(source || errorObj.stack || ''));
+    const fingerprint = getTelemetryFingerprint(eventType, errorObj, source, module);
+    const now = Date.now();
+    const lastSentTs = _telemetryDedupCache.get(fingerprint) || 0;
+    if (now - lastSentTs < TELEMETRY_DEDUP_WINDOW_MS) return;
+
+    _telemetryDedupCache.set(fingerprint, now);
+    _sentClientErrorEvents += 1;
+
+    sendClientTelemetry(eventType, {
+        message: String(errorObj.message || 'Unknown error').slice(0, 1200),
+        stack: String(errorObj.stack || '').slice(0, 4000),
+        source: source.slice(0, 512),
+        module: module.slice(0, 256),
+        line: Number.isFinite(extra.line) ? extra.line : null,
+        column: Number.isFinite(extra.column) ? extra.column : null,
+        state: getReaderStateSnapshot()
+    });
+}
+
+function buildChapterOpenTelemetryContext(chapterIdx, usePrefetch) {
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    return {
+        startedAtMs: now,
+        chapterIdx: Number.isInteger(chapterIdx) ? chapterIdx : null,
+        usePrefetch: !!usePrefetch
+    };
+}
+
+function reportChapterOpenTelemetry(chapter, telemetryContext, source) {
+    if (!telemetryContext || !Number.isFinite(telemetryContext.startedAtMs)) return;
+    const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const durationMs = now - telemetryContext.startedAtMs;
+    if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > 120000) return;
+    const chapterId = chapter && chapter.chapter !== undefined ? String(chapter.chapter) : '';
+    sendClientTelemetry('client_chapter_open_ms', {
+        module: 'reader.js',
+        source: String(source || 'unknown'),
+        duration_ms: Math.round(durationMs * 100) / 100,
+        series_id: currentSeries?.id || '',
+        volume: currentVolume?.volume ?? '',
+        chapter: chapterId,
+        chapter_idx: Number.isInteger(telemetryContext.chapterIdx) ? telemetryContext.chapterIdx : null,
+        used_prefetch: !!telemetryContext.usePrefetch
+    });
+}
+
+function bindGlobalErrorTelemetry() {
+    if (_errorTelemetryBound) return;
+    _errorTelemetryBound = true;
+
+    window.addEventListener('error', (event) => {
+        reportClientError('client_runtime_error', event.error || event.message, {
+            source: event.filename,
+            module: getModuleFromSource(event.filename || ''),
+            line: event.lineno,
+            column: event.colno
+        });
+    });
+
+    window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason;
+        reportClientError('client_unhandled_rejection', reason, {
+            source: 'window.unhandledrejection',
+            module: 'bootstrap'
+        });
+    });
+}
+
+function renderStateBlock(target, options = {}) {
+    const container = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!container) return;
+
+    const variant = String(options.variant || 'empty');
+    const icon = typeof options.icon === 'string' && options.icon ? options.icon : (variant === 'error' ? '⚠️' : '📚');
+    const title = String(options.title || '');
+    const description = String(options.description || '');
+    const actionLabel = String(options.actionLabel || '');
+    const compact = !!options.compact;
+    const onAction = typeof options.onAction === 'function' ? options.onAction : null;
+    const hasAction = !!(actionLabel && onAction);
+
+    const classes = ['empty-state', `state-${variant}`];
+    if (compact) classes.push('compact');
+
+    container.innerHTML = `
+        <div class="${classes.join(' ')}">
+            <div class="empty-icon">${icon}</div>
+            ${title ? `<h3>${escapeHtml(title)}</h3>` : ''}
+            ${description ? `<p>${escapeHtml(description)}</p>` : ''}
+            ${hasAction ? `<button type="button" class="retry-btn state-action-btn">${escapeHtml(actionLabel)}</button>` : ''}
+        </div>
+    `;
+
+    if (hasAction) {
+        const actionBtn = container.querySelector('.state-action-btn');
+        if (actionBtn) {
+            actionBtn.addEventListener('click', () => {
+                try {
+                    onAction();
+                } catch (err) {
+                    console.warn('State action error:', err);
+                }
+            });
+        }
+    }
+}
+
+function updateNetworkStatusBanner({ initial = false } = {}) {
+    const banner = document.getElementById('network-status');
+    if (!banner) return;
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+    if (isOffline) {
+        clearTimeout(_networkStatusHideTimer);
+        banner.className = 'network-status-banner offline';
+        banner.textContent = `⚠️ \u041d\u0435\u0442 \u0441\u0435\u0442\u0438. \u0427\u0430\u0441\u0442\u044c \u0444\u0443\u043d\u043a\u0446\u0438\u0439 \u0432\u0440\u0435\u043c\u0435\u043d\u043d\u043e \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430.`;
+        return;
+    }
+
+    if (initial) {
+        banner.className = 'network-status-banner hidden';
+        banner.textContent = '';
+        return;
+    }
+
+    banner.className = 'network-status-banner online';
+    banner.textContent = `✅ \u0421\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u0435 \u0432\u043e\u0441\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e`;
+    clearTimeout(_networkStatusHideTimer);
+    _networkStatusHideTimer = setTimeout(() => {
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+            banner.className = 'network-status-banner hidden';
+            banner.textContent = '';
+        }
+    }, 2600);
+}
+
+function bindNetworkStatusListeners() {
+    if (_networkStatusBound) return;
+    _networkStatusBound = true;
+    window.addEventListener('offline', () => updateNetworkStatusBanner());
+    window.addEventListener('online', () => updateNetworkStatusBanner());
+    updateNetworkStatusBanner({ initial: true });
 }
 
 
@@ -431,6 +778,7 @@ let serverBookmarks = []; // Хранит загруженные закладк�
 
 async function loadData() {
     console.log("Starting loadData...");
+    let hadNetworkFailure = false;
 
     // Вспомогательная функция для таймаута, если AbortSignal.timeout не поддерживается
     const getTimeoutSignal = (ms) => {
@@ -461,28 +809,50 @@ async function loadData() {
     if (API_URL) {
         console.log("Fetching reader data from API:", API_URL + '/api/reader');
         try {
-            const resp = await apiFetch(API_URL + '/api/reader', { signal: getTimeoutSignal(10000) });
-            if (resp.ok) {
-                allData = await resp.json();
-                console.log("Data loaded from API, series count:", allData.series?.length);
-                
-                // Сохраняем админов для бейджей
+            const cachedSnapshot = getCachedReaderApiSnapshot();
+            const headers = {};
+            if (cachedSnapshot?.etag) {
+                headers['If-None-Match'] = cachedSnapshot.etag;
+            }
+
+            const resp = await apiFetch(API_URL + '/api/reader', {
+                signal: getTimeoutSignal(10000),
+                headers
+            });
+            let apiData = null;
+            if (resp.status === 304) {
+                apiData = cachedSnapshot?.payload || null;
+                if (apiData) {
+                    console.log("Reader API returned 304; using cached snapshot.");
+                } else {
+                    console.warn("Reader API returned 304, but no cached snapshot found.");
+                }
+            } else if (resp.ok) {
+                apiData = await resp.json();
+                const etag = resp.headers.get('ETag') || '';
+                saveReaderApiSnapshot(apiData, etag);
+                console.log("Data loaded from API, series count:", apiData.series?.length);
+            } else {
+                console.warn("Reader API returned status:", resp.status);
+                hadNetworkFailure = true;
+            }
+
+            if (apiData) {
+                allData = apiData;
                 if (allData.admin_ids) {
                     adminIds = allData.admin_ids.map(id => String(id));
                 }
-
                 if (allData.series && allData.series.length > 0) {
                     renderSeriesList();
                     renderContinueReading();
-                    handleStartParam(); 
+                    handleStartParam();
                     return;
                 }
                 console.log("API returned empty series list, falling back to JSON...");
-            } else {
-                console.warn("Reader API returned status:", resp.status);
             }
         } catch (e) {
             console.warn('API fetch error or timeout:', e);
+            hadNetworkFailure = true;
         }
     } else {
         console.log("No API_URL configured, skipping API fetch.");
@@ -503,23 +873,38 @@ async function loadData() {
             }
         } else {
             console.warn("Fallback JSON fetch failed with status:", resp.status);
+            hadNetworkFailure = true;
         }
     } catch (e) {
         console.error('Fallback JSON fetch error:', e);
+        hadNetworkFailure = true;
     }
 
     console.log("All data sources failed or empty, showing empty state.");
+    if (hadNetworkFailure || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        showNetworkState();
+        return;
+    }
     showEmptyState();
 }
 
 function showEmptyState() {
-    document.getElementById('series-list').innerHTML = `
-        <div class="empty-state">
-            <div class="empty-icon">📚</div>
-            <h3>Библиотека пуста</h3>
-            <p>Данные ещё не загружены. Добавьте главы через бота или разместите файл chapters_data.json в папке webapp.</p>
-        </div>
-    `;
+    renderStateBlock('series-list', {
+        icon: '\uD83D\uDCDA',
+        title: '\u0411\u0438\u0431\u043b\u0438\u043e\u0442\u0435\u043a\u0430 \u043f\u0443\u0441\u0442\u0430',
+        description: '\u0414\u0430\u043d\u043d\u044b\u0435 \u043f\u043e\u043a\u0430 \u043d\u0435 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043d\u044b. \u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0433\u043b\u0430\u0432\u044b \u0447\u0435\u0440\u0435\u0437 \u0431\u043e\u0442\u0430 \u0438\u043b\u0438 \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u0435 chapters_data.json.'
+    });
+}
+
+function showNetworkState() {
+    renderStateBlock('series-list', {
+        variant: 'error',
+        icon: '\uD83C\uDF10',
+        title: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0434\u0430\u043d\u043d\u044b\u0435',
+        description: '\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u0435 \u0441 \u0441\u0435\u0442\u044c\u044e \u0438 \u043f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0435 \u0440\u0430\u0437.',
+        actionLabel: '\u041f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u044c',
+        onAction: () => loadData()
+    });
 }
 
 function handleStartParam() {
@@ -555,6 +940,7 @@ function handleStartParam() {
 // ==========================================================================
 
 function renderSeriesList() {
+    assertReaderState('renderSeriesList:start');
     const container = document.getElementById('series-list');
 
     if (!allData.series || allData.series.length === 0) {
@@ -568,6 +954,7 @@ function renderSeriesList() {
             return sum + (v.chapters || []).filter(c => isRead(s.id, v.volume, c.chapter)).length;
         }, 0);
         const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
+        const progressText = `${readCount}/${totalCh || 0}`;
 
         // Бейдж «Продолжить»
         const lastRead = getLastRead(s.id);
@@ -575,6 +962,9 @@ function renderSeriesList() {
         if (lastRead) {
             continueBadge = `<span class="continue-badge">▶ Продолжить · Гл. ${lastRead.chapter}</span>`;
         }
+        const quickAction = lastRead
+            ? `<button class="series-action-btn primary" onclick="jumpToLastRead(event, '${s.id}')">Продолжить</button>`
+            : `<button class="series-action-btn" onclick="jumpToLatestChapter(event, '${s.id}')">К последней</button>`;
 
         const editBtns = isAdminMode ? `
             <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('series_${s.id}'); event.stopPropagation();">&#9998;</button>
@@ -592,8 +982,10 @@ function renderSeriesList() {
             ${coverEl}
             <div class="series-info">
                 <h3>${escapeHtml(s.title)}${customBadge}${editBtns}</h3>
-                <p>${s.volumes.length} том(ов) &middot; ${totalCh} глав${progress > 0 ? ` &middot; ${progress}%` : ''}</p>
+                <p>${s.volumes.length} том(ов) &middot; ${totalCh} глав</p>
+                <p class="series-progress-text">Прочитано: ${progressText} (${progress}%)</p>
                 ${continueBadge}
+                <div class="series-actions">${quickAction}</div>
             </div>
             <span class="series-arrow">&rsaquo;</span>
         </div>`;
@@ -601,6 +993,7 @@ function renderSeriesList() {
 }
 
 function selectSeries(seriesId) {
+    assertReaderState('selectSeries:start');
     currentSeries = allData.series.find(s => s.id === seriesId);
     if (!currentSeries) return;
 
@@ -610,7 +1003,7 @@ function selectSeries(seriesId) {
     // Восстанавливаем последнюю читаемую главу или первый том
     const lastRead = getLastRead(seriesId);
     if (lastRead) {
-        const vol = currentSeries.volumes.find(v => v.volume === lastRead.volume);
+        const vol = currentSeries.volumes.find(v => String(v.volume) === String(lastRead.volume));
         if (vol) {
             selectVolume(lastRead.volume);
             showScreen('chapters');
@@ -623,6 +1016,74 @@ function selectSeries(seriesId) {
     }
 
     showScreen('chapters');
+}
+
+function openSeriesChapter(seriesId, volumeId, chapterKey, fallbackToLatest = false) {
+    const series = allData.series.find((s) => String(s.id) === String(seriesId));
+    if (!series || !Array.isArray(series.volumes) || series.volumes.length === 0) return;
+
+    currentSeries = series;
+    const title = document.getElementById('chapters-title');
+    if (title) {
+        title.textContent = currentSeries.title;
+    }
+
+    renderVolumeTabs();
+
+    let targetVolume = series.volumes.find((v) => String(v.volume) === String(volumeId));
+    if (!targetVolume && fallbackToLatest) {
+        targetVolume = series.volumes[series.volumes.length - 1];
+    }
+    if (!targetVolume) {
+        selectSeries(seriesId);
+        return;
+    }
+
+    selectVolume(targetVolume.volume);
+    showScreen('chapters');
+
+    const chapters = Array.isArray(targetVolume.chapters) ? targetVolume.chapters : [];
+    let targetIdx = chapters.findIndex((ch) => String(ch.chapter) === String(chapterKey));
+    if (targetIdx === -1 && fallbackToLatest) {
+        targetIdx = chapters.length - 1;
+    }
+
+    if (targetIdx >= 0) {
+        openChapter(targetIdx);
+    }
+}
+
+function jumpToLatestChapter(event, seriesId) {
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
+    const series = allData.series.find((s) => String(s.id) === String(seriesId));
+    if (!series || !Array.isArray(series.volumes) || series.volumes.length === 0) {
+        return;
+    }
+
+    const targetVolume = series.volumes[series.volumes.length - 1];
+    const chapters = Array.isArray(targetVolume.chapters) ? targetVolume.chapters : [];
+    if (chapters.length === 0) {
+        selectSeries(seriesId);
+        return;
+    }
+
+    const lastChapter = chapters[chapters.length - 1];
+    openSeriesChapter(seriesId, targetVolume.volume, lastChapter.chapter, true);
+}
+
+function jumpToLastRead(event, seriesId) {
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
+    const lastRead = getLastRead(seriesId);
+    if (!lastRead) {
+        jumpToLatestChapter(null, seriesId);
+        return;
+    }
+
+    openSeriesChapter(seriesId, lastRead.volume, lastRead.chapter, true);
 }
 
 function renderVolumeTabs() {
@@ -649,6 +1110,7 @@ function renderVolumeTabs() {
 }
 
 function selectVolume(volNum) {
+    assertReaderState('selectVolume:start');
     currentVolume = currentSeries.volumes.find(v => v.volume === volNum);
     if (!currentVolume) return;
 
@@ -660,17 +1122,17 @@ function selectVolume(volNum) {
 }
 
 function renderChaptersList() {
+    assertReaderState('renderChaptersList:start');
     cleanupChapterDnD();
     const container = document.getElementById('chapters-list');
     currentChapters = currentVolume.chapters;
 
     if (currentChapters.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📭</div>
-                <h3>Нет глав</h3>
-                <p>В этом томе пока нет глав.</p>
-            </div>`;
+        renderStateBlock(container, {
+            icon: '\uD83D\uDCC2',
+            title: '\u041d\u0435\u0442 \u0433\u043b\u0430\u0432',
+            description: '\u0412 \u044d\u0442\u043e\u043c \u0442\u043e\u043c\u0435 \u043f\u043e\u043a\u0430 \u043d\u0435\u0442 \u0433\u043b\u0430\u0432.'
+        });
         return;
     }
 
@@ -716,7 +1178,9 @@ function renderChaptersList() {
 // ==========================================================================
 
 function openChapter(idx, usePrefetch = false) {
+    assertReaderState('openChapter:before_set_idx');
     currentChapterIdx = idx;
+    assertReaderState('openChapter:after_set_idx');
     const chapter = currentChapters[idx];
     if (!chapter) return;
     
@@ -738,7 +1202,9 @@ function openChapter(idx, usePrefetch = false) {
     if (currentSeries && currentVolume) {
         markAsRead(currentSeries.id, currentVolume.volume, chapter.chapter);
     }
-    loadChapterContent(chapter, usePrefetch);
+    const telemetryContext = buildChapterOpenTelemetryContext(idx, usePrefetch);
+    loadChapterContent(chapter, usePrefetch, telemetryContext);
+    queueChapterUrlsForOfflineCache(currentChapterIdx, OFFLINE_CHAPTER_PREFETCH_COUNT);
 
     initProgressBar();
     if (progressBarEl) progressBarEl.style.width = '0%';
@@ -763,9 +1229,107 @@ function openChapter(idx, usePrefetch = false) {
 let prefetchedChapter = { idx: -1, html: null };
 let _prefetchingIdx = -1;
 let _chapterAbortController = null; // AbortController для отмены загрузки при смене главы
+const _stateContractWarnings = new Set();
 
-function loadChapterContent(chapter, usePrefetch = false) {
+function reportStateContractViolation(context, issue, details = {}) {
+    const key = `${context}:${issue}`;
+    if (_stateContractWarnings.has(key)) return;
+    _stateContractWarnings.add(key);
+    console.warn(`[state-contract] ${issue} (${context})`, details);
+    sendClientTelemetry('client_state_contract_violation', {
+        context,
+        issue,
+        details,
+        state: getReaderStateSnapshot()
+    });
+}
+
+function assertReaderState(context = 'unknown') {
+    if (!Array.isArray(currentChapters)) {
+        reportStateContractViolation(context, 'currentChapters_not_array', { type: typeof currentChapters });
+        currentChapters = [];
+    }
+
+    if (!Number.isInteger(currentChapterIdx) || currentChapterIdx < 0) {
+        reportStateContractViolation(context, 'currentChapterIdx_invalid', { value: currentChapterIdx });
+        currentChapterIdx = 0;
+    }
+
+    if (currentSeries && (typeof currentSeries !== 'object' || currentSeries.id === undefined)) {
+        reportStateContractViolation(context, 'currentSeries_invalid', { valueType: typeof currentSeries });
+        currentSeries = null;
+    }
+
+    if (currentSeries && !Array.isArray(currentSeries.volumes)) {
+        reportStateContractViolation(context, 'currentSeries_volumes_invalid', {});
+        currentSeries = null;
+    }
+
+    if (currentVolume && (typeof currentVolume !== 'object' || currentVolume.volume === undefined)) {
+        reportStateContractViolation(context, 'currentVolume_invalid', { valueType: typeof currentVolume });
+        currentVolume = null;
+    }
+
+    if (currentVolume && !Array.isArray(currentVolume.chapters)) {
+        reportStateContractViolation(context, 'currentVolume_chapters_invalid', {});
+        currentVolume.chapters = [];
+    }
+
+    if (
+        currentSeries &&
+        currentVolume &&
+        Array.isArray(currentSeries.volumes) &&
+        !currentSeries.volumes.some((v) => String(v.volume) === String(currentVolume.volume))
+    ) {
+        reportStateContractViolation(context, 'series_volume_mismatch', {
+            seriesId: currentSeries.id,
+            volume: currentVolume.volume
+        });
+        currentVolume = null;
+        currentChapters = [];
+        currentChapterIdx = 0;
+    }
+
+    if (
+        !prefetchedChapter ||
+        typeof prefetchedChapter !== 'object' ||
+        !Number.isInteger(prefetchedChapter.idx)
+    ) {
+        reportStateContractViolation(context, 'prefetchedChapter_invalid', { valueType: typeof prefetchedChapter });
+        prefetchedChapter = { idx: -1, html: null };
+    }
+
+    if (prefetchedChapter.html !== null && typeof prefetchedChapter.html !== 'string') {
+        reportStateContractViolation(context, 'prefetchedChapter_html_invalid', { valueType: typeof prefetchedChapter.html });
+        prefetchedChapter.html = null;
+    }
+
+    if (_chapterAbortController && typeof _chapterAbortController.abort !== 'function') {
+        reportStateContractViolation(context, 'abortController_invalid', { valueType: typeof _chapterAbortController });
+        _chapterAbortController = null;
+    }
+
+    if (currentChapters.length === 0) {
+        if (currentChapterIdx !== 0) {
+            reportStateContractViolation(context, 'currentChapterIdx_without_chapters', { value: currentChapterIdx });
+            currentChapterIdx = 0;
+        }
+        return;
+    }
+
+    if (currentChapterIdx >= currentChapters.length) {
+        reportStateContractViolation(context, 'currentChapterIdx_out_of_bounds', {
+            value: currentChapterIdx,
+            chaptersCount: currentChapters.length
+        });
+        currentChapterIdx = currentChapters.length - 1;
+    }
+}
+
+function loadChapterContent(chapter, usePrefetch = false, telemetryContext = null) {
+    assertReaderState('loadChapterContent:start');
     const container = document.getElementById('reader-text');
+    const chapterTelemetryContext = telemetryContext || buildChapterOpenTelemetryContext(currentChapterIdx, usePrefetch);
 
     // Отменяем предыдущую загрузку, если была
     if (_chapterAbortController) {
@@ -775,7 +1339,7 @@ function loadChapterContent(chapter, usePrefetch = false) {
 
     // Check if we have prefetched content for this chapter
     if (usePrefetch && prefetchedChapter.idx === currentChapterIdx && prefetchedChapter.html) {
-        renderLoadedContent(container, prefetchedChapter.html, chapter);
+        renderLoadedContent(container, prefetchedChapter.html, chapter, chapterTelemetryContext, 'prefetch');
         prefetchedChapter = { idx: -1, html: null };
         return;
     }
@@ -845,22 +1409,23 @@ function loadChapterContent(chapter, usePrefetch = false) {
 
         Promise.all(loadPromises).then(results => {
             if (signal.aborted || chapter !== currentChapters[currentChapterIdx]) return;
-            renderLoadedContent(container, results.join(''), chapter);
+            renderLoadedContent(container, results.join(''), chapter, chapterTelemetryContext, 'network');
         }).catch(err => {
             if (err.name === 'AbortError') return;
             console.error('Chapter load failed:', err);
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">❌</div>
-                    <h3>Ошибка загрузки главы</h3>
-                    <p>Проверьте соединение или используйте VPN.</p>
-                    <button class="retry-btn" onclick="loadChapterContent(currentChapters[currentChapterIdx])">🔄 Повторить попытку</button>
-                </div>`;
+            renderStateBlock(container, {
+                variant: 'error',
+                icon: '\u274C',
+                title: '\u041e\u0448\u0438\u0431\u043a\u0430 \u0437\u0430\u0433\u0440\u0443\u0437\u043a\u0438 \u0433\u043b\u0430\u0432\u044b',
+                description: '\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u0435 \u0438 \u043f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0441\u043d\u043e\u0432\u0430.',
+                actionLabel: '\u041f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u044c',
+                onAction: () => loadChapterContent(currentChapters[currentChapterIdx])
+            });
         });
 
     } else if (chapter.text) {
         const paragraphs = chapter.text.split('\n\n').map(p => `<p>${p.trim()}</p>`).join('');
-        renderLoadedContent(container, paragraphs, chapter);
+        renderLoadedContent(container, paragraphs, chapter, chapterTelemetryContext, 'inline_text');
     } else {
         container.innerHTML = `
             <div class="empty-state" style="margin-top:20vh;">
@@ -870,12 +1435,13 @@ function loadChapterContent(chapter, usePrefetch = false) {
                 ${isAdminMode ? `<button class="admin-primary-btn" style="margin-top:2rem;" onclick="openEditUrlModal(currentChapterIdx)">🔗 Добавить ссылку</button>` : ''}
             </div>
         `;
+        reportChapterOpenTelemetry(chapter, chapterTelemetryContext, 'empty');
     }
 
     document.getElementById('reader-content').scrollTop = 0;
 }
 
-function renderLoadedContent(container, html, chapter) {
+function renderLoadedContent(container, html, chapter, telemetryContext = null, source = 'unknown') {
     container.innerHTML = html;
 
     // Smooth transition: fade in (remove loading class)
@@ -900,6 +1466,7 @@ function renderLoadedContent(container, html, chapter) {
     initImageFadeIn(container);
     applyIframeDarkMode();
     restoreScrollPosition();
+    reportChapterOpenTelemetry(chapter, telemetryContext, source);
 }
 
 // ★ Skeleton Loader (пункт 5)
@@ -1178,6 +1745,49 @@ function updateLikeUI(count, liked) {
 // ==========================================================================
 
 let replyingToId = null;
+let lastFailedCommentId = null;
+const pendingCommentSends = new Map();
+let chapterReactionsState = { reactions: {}, user_reaction: null };
+
+function setCommentSendState(state = 'idle', message = '', failedCommentId = null) {
+    const statusEl = document.getElementById('comment-send-status');
+    if (!statusEl) return;
+
+    if (state === 'idle') {
+        statusEl.className = 'comment-send-status hidden';
+        statusEl.innerHTML = '';
+        return;
+    }
+
+    statusEl.className = `comment-send-status ${state}`;
+    if (state === 'sending') {
+        statusEl.textContent = message || 'Отправка комментария...';
+        return;
+    }
+
+    if (state === 'error') {
+        if (failedCommentId) {
+            lastFailedCommentId = String(failedCommentId);
+        }
+        statusEl.innerHTML = `
+            <span>${escapeHtml(message || 'Не удалось отправить комментарий.')}</span>
+            <button type="button" class="retry-inline-btn" onclick="retryLastFailedComment()">Повтор</button>
+        `;
+    }
+}
+
+function retryLastFailedComment() {
+    if (!lastFailedCommentId) return;
+    retryPendingComment(lastFailedCommentId);
+}
+
+function makeTempCommentId() {
+    return `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function findCommentInCache(commentId) {
+    return allCommentsCache.find((c) => String(c.id) === String(commentId)) || null;
+}
 
 function setReply(id, name) {
     replyingToId = id;
@@ -1198,8 +1808,12 @@ async function loadComments() {
     if (!key) return;
     try {
         const resp = await apiFetch(API_URL + `/api/comments?chapter_key=${encodeURIComponent(key)}`);
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+        }
         const data = await resp.json();
-        allCommentsCache = data.comments || [];
+        const pending = Array.from(pendingCommentSends.values()).filter((c) => c._optimisticState === 'sending' || c._optimisticState === 'error');
+        allCommentsCache = [...pending, ...(data.comments || [])];
         
         const countBadge = document.getElementById('comments-count-badge');
         if (countBadge) countBadge.textContent = allCommentsCache.length > 0 ? `(${allCommentsCache.length})` : '';
@@ -1209,6 +1823,17 @@ async function loadComments() {
         }
     } catch (e) {
         console.warn('Comments load error:', e);
+        const list = document.getElementById('comments-list');
+        if (list) {
+            renderStateBlock(list, {
+                variant: 'error',
+                icon: '\u26A0\uFE0F',
+                title: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u043a\u043e\u043c\u043c\u0435\u043d\u0442\u0430\u0440\u0438\u0438',
+                description: '\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u0435\u0442\u044c \u0438 \u043f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0435 \u0440\u0430\u0437.',
+                actionLabel: '\u041f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u044c',
+                onAction: () => loadComments()
+            });
+        }
     }
 }
 
@@ -1294,15 +1919,30 @@ function renderComments(comments) {
         const role = getUserRole(String(c.user_id));
         const roleBadge = role ? `<span class="comment-role-badge ${role.css}">${role.text}</span>` : '';
 
+        const isPendingComment = c._optimisticState === 'sending' || c._optimisticState === 'error';
+        const commentStateClass = c._optimisticState === 'sending'
+            ? 'pending-send'
+            : (c._optimisticState === 'error' ? 'pending-error' : '');
+        const stateBadge = c._optimisticState === 'sending'
+            ? `<span class="comment-state-badge sending">Отправка...</span>`
+            : (c._optimisticState === 'error' ? `<span class="comment-state-badge error">Не отправлено</span>` : '');
+
         const deleteBtn = (isOwn || viewerIsAdmin) ? `<button class="c-action-btn c-delete" onclick="deleteComment(${c.id})">Удалить</button>` : '';
         const editBtn = isOwn ? `<button class="c-action-btn" onclick="editComment(${c.id})">Ред.</button>` : '';
         const replyBtn = `<button class="c-action-btn" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')">Ответить</button>`;
         const reportBtn = !isOwn ? `<button class="c-action-btn" onclick="reportComment(${c.id})">Пожаловаться</button>` : '';
+        const retryBtn = c._optimisticState === 'error'
+            ? `<button class="c-action-btn c-retry" onclick="retryPendingComment('${escapeHtml(String(c.id))}')">Повтор</button>`
+            : '';
+        const discardBtn = c._optimisticState === 'error'
+            ? `<button class="c-action-btn c-discard" onclick="discardPendingComment('${escapeHtml(String(c.id))}')">Убрать</button>`
+            : '';
 
         // Реакции
         const likes = c.likes || 0;
         const userReaction = c.user_reaction; 
         const likeActive = userReaction === 'like' ? 'active' : '';
+        const reactionPending = !!c._reactionPending;
 
         // Avatar
         const avatarUrl = API_URL && c.user_id ? `${API_URL}/api/avatar?user_id=${c.user_id}` : null;
@@ -1311,27 +1951,29 @@ function renderComments(comments) {
             : `<div class="comment-avatar" style="background:${color}">${initial}</div>`;
 
         let html = `
-        <div class="comment-item ${isChild ? 'comment-reply' : ''}" id="comment-${c.id}">
+        <div class="comment-item ${isChild ? 'comment-reply' : ''} ${commentStateClass}" id="comment-${c.id}">
             ${isChild ? '<div class="comment-branch"></div><div class="comment-branch-curve"></div>' : ''}
             <div class="comment-content">
                 <div class="comment-header">
                     ${avatarHtml}
-                    <div class="comment-author">${escapeHtml(c.user_name)}${roleBadge}</div>
+                    <div class="comment-author">${escapeHtml(c.user_name)}${roleBadge}${stateBadge}</div>
                     <div class="comment-date" style="margin-left:auto;">${date}</div>
                 </div>
                 <div class="comment-text" id="comment-text-${c.id}">${applyMarkup(c.text)}</div>
                 <div class="comment-actions">
                     <div class="comment-reactions">
-                        <button class="c-reaction-btn c-like ${likeActive}" onclick="reactToComment(${c.id}, 'like')" title="Нравится">
+                        ${isPendingComment ? '' : `<button class="c-reaction-btn c-like ${likeActive} ${reactionPending ? 'pending' : ''}" ${reactionPending ? 'disabled' : ''} onclick="reactToComment(${c.id}, 'like')" title="Нравится">
                             <svg class="icon-xs" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                             <span>${likes}</span>
-                        </button>
+                        </button>`}
                     </div>
                     <div class="comment-main-actions">
-                        ${replyBtn}
-                        ${editBtn}
-                        ${deleteBtn}
-                        ${reportBtn}
+                        ${isPendingComment ? '' : replyBtn}
+                        ${isPendingComment ? '' : editBtn}
+                        ${isPendingComment ? '' : deleteBtn}
+                        ${isPendingComment ? '' : reportBtn}
+                        ${retryBtn}
+                        ${discardBtn}
                     </div>
                 </div>
         `;
@@ -1398,6 +2040,25 @@ async function reactToComment(commentId, type) {
         showToast('Пожалуйста, авторизуйтесь через бота.');
         return;
     }
+    const comment = findCommentInCache(commentId);
+    if (!comment) return;
+
+    const prevReaction = comment.user_reaction || null;
+    const prevLikes = Number(comment.likes || 0);
+
+    const nextReaction = prevReaction === type ? null : type;
+    let nextLikes = prevLikes;
+    if (prevReaction === 'like' && type === 'like') {
+        nextLikes = Math.max(0, prevLikes - 1);
+    } else if (prevReaction !== 'like' && type === 'like') {
+        nextLikes = prevLikes + 1;
+    }
+
+    comment.user_reaction = nextReaction;
+    comment.likes = nextLikes;
+    comment._reactionPending = true;
+    renderComments(allCommentsCache);
+
     try {
         const resp = await apiFetch(`${API_URL}/api/comments/react`, {
             method: 'POST',
@@ -1408,10 +2069,20 @@ async function reactToComment(commentId, type) {
         if (data.ok) {
             await loadComments();
         } else {
+            comment.user_reaction = prevReaction;
+            comment.likes = prevLikes;
+            delete comment._reactionPending;
+            renderComments(allCommentsCache);
             showToast('Ошибка при реакции: ' + (data.error || 'неизвестно'));
         }
     } catch (e) {
+        comment.user_reaction = prevReaction;
+        comment.likes = prevLikes;
+        delete comment._reactionPending;
+        renderComments(allCommentsCache);
         showToast('Ошибка сети.');
+    } finally {
+        delete comment._reactionPending;
     }
 }
 
@@ -1531,18 +2202,46 @@ async function postComment() {
     const key = getChapterKey();
     if (!key) return;
 
-    const btn = document.querySelector('.comment-submit-btn');
-    btn.disabled = true;
+    const parentId = replyingToId;
+    const tempId = makeTempCommentId();
+    const pendingComment = {
+        id: tempId,
+        chapter_key: key,
+        user_id: userId,
+        user_name: userName,
+        text,
+        parent_id: parentId || null,
+        likes: 0,
+        user_reaction: null,
+        created_at: new Date().toISOString(),
+        _optimisticState: 'sending',
+        _retryPayload: {
+            chapter_key: key,
+            text,
+            parent_id: parentId || null
+        }
+    };
+
+    pendingCommentSends.set(String(tempId), pendingComment);
+    allCommentsCache = [pendingComment, ...allCommentsCache];
+    input.value = '';
+    updateCommentPreview();
+    cancelReply();
+    renderComments(allCommentsCache);
+    setCommentSendState('sending', 'Отправка комментария...');
+
+    const btn = document.querySelector('#comment-form .comment-submit-btn');
+    const prevBtnText = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Отправка...';
+    }
 
     try {
         const resp = await apiFetch(API_URL + '/api/comments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chapter_key: key,
-                text: text,
-                parent_id: replyingToId
-            })
+            body: JSON.stringify(pendingComment._retryPayload)
         });
 
         if (!resp.ok) {
@@ -1550,15 +2249,74 @@ async function postComment() {
             throw new Error(err.error || 'Ошибка сервера при отправке');
         }
 
-        input.value = '';
-        cancelReply();
+        pendingCommentSends.delete(String(tempId));
+        allCommentsCache = allCommentsCache.filter(c => String(c.id) !== String(tempId));
+        setCommentSendState('idle');
         await loadComments();
     } catch (e) {
         console.error('Post comment error:', e);
-        tg.showAlert("Ошибка: " + e.message);
+        pendingComment._optimisticState = 'error';
+        allCommentsCache = allCommentsCache.map(c => String(c.id) === String(tempId) ? pendingComment : c);
+        lastFailedCommentId = String(tempId);
+        renderComments(allCommentsCache);
+        setCommentSendState('error', `Не удалось отправить: ${e.message}`, tempId);
     } finally {
-        btn.disabled = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = prevBtnText || 'Отправить';
+        }
     }
+}
+
+async function retryPendingComment(commentId) {
+    const key = String(commentId);
+    const pending = pendingCommentSends.get(key) || findCommentInCache(key);
+    if (!pending || !pending._retryPayload) return;
+    if (pending._retryInFlight) return;
+
+    pending._retryInFlight = true;
+    pending._optimisticState = 'sending';
+    renderComments(allCommentsCache);
+    setCommentSendState('sending', 'Повторная отправка...');
+
+    try {
+        const resp = await apiFetch(API_URL + '/api/comments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pending._retryPayload)
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.error || 'Ошибка сервера при отправке');
+        }
+
+        pendingCommentSends.delete(key);
+        allCommentsCache = allCommentsCache.filter(c => String(c.id) !== key);
+        if (lastFailedCommentId === key) {
+            lastFailedCommentId = null;
+        }
+        setCommentSendState('idle');
+        await loadComments();
+    } catch (e) {
+        pending._optimisticState = 'error';
+        console.warn('Retry comment error:', e);
+        renderComments(allCommentsCache);
+        setCommentSendState('error', `Повтор не удался: ${e.message}`, key);
+    } finally {
+        pending._retryInFlight = false;
+    }
+}
+
+function discardPendingComment(commentId) {
+    const key = String(commentId);
+    pendingCommentSends.delete(key);
+    allCommentsCache = allCommentsCache.filter(c => String(c.id) !== key);
+    if (lastFailedCommentId === key) {
+        lastFailedCommentId = null;
+        setCommentSendState('idle');
+    }
+    renderComments(allCommentsCache);
 }
 
 async function deleteComment(commentId) {
@@ -1630,16 +2388,36 @@ async function loadReactions() {
     if (!key) return;
     try {
         const resp = await apiFetch(API_URL + `/api/reactions?chapter_key=${encodeURIComponent(key)}`);
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+        }
         const data = await resp.json();
-        renderReactions(data);
+        chapterReactionsState = {
+            reactions: { ...(data.reactions || {}) },
+            user_reaction: data.user_reaction || null
+        };
+        renderReactions(chapterReactionsState);
     } catch (e) {
         console.warn('Reactions load error:', e);
+        const bar = document.getElementById('reaction-bar');
+        if (bar) {
+            renderStateBlock(bar, {
+                variant: 'error',
+                compact: true,
+                icon: '\u26A1',
+                title: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0437\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0440\u0435\u0430\u043a\u0446\u0438\u0438',
+                actionLabel: '\u041f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u044c',
+                onAction: () => loadReactions()
+            });
+        }
     }
 }
 
 function renderReactions(data) {
     const bar = document.getElementById('reaction-bar');
     if (!bar) return;
+
+    const safeData = data || chapterReactionsState || { reactions: {}, user_reaction: null };
 
     const list = [
         { type: 'like', text: 'Круто', emoji: '👍', svg: '<svg class="r-svg" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>' },
@@ -1651,8 +2429,8 @@ function renderReactions(data) {
         { type: 'battle', text: 'Эпик', emoji: '⚔️', svg: '<svg class="r-svg" viewBox="0 0 24 24"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/></svg>' }
     ];
 
-    const reactions = data.reactions || {};
-    const user_reaction = data.user_reaction;
+    const reactions = safeData.reactions || {};
+    const user_reaction = safeData.user_reaction;
 
     bar.innerHTML = list.map(item => {
         const count = reactions[item.type] || 0;
@@ -1667,51 +2445,14 @@ function renderReactions(data) {
 }
 
 let _isReacting = false;
-async function toggleReaction(type) {
-    if (!API_URL || !userId) {
-        showToast('Авторизуйтесь в боте для реакций');
-        return;
-    }
-    if (_isReacting) return;
-    
-    const key = getChapterKey();
-    if (!key) return;
 
-    _isReacting = true;
-    // Visual Feedback
-    const itemEl = document.querySelector(`.reaction-item.type-${type}`);
-    const emojiMap = { like: '👍', heart: '❤️', fire: '🔥', funny: '😂', wow: '😮', sad: '😢', battle: '⚔️' };
-    
-    haptic('medium');
-    if (itemEl && !itemEl.classList.contains('active')) {
-        spawnFloatingEmoji(emojiMap[type] || '✨', itemEl);
-    }
-
-    try {
-        const resp = await apiFetch(API_URL + '/api/reactions', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                chapter_key: key,
-                reaction: type
-            })
-        });
-        const data = await resp.json();
-        if (data.ok) {
-            await loadReactions();
-        }
-    } catch (e) {
-        showToast('Ошибка сети.');
-    } finally {
-        _isReacting = false;
-    }
-}
 
 // ==========================================================================
 // НАВИГАЦИЯ ЭКРАНОВ
 // ==========================================================================
 
 function showScreen(name) {
+    assertReaderState(`showScreen:${name}`);
     // Если уходим из читалки — сохраняем позицию
     if (document.getElementById('screen-reader').classList.contains('active') && name !== 'reader') {
         saveScrollPosition();
@@ -1749,6 +2490,7 @@ function showScreen(name) {
     }
 
     if (name === 'library') {
+        updateLibraryFilterButtons();
         renderLibraryTab();
         updateLibraryStats();
     }
@@ -2127,7 +2869,7 @@ function renderContinueReading() {
 
     container.style.display = 'block';
     container.innerHTML = `
-        <div class="continue-reading-card" onclick="selectSeries('${series.id}')">
+        <div class="continue-reading-card" onclick="jumpToLastRead(event, '${series.id}')">
             <div class="continue-reading-icon">🔖</div>
             <div class="continue-reading-info">
                 <div class="continue-reading-label">Продолжить чтение</div>
@@ -2574,81 +3316,132 @@ function updateLibraryStats() {
     }
 }
 
-function renderLibraryTab() {
+function setLibraryFilter(filter) {
+    if (!Object.values(LIBRARY_FILTERS).includes(filter)) return;
+    libraryFilter = filter;
+    safeSetLocal(LIBRARY_FILTER_KEY, libraryFilter);
+    updateLibraryFilterButtons();
+    renderLibraryTab();
+}
+
+function updateLibraryFilterButtons() {
+    const buttons = document.querySelectorAll('#library-filters [data-filter]');
+    buttons.forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.filter === libraryFilter);
+    });
+}
+
+function getSeriesProgressMeta(series) {
+    const volumes = Array.isArray(series?.volumes) ? series.volumes : [];
+    const totalCh = volumes.reduce((sum, v) => sum + (v.chapters || []).length, 0);
+    const readCount = volumes.reduce((sum, v) => {
+        return sum + (v.chapters || []).filter((c) => isRead(series.id, v.volume, c.chapter)).length;
+    }, 0);
+    const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
+    const lastRead = getLastRead(series.id);
+    const status = readCount === 0
+        ? LIBRARY_FILTERS.NOT_STARTED
+        : (readCount >= totalCh && totalCh > 0 ? LIBRARY_FILTERS.COMPLETED : LIBRARY_FILTERS.IN_PROGRESS);
+
+    return {
+        series,
+        totalCh,
+        readCount,
+        progress,
+        lastRead,
+        status
+    };
+}
+
+function renderLibraryTabV2() {
+    assertReaderState('renderLibraryTab:start');
     const list = document.getElementById('library-list');
     if (!list) return;
+    updateLibraryFilterButtons();
 
     if (!allData || !allData.series || allData.series.length === 0) {
-        list.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📂</div>
-                <h3>Нет данных</h3>
-                <p>Библиотека пуста. Добавьте свои первые ранобэ.</p>
-            </div>
-        `;
+        renderStateBlock(list, {
+            icon: '\uD83D\uDCC2',
+            title: '\u041d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445',
+            description: '\u0411\u0438\u0431\u043b\u0438\u043e\u0442\u0435\u043a\u0430 \u043f\u0443\u0441\u0442\u0430. \u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u043f\u0435\u0440\u0432\u044b\u0435 \u0433\u043b\u0430\u0432\u044b.'
+        });
         return;
     }
 
-    // Get last read data
-    const allLocal = safeGetLocal('reader_last_read', {});
+    const seriesMeta = allData.series.map((series) => getSeriesProgressMeta(series));
+    const filtered = seriesMeta
+        .filter((meta) => meta.status === libraryFilter)
+        .sort((a, b) => {
+            const tsA = a.lastRead?.ts || 0;
+            const tsB = b.lastRead?.ts || 0;
+            if (tsA !== tsB) return tsB - tsA;
+            if (a.progress !== b.progress) return b.progress - a.progress;
+            return String(a.series.title || '').localeCompare(String(b.series.title || ''), 'ru');
+        });
 
-    // Combine local with server bookmarks if missing
-    serverBookmarks.forEach(bm => {
-        if (!allLocal[bm.series_id]) {
-            allLocal[bm.series_id] = {
-                seriesId: bm.series_id,
-                volume: bm.volume_id,
-                chapter: bm.chapter_key,
-                ts: new Date(bm.updated_at).getTime() || 0,
-                isServer: true
-            };
-        }
-    });
-
-    const activeSeriesKeys = Object.keys(allLocal).sort((a, b) => (allLocal[b].ts || 0) - (allLocal[a].ts || 0));
-
-    if (activeSeriesKeys.length === 0) {
-        list.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon">📝</div>
-                <h3>Вы ещё ничего не читали</h3>
-                <p>Откройте Главную, чтобы выбрать историю.</p>
-            </div>
-        `;
+    if (filtered.length === 0) {
+        const emptyTextByFilter = {
+            [LIBRARY_FILTERS.IN_PROGRESS]: {
+                icon: '📝',
+                title: 'Нет тайтлов в процессе',
+                desc: 'Начните чтение на вкладке «Главная».'
+            },
+            [LIBRARY_FILTERS.NOT_STARTED]: {
+                icon: '📚',
+                title: 'Всё начато',
+                desc: 'Тайтлов со статусом «Не начато» пока нет.'
+            },
+            [LIBRARY_FILTERS.COMPLETED]: {
+                icon: '✅',
+                title: 'Ещё нет завершённых',
+                desc: 'Закончите хотя бы один тайтл — он появится здесь.'
+            }
+        };
+        const empty = emptyTextByFilter[libraryFilter] || emptyTextByFilter[LIBRARY_FILTERS.IN_PROGRESS];
+        renderStateBlock(list, {
+            icon: empty.icon,
+            title: empty.title,
+            description: empty.desc
+        });
         return;
     }
 
-    const itemsHtml = activeSeriesKeys.slice(0, 10).map(key => {
-        const bm = allLocal[key];
-        const s = allData.series.find(x => String(x.id) === String(bm.seriesId || key));
+    const itemsHtml = filtered.map((meta) => {
+        const s = meta.series;
+        const bm = meta.lastRead;
         if (!s) return '';
 
-        let chTitle = "Глава " + bm.chapter;
-        const v = s.volumes.find(v => String(v.volume) === String(bm.volume));
-        if (v) {
-            const ch = (v.chapters || []).find(c => String(c.chapter) === String(bm.chapter));
-            if (ch && ch.custom_name) chTitle = ch.custom_name;
-            else if (ch) chTitle = `Глава ${ch.chapter}`;
+        let locationText = 'История ещё не начата';
+        if (bm) {
+            const v = s.volumes.find((x) => String(x.volume) === String(bm.volume));
+            let chTitle = `Глава ${bm.chapter}`;
+            if (v) {
+                const ch = (v.chapters || []).find((c) => String(c.chapter) === String(bm.chapter));
+                if (ch && ch.custom_name) chTitle = ch.custom_name;
+            }
+            const volTitle = v && v.custom_name ? v.custom_name : `Том ${bm.volume}`;
+            locationText = `Остановлено: ${volTitle}, ${chTitle}`;
         }
 
-        // Progress calc
-        const totalCh = s.volumes.reduce((sum, v) => sum + (v.chapters || []).length, 0);
-        const readCount = s.volumes.reduce((sum, v) => {
-            return sum + (v.chapters || []).filter(c => isRead(s.id, v.volume, c.chapter)).length;
-        }, 0);
-        const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
+        const progressText = `${meta.readCount}/${meta.totalCh || 0}`;
         const coverImg = s.cover_url ? `<img src="${s.cover_url}" class="library-cover" alt="">` : `<div class="series-icon">📖</div>`;
+        const quickAction = bm
+            ? `<button class="series-action-btn primary" onclick="jumpToLastRead(event, '${s.id}')">Продолжить</button>`
+            : `<button class="series-action-btn" onclick="jumpToLatestChapter(event, '${s.id}')">К последней</button>`;
 
         return `
         <div class="series-card" style="margin-bottom:12px;" onclick="selectSeries('${s.id}')">
             ${coverImg}
             <div class="series-info">
                 <h3>${escapeHtml(s.title)}</h3>
-                <p style="font-size: 13px; color: var(--text-sec); margin-top:2px;">Остановлено: Том ${bm.volume}, ${chTitle}</p>
+                <p style="font-size: 13px; color: var(--text-sec); margin-top:2px;">${locationText}</p>
                 <div class="library-progress-bar">
-                    <div class="library-progress-fill" style="width: ${progress}%"></div>
+                    <div class="library-progress-fill" style="width: ${meta.progress}%"></div>
                 </div>
-                <div style="font-size: 11px; margin-top:4px; text-align:right; color: var(--text-sec);">${progress}% прочитано</div>
+                <div style="font-size: 11px; margin-top:4px; text-align:right; color: var(--text-sec);">
+                    ${progressText} &middot; ${meta.progress}% прочитано
+                </div>
+                <div class="series-actions">${quickAction}</div>
             </div>
             <span class="series-arrow">&rsaquo;</span>
         </div>`;
@@ -2656,6 +3449,12 @@ function renderLibraryTab() {
 
     list.innerHTML = itemsHtml;
 }
+
+function renderLibraryTab() {
+    return renderLibraryTabV2();
+}
+
+
 
 // ==========================================================================
 // DRAG-N-DROP CHAPTER SORT (Admin, Batch 3)
@@ -3297,11 +4096,85 @@ function initReaderScrollListeners() {
 
         // 4. Prefetch следующей главы (при 85%)
         if (progress > 85) {
-            preloadNextChapter();
+            prefetchNextChapter();
         }
     }, { passive: true });
 }
 
+// Optimistic chapter reactions with rollback on network/server errors.
+async function toggleReaction(type) {
+    if (!API_URL || !userId) {
+        showToast('Авторизуйтесь в боте для реакций');
+        return;
+    }
+    if (_isReacting) return;
+
+    const key = getChapterKey();
+    if (!key) return;
+
+    _isReacting = true;
+    const emojiMap = { like: '👍', heart: '❤️', fire: '🔥', funny: '😂', wow: '😮', sad: '😢', battle: '⚔️' };
+    const prevState = {
+        reactions: { ...(chapterReactionsState?.reactions || {}) },
+        user_reaction: chapterReactionsState?.user_reaction || null
+    };
+    const nextState = {
+        reactions: { ...(prevState.reactions || {}) },
+        user_reaction: prevState.user_reaction
+    };
+    const prevType = prevState.user_reaction;
+
+    haptic('medium');
+    if (prevType !== type) {
+        nextState.reactions[type] = Number(nextState.reactions[type] || 0) + 1;
+        if (prevType) {
+            nextState.reactions[prevType] = Math.max(0, Number(nextState.reactions[prevType] || 0) - 1);
+        }
+        nextState.user_reaction = type;
+    } else {
+        nextState.reactions[type] = Math.max(0, Number(nextState.reactions[type] || 0) - 1);
+        nextState.user_reaction = null;
+    }
+
+    chapterReactionsState = nextState;
+    renderReactions(chapterReactionsState);
+
+    const itemEl = document.querySelector(`.reaction-item.type-${type}`);
+    if (itemEl && !itemEl.classList.contains('active')) {
+        spawnFloatingEmoji(emojiMap[type] || '✨', itemEl);
+    }
+    if (itemEl) {
+        itemEl.classList.add('pending');
+    }
+
+    try {
+        const resp = await apiFetch(API_URL + '/api/reactions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chapter_key: key,
+                reaction: type
+            })
+        });
+        const data = await resp.json();
+        if (!data.ok) {
+            throw new Error(data.error || 'Ошибка реакции');
+        }
+        loadReactions();
+    } catch (e) {
+        chapterReactionsState = prevState;
+        renderReactions(chapterReactionsState);
+        showToast('Ошибка сети. Реакция откатена.');
+    } finally {
+        _isReacting = false;
+    }
+}
+
+assertReaderState('bootstrap');
+bindGlobalErrorTelemetry();
+bindNetworkStatusListeners();
+registerReaderServiceWorker();
+updateLibraryFilterButtons();
 restoreSettings();
 loadData();
 initTypoReporter();
