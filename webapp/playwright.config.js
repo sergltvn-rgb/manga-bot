@@ -17,7 +17,7 @@ module.exports = defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: "..\\.venv\\Scripts\\python.exe -m http.server 4173",
+    command: "python -m http.server 4173",
     url: "http://127.0.0.1:4173/reader.html",
     cwd: __dirname,
     reuseExistingServer: true,
