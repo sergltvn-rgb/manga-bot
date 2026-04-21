@@ -151,8 +151,8 @@ function syncAdminModeControls() {
     }
 
     if (toggle) {
-        toggle.disabled = !canUseAdminMode;
-        toggle.checked = canUseAdminMode && !!isAdminMode;
+        toggle.disabled = false;
+        toggle.checked = canUseAdminMode ? !!isAdminMode : false;
     }
     if (hint) {
         hint.textContent = canUseAdminMode
