@@ -8,7 +8,17 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="reader.css?v=15">
+    <script>
+        (function () {
+            const params = new URLSearchParams(window.location.search);
+            const rev = params.get('rev') || '16';
+            window.__READER_REV = rev;
+            const css = document.createElement('link');
+            css.rel = 'stylesheet';
+            css.href = `reader.css?v=${encodeURIComponent(rev)}`;
+            document.head.appendChild(css);
+        })();
+    </script>
 </head>
 <body class="theme-light">
     <!-- ★ Reading Progress Bar -->
@@ -488,6 +498,13 @@
         </div>
     </div>
 
-    <script src="reader.js?v=15"></script>
+    <script>
+        (function () {
+            const rev = window.__READER_REV || '16';
+            const script = document.createElement('script');
+            script.src = `reader.js?v=${encodeURIComponent(rev)}`;
+            document.body.appendChild(script);
+        })();
+    </script>
 </body>
 </html>

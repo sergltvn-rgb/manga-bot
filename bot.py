@@ -18,8 +18,9 @@ import aiohttp.web
 import io
 import html
 from datetime import datetime
+from html.parser import HTMLParser
 from typing import Union
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command, StateFilter
@@ -64,12 +65,15 @@ dp = Dispatcher()
 # Глобальная aiohttp сессия (открывается один раз при старте)
 _http_session: aiohttp.ClientSession | None = None
 READER_CACHE_TTL_SECONDS = 30
+CHAPTER_CONTENT_CACHE_TTL_SECONDS = 300
 _reader_data_cache: dict = {
     "payload": None,
     "etag": "",
     "built_at": 0.0,
 }
 _reader_cache_lock = asyncio.Lock()
+_chapter_content_cache: dict = {}
+_chapter_content_cache_lock = asyncio.Lock()
 
 async def get_http_session() -> aiohttp.ClientSession:
     """Возвращает единственную aiohttp-сессию, создаёт лениво."""
@@ -3207,6 +3211,7 @@ def invalidate_reader_cache(reason: str = "") -> None:
     _reader_data_cache["payload"] = None
     _reader_data_cache["etag"] = ""
     _reader_data_cache["built_at"] = 0.0
+    invalidate_chapter_content_cache(reason)
     if reason:
         logging.info("Reader cache invalidated: %s", reason)
 
@@ -3259,6 +3264,366 @@ async def get_cached_reader_data(force_refresh: bool = False) -> tuple[dict, str
         _reader_data_cache["etag"] = fresh_etag
         _reader_data_cache["built_at"] = time.time()
         return fresh_payload, fresh_etag, False
+
+
+def _render_inline_chapter_html(text: str) -> str:
+    parts = []
+    for block in re.split(r"\n\s*\n", str(text or "").strip()):
+        line = block.strip()
+        if not line:
+            continue
+        escaped = html.escape(line, quote=False).replace("\n", "<br>")
+        parts.append(f"<p>{escaped}</p>")
+    return "".join(parts)
+
+
+def _render_telegraph_nodes_server(nodes: list) -> str:
+    if not isinstance(nodes, list):
+        return ""
+
+    allowed_tags = {
+        "p", "br", "strong", "em", "b", "i", "u", "s", "blockquote",
+        "code", "pre", "a", "h3", "h4", "figure", "figcaption", "img",
+        "ul", "ol", "li", "hr"
+    }
+    void_tags = {"br", "img", "hr"}
+    attr_allowlist = {
+        "a": {"href"},
+        "img": {"src", "alt"},
+    }
+
+    def render(node: object) -> str:
+        if isinstance(node, str):
+            return html.escape(node, quote=False)
+        if not isinstance(node, dict):
+            return ""
+
+        tag = str(node.get("tag") or "").lower().strip()
+        if not tag:
+            return ""
+        if tag not in allowed_tags:
+            return "".join(render(child) for child in (node.get("children") or []))
+
+        attrs = []
+        for key, value in (node.get("attrs") or {}).items():
+            attr_name = str(key or "").lower().strip()
+            if attr_name not in attr_allowlist.get(tag, set()):
+                continue
+            attr_value = str(value or "").strip()
+            if tag == "img" and attr_name == "src" and attr_value.startswith("/"):
+                attr_value = urljoin("https://telegra.ph", attr_value)
+            if tag == "a" and attr_name == "href":
+                normalized = _normalize_external_url(attr_value, max_len=2048)
+                if not normalized:
+                    continue
+                attr_value = normalized
+            if not attr_value:
+                continue
+            attrs.append(f'{attr_name}="{html.escape(attr_value, quote=True)}"')
+
+        attrs_text = f" {' '.join(attrs)}" if attrs else ""
+        children_html = "".join(render(child) for child in (node.get("children") or []))
+        if tag == "img":
+            if 'src="' not in attrs_text:
+                return ""
+            attrs_text += ' loading="lazy"'
+        if tag in void_tags:
+            return f"<{tag}{attrs_text}>"
+        return f"<{tag}{attrs_text}>{children_html}</{tag}>"
+
+    return "".join(render(item) for item in nodes)
+
+
+class _SafeHtmlFragmentParser(HTMLParser):
+    _ALLOWED_TAGS = {
+        "article", "section", "div", "p", "br", "strong", "em", "b", "i",
+        "u", "s", "blockquote", "code", "pre", "a", "h1", "h2", "h3", "h4",
+        "h5", "h6", "figure", "figcaption", "img", "ul", "ol", "li", "hr",
+        "span"
+    }
+    _VOID_TAGS = {"br", "img", "hr"}
+    _ATTR_ALLOWLIST = {
+        "a": {"href"},
+        "img": {"src", "alt"},
+    }
+
+    def __init__(self, base_url: str = "") -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.result: list[str] = []
+        self._tag_stack: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        name = str(tag or "").lower()
+        if name in {"script", "style", "noscript", "iframe"}:
+            self._skip_depth += 1
+            self._tag_stack.append("__skip__")
+            return
+        if self._skip_depth:
+            self._tag_stack.append("__skip__")
+            return
+        if name not in self._ALLOWED_TAGS:
+            self._tag_stack.append("__drop__")
+            return
+
+        clean_attrs = []
+        allowed_attrs = self._ATTR_ALLOWLIST.get(name, set())
+        for key, value in attrs:
+            attr_name = str(key or "").lower()
+            if attr_name not in allowed_attrs:
+                continue
+            raw_value = str(value or "").strip()
+            if name == "a" and attr_name == "href":
+                normalized = _normalize_external_url(raw_value, max_len=2048)
+                if not normalized:
+                    continue
+                raw_value = normalized
+            elif name == "img" and attr_name == "src":
+                raw_value = urljoin(self.base_url or "", raw_value)
+                normalized = _normalize_external_url(raw_value, max_len=2048)
+                if not normalized:
+                    continue
+                raw_value = normalized
+            if not raw_value:
+                continue
+            clean_attrs.append(f'{attr_name}="{html.escape(raw_value, quote=True)}"')
+
+        attrs_text = f" {' '.join(clean_attrs)}" if clean_attrs else ""
+        if name == "img" and 'src="' not in attrs_text:
+            self._tag_stack.append("__drop__")
+            return
+        if name == "img":
+            attrs_text += ' loading="lazy"'
+        self.result.append(f"<{name}{attrs_text}>")
+        self._tag_stack.append(name)
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self._tag_stack:
+            return
+        marker = self._tag_stack.pop()
+        if marker == "__skip__":
+            if self._skip_depth:
+                self._skip_depth -= 1
+            return
+        if marker == "__drop__" or marker in self._VOID_TAGS:
+            return
+        self.result.append(f"</{marker}>")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        text = str(data or "")
+        if not text:
+            return
+        self.result.append(html.escape(text, quote=False))
+
+    def handle_entityref(self, name: str) -> None:
+        if self._skip_depth:
+            return
+        self.result.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self._skip_depth:
+            return
+        self.result.append(f"&#{name};")
+
+
+def _sanitize_html_fragment(fragment: str, base_url: str = "") -> str:
+    parser = _SafeHtmlFragmentParser(base_url=base_url)
+    parser.feed(str(fragment or ""))
+    parser.close()
+    cleaned = "".join(parser.result)
+    cleaned = re.sub(r"(?:\s*<br>\s*){3,}", "<br><br>", cleaned)
+    return cleaned.strip()
+
+
+def _extract_teletype_article_fragment(page_html: str) -> str:
+    if not page_html:
+        return ""
+    match = re.search(
+        r'<article[^>]*itemprop=["\']articleBody["\'][^>]*>(.*?)</article>',
+        page_html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        match = re.search(r"<article\b[^>]*>(.*?)</article>", page_html, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    fragment = match.group(1)
+    fragment = re.sub(r"<!--.*?-->", "", fragment, flags=re.DOTALL)
+    fragment = re.sub(r"<a[^>]*name=[\"'][^\"']+[\"'][^>]*>\s*</a>", "", fragment, flags=re.IGNORECASE)
+    return fragment.strip()
+
+
+def _build_chapter_content_cache_key(series_id: str, volume: str, chapter: str) -> str:
+    return f"{str(series_id)}::{str(volume)}::{str(chapter)}"
+
+
+def _extract_chapter_urls(chapter_data: dict) -> list[str]:
+    urls: list[str] = []
+    if isinstance(chapter_data.get("urls"), list):
+        for item in chapter_data["urls"]:
+            normalized = _normalize_external_url(item, max_len=2048)
+            if normalized and normalized not in urls:
+                urls.append(normalized)
+    fallback = _normalize_external_url(chapter_data.get("url"), max_len=2048)
+    if fallback and fallback not in urls:
+        urls.append(fallback)
+    return urls
+
+
+async def _resolve_reader_chapter_entry(series_id: str, volume: str, chapter: str) -> tuple[dict | None, dict | None, dict | None]:
+    payload, _, _ = await get_cached_reader_data(force_refresh=False)
+    for series in payload.get("series", []):
+        if str(series.get("id")) != str(series_id):
+            continue
+        for vol in series.get("volumes", []):
+            if str(vol.get("volume")) != str(volume):
+                continue
+            for chapter_data in vol.get("chapters", []):
+                if str(chapter_data.get("chapter")) == str(chapter):
+                    return payload, series, chapter_data
+            return payload, series, None
+        return payload, series, None
+    return payload, None, None
+
+
+async def _fetch_telegra_ph_html(source_url: str) -> str:
+    match = re.search(r"telegra\.ph/(.+)$", str(source_url or ""), flags=re.IGNORECASE)
+    if not match:
+        return ""
+    api_url = f"https://api.telegra.ph/getPage/{match.group(1)}?return_content=true"
+    session = await get_http_session()
+    async with session.get(api_url, headers={"Accept": "application/json"}) as resp:
+        if resp.status != 200:
+            return ""
+        data = await resp.json(content_type=None)
+    if not data or not data.get("ok"):
+        return ""
+    return _render_telegraph_nodes_server(data.get("result", {}).get("content") or [])
+
+
+async def _fetch_teletype_html(source_url: str) -> str:
+    session = await get_http_session()
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "ru,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    async with session.get(source_url, headers=headers) as resp:
+        if resp.status != 200:
+            return ""
+        page_html = await resp.text()
+    article_fragment = _extract_teletype_article_fragment(page_html)
+    if not article_fragment:
+        return ""
+    return _sanitize_html_fragment(article_fragment, base_url=source_url)
+
+
+async def _build_chapter_content_payload(series_id: str, volume: str, chapter: str) -> tuple[dict | None, int]:
+    _, series, chapter_data = await _resolve_reader_chapter_entry(series_id, volume, chapter)
+    if not series:
+        return None, 404
+    if not chapter_data:
+        return None, 404
+
+    chapter_text = str(chapter_data.get("text") or "").strip()
+    source_urls = _extract_chapter_urls(chapter_data)
+    fallback_url = source_urls[0] if source_urls else None
+    chapter_name = str(chapter_data.get("custom_name") or f"Глава {chapter}")
+
+    if chapter_text:
+        return {
+            "ok": True,
+            "source_type": "inline",
+            "html": _render_inline_chapter_html(chapter_text),
+            "fallback_url": fallback_url,
+            "series_id": str(series_id),
+            "volume": str(volume),
+            "chapter": str(chapter),
+            "chapter_name": chapter_name,
+        }, 200
+
+    preferred_urls = sorted(
+        source_urls,
+        key=lambda value: (0 if "telegra.ph" in value else 1 if "teletype.in" in value else 2, source_urls.index(value)),
+    )
+
+    for url in preferred_urls:
+        try:
+            html_fragment = ""
+            source_type = "fallback"
+            if "telegra.ph" in url:
+                html_fragment = await _fetch_telegra_ph_html(url)
+                source_type = "telegraph"
+            elif "teletype.in" in url:
+                html_fragment = await _fetch_teletype_html(url)
+                source_type = "teletype"
+
+            if html_fragment:
+                return {
+                    "ok": True,
+                    "source_type": source_type,
+                    "html": html_fragment,
+                    "fallback_url": url,
+                    "series_id": str(series_id),
+                    "volume": str(volume),
+                    "chapter": str(chapter),
+                    "chapter_name": chapter_name,
+                }, 200
+        except Exception as fetch_error:
+            logging.warning("Chapter content fetch failed for %s: %s", url, fetch_error)
+
+    return {
+        "ok": False,
+        "source_type": "fallback",
+        "html": "",
+        "fallback_url": fallback_url,
+        "series_id": str(series_id),
+        "volume": str(volume),
+        "chapter": str(chapter),
+        "chapter_name": chapter_name,
+    }, 200
+
+
+def invalidate_chapter_content_cache(reason: str = "") -> None:
+    _chapter_content_cache.clear()
+    if reason:
+        logging.info("Chapter content cache invalidated: %s", reason)
+
+
+async def get_cached_chapter_content(series_id: str, volume: str, chapter: str, force_refresh: bool = False) -> tuple[dict | None, bool, int]:
+    cache_key = _build_chapter_content_cache_key(series_id, volume, chapter)
+    now = time.time()
+    cached_entry = _chapter_content_cache.get(cache_key)
+    if (
+        not force_refresh
+        and isinstance(cached_entry, dict)
+        and (now - float(cached_entry.get("built_at") or 0.0)) < CHAPTER_CONTENT_CACHE_TTL_SECONDS
+    ):
+        return cached_entry.get("payload"), True, int(cached_entry.get("status") or 200)
+
+    async with _chapter_content_cache_lock:
+        now = time.time()
+        cached_entry = _chapter_content_cache.get(cache_key)
+        if (
+            not force_refresh
+            and isinstance(cached_entry, dict)
+            and (now - float(cached_entry.get("built_at") or 0.0)) < CHAPTER_CONTENT_CACHE_TTL_SECONDS
+        ):
+            return cached_entry.get("payload"), True, int(cached_entry.get("status") or 200)
+
+        payload, status_code = await _build_chapter_content_payload(series_id, volume, chapter)
+        if payload is not None:
+            _chapter_content_cache[cache_key] = {
+                "payload": payload,
+                "status": status_code,
+                "built_at": time.time(),
+            }
+        else:
+            _chapter_content_cache.pop(cache_key, None)
+        return payload, False, status_code
 
 @dp.message(Command("toggle_sync"))
 async def cmd_toggle_sync(message: types.Message):
@@ -4261,6 +4626,11 @@ WEBAPP_TELEMETRY_EVENTS = {
     "client_unhandled_rejection",
     "client_state_contract_violation",
     "client_chapter_open_ms",
+    "series_selected",
+    "chapters_screen_opened",
+    "chapter_click",
+    "chapter_content_load_failed",
+    "cache_version_mismatch",
 }
 MAX_TELEMETRY_PAYLOAD_JSON_LENGTH = 16000
 MAX_TELEMETRY_METRIC_MS = 120000.0
@@ -4588,6 +4958,33 @@ async def handle_telemetry_post(request: aiohttp.web.Request) -> aiohttp.web.Res
         return aiohttp.web.json_response({"error": "invalid json"}, status=400, headers=CORS_HEADERS)
     except Exception as e:
         logging.error(f"Telemetry API Error: {e}")
+        return aiohttp.web.json_response({"error": "internal"}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_chapter_content(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    series_id = str(request.query.get("series_id", "")).strip()
+    volume = str(request.query.get("volume", "")).strip()
+    chapter = str(request.query.get("chapter", "")).strip()
+
+    if not _is_valid_series_id(series_id):
+        return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+    if not volume or len(volume) > 32 or not re.fullmatch(r"[A-Za-z0-9._-]+", volume):
+        return aiohttp.web.json_response({"error": "invalid volume"}, status=400, headers=CORS_HEADERS)
+    if not _is_valid_chapter_token(chapter):
+        return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
+
+    try:
+        payload, cache_hit, status_code = await get_cached_chapter_content(series_id, volume, chapter, force_refresh=False)
+        if payload is None:
+            return aiohttp.web.json_response({"error": "not found"}, status=status_code, headers=CORS_HEADERS)
+
+        headers = dict(CORS_HEADERS)
+        headers["Cache-Control"] = "no-cache"
+        payload_with_cache = dict(payload)
+        payload_with_cache["cache_status"] = "hit" if cache_hit else "miss"
+        return aiohttp.web.json_response(payload_with_cache, status=status_code, headers=headers)
+    except Exception as e:
+        logging.error("Chapter content API Error for %s/%s/%s: %s", series_id, volume, chapter, e)
         return aiohttp.web.json_response({"error": "internal"}, status=500, headers=CORS_HEADERS)
 
 async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -5577,10 +5974,12 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.on_cleanup.append(close_webapp_resources)
 
     app.router.add_get("/api/reader", handle_reader_data)
+    app.router.add_get("/api/chapter-content", handle_chapter_content)
     app.router.add_post("/api/telemetry", handle_telemetry_post)
 
     app.router.add_get("/", handle_root_redirect)
     app.router.add_options("/api/reader", handle_cors_preflight)
+    app.router.add_options("/api/chapter-content", handle_cors_preflight)
     app.router.add_options("/api/telemetry", handle_cors_preflight)
 
     app.router.add_get("/api/likes", handle_likes_get)

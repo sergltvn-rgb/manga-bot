@@ -95,6 +95,15 @@ function safeJson(request) {
   }
 }
 
+function renderInlineChapterHtml(text) {
+  return String(text || "")
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => `<p>${part}</p>`)
+    .join("");
+}
+
 async function fulfillJson(route, payload, status = 200) {
   await route.fulfill({
     status,
@@ -162,6 +171,27 @@ async function installVisualMocks(page, state) {
 
     if (pathname === "/api/reader" && method === "GET") {
       await fulfillJson(route, state.readerData);
+      return;
+    }
+
+    if (pathname === "/api/chapter-content" && method === "GET") {
+      const seriesId = url.searchParams.get("series_id") || "";
+      const volumeId = url.searchParams.get("volume") || "";
+      const chapterId = url.searchParams.get("chapter") || "";
+      const series = state.readerData.series.find((item) => String(item.id) === String(seriesId));
+      const volume = series?.volumes.find((item) => String(item.volume) === String(volumeId));
+      const chapter = volume?.chapters.find((item) => String(item.chapter) === String(chapterId));
+      if (!chapter) {
+        await fulfillJson(route, { error: "not found" }, 404);
+        return;
+      }
+      await fulfillJson(route, {
+        ok: true,
+        source_type: "inline",
+        html: renderInlineChapterHtml(chapter.text || ""),
+        fallback_url: chapter.url || null,
+        cache_status: "miss",
+      });
       return;
     }
 

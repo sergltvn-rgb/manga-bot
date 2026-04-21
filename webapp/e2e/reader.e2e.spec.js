@@ -55,6 +55,109 @@ function createMockState() {
   };
 }
 
+function createMobileSelectionState() {
+  return {
+    nextCommentId: 1,
+    commentsByChapter: {},
+    chapterReactionsByChapter: {},
+    userReactionByChapter: {},
+    likesByChapter: {},
+    calls: {
+      reader: 0,
+      commentsPost: 0,
+      reactionsPost: 0,
+      typoPost: 0,
+      renameRequest: 0,
+      chapterEdit: 0,
+      chapterBulk: 0,
+      sortPut: 0,
+    },
+    readerData: {
+      bot_username: "AlyaTestBot",
+      admin_ids: [ADMIN_USER_ID],
+      series: [
+        {
+          id: "akashic_records",
+          title: "Хроники Акаши",
+          volumes: [
+            {
+              volume: 11,
+              chapters: [
+                { chapter: "1", custom_name: "Глава 1", text: "Akashic chapter one." },
+                { chapter: "2", custom_name: "Глава 2", text: "Akashic chapter two." },
+              ],
+            },
+          ],
+        },
+        {
+          id: "ranobe_alya",
+          title: "Воительница Аля",
+          volumes: [
+            {
+              volume: 1,
+              chapters: [
+                {
+                  chapter: "1",
+                  custom_name: "Часть 1",
+                  url: "https://teletype.in/@slitvin/The_warrior_Alya_part_1",
+                  __chapterContent: {
+                    ok: true,
+                    source_type: "teletype",
+                    html: "<p>Воительница Аля — часть 1.</p>",
+                  },
+                },
+                {
+                  chapter: "2",
+                  custom_name: "Часть 2",
+                  url: "https://teletype.in/@slitvin/The_warrior_Alya_part_2",
+                  __chapterContent: {
+                    ok: true,
+                    source_type: "teletype",
+                    html: "<p>Воительница Аля — часть 2.</p>",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: "manga_ru",
+          title: "Аля иногда... Манга",
+          volumes: [
+            {
+              volume: 1,
+              chapters: [
+                {
+                  chapter: "75",
+                  custom_name: "Глава 75",
+                  url: "https://example.org/manga-75",
+                  __chapterContent: {
+                    ok: false,
+                    source_type: "fallback",
+                    html: "",
+                    fallback_url: "https://example.org/manga-75",
+                  },
+                },
+                {
+                  chapter: "76",
+                  custom_name: "Глава 76",
+                  url: "https://example.org/manga-76",
+                  __chapterContent: {
+                    ok: false,
+                    source_type: "fallback",
+                    html: "",
+                    fallback_url: "https://example.org/manga-76",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 function chapterKey(seriesId, volume, chapter) {
   return `${seriesId}_v${volume}_ch${chapter}`;
 }
@@ -63,6 +166,21 @@ function findVolume(state, seriesId, volumeId) {
   const series = state.readerData.series.find((s) => String(s.id) === String(seriesId));
   if (!series) return null;
   return series.volumes.find((v) => String(v.volume) === String(volumeId)) || null;
+}
+
+function findChapter(state, seriesId, volumeId, chapterId) {
+  const volume = findVolume(state, seriesId, volumeId);
+  if (!volume) return null;
+  return volume.chapters.find((ch) => String(ch.chapter) === String(chapterId)) || null;
+}
+
+function renderInlineChapterHtml(text) {
+  return String(text || "")
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => `<p>${part}</p>`)
+    .join("");
 }
 
 function safeJson(request) {
@@ -145,6 +263,47 @@ async function installTelegramAndApiMocks(page, state) {
     if (pathname === "/api/reader" && method === "GET") {
       state.calls.reader += 1;
       await fulfillJson(route, state.readerData);
+      return;
+    }
+
+    if (pathname === "/api/chapter-content" && method === "GET") {
+      const seriesId = url.searchParams.get("series_id") || "";
+      const volumeId = url.searchParams.get("volume") || "";
+      const chapterId = url.searchParams.get("chapter") || "";
+      const chapter = findChapter(state, seriesId, volumeId, chapterId);
+      if (!chapter) {
+        await fulfillJson(route, { error: "not found" }, 404);
+        return;
+      }
+
+      const fallbackUrl = chapter.url || (Array.isArray(chapter.urls) ? chapter.urls[0] : null) || null;
+      if (chapter.__chapterContent) {
+        await fulfillJson(route, {
+          cache_status: "miss",
+          ...chapter.__chapterContent,
+          fallback_url: chapter.__chapterContent.fallback_url ?? fallbackUrl,
+        });
+        return;
+      }
+
+      if (chapter.text) {
+        await fulfillJson(route, {
+          ok: true,
+          source_type: "inline",
+          html: renderInlineChapterHtml(chapter.text),
+          fallback_url: fallbackUrl,
+          cache_status: "miss",
+        });
+        return;
+      }
+
+      await fulfillJson(route, {
+        ok: false,
+        source_type: "fallback",
+        html: "",
+        fallback_url: fallbackUrl,
+        cache_status: "miss",
+      });
       return;
     }
 
@@ -437,5 +596,57 @@ test.describe("Reader E2E smoke", () => {
       await reorderChapters(0, 1);
     });
     await expect.poll(() => state.calls.sortPut).toBe(1);
+  });
+
+  test("mobile flow: selects the correct title and keeps chapter list tappable after fallback", async ({ browser }) => {
+    const state = createMobileSelectionState();
+    const context = await browser.newContext({
+      viewport: { width: 393, height: 852 },
+      userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 7)",
+    });
+    const page = await context.newPage();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=mobile-a");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(3);
+
+    await page.locator("#series-list .series-card").nth(1).click();
+    await expect(page.locator("#chapters-title")).toHaveText("Воительница Аля");
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(2);
+
+    await page.locator("#screen-chapters .back-btn").click();
+    await page.locator("#series-list .series-card").nth(2).click();
+    await expect(page.locator("#chapters-title")).toHaveText("Аля иногда... Манга");
+
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("#reader-text")).toContainText("Не удалось загрузить главу");
+    await expect(page.locator("#reader-text .state-action-btn")).toHaveText("Открыть источник");
+
+    await page.locator("#screen-reader .back-btn").click();
+    await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
+    await page.locator("#chapters-list .chapter-item").nth(1).click();
+    await expect(page.locator("#chapter-title-header")).toContainText("76");
+
+    await context.close();
+  });
+
+  test("cache snapshot rotates when rev changes", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=rev-a");
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("reader_api_snapshot_v2_rev-a") !== null)).toBe(true);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=rev-b");
+    await expect.poll(() => page.evaluate(() => ({
+      currentRev: JSON.parse(localStorage.getItem("reader_api_snapshot_rev") || '""'),
+      hasOldKey: localStorage.getItem("reader_api_snapshot_v2_rev-a") !== null,
+      hasNewKey: localStorage.getItem("reader_api_snapshot_v2_rev-b") !== null,
+    }))).toEqual({
+      currentRev: "rev-b",
+      hasOldKey: false,
+      hasNewKey: true,
+    });
   });
 });

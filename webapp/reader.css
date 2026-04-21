@@ -421,6 +421,16 @@ body {
 .chapter-item:hover { background: var(--card-hover); }
 .chapter-item:active { background: var(--accent-light); }
 
+.chapter-item.chapter-item-disabled {
+    opacity: 0.72;
+    cursor: default;
+}
+
+.chapter-item.chapter-item-disabled:hover,
+.chapter-item.chapter-item-disabled:active {
+    background: transparent;
+}
+
 .chapter-num {
     width: 32px; height: 32px;
     border-radius: 8px;
@@ -438,6 +448,10 @@ body {
     flex: 1;
     font-size: 14px;
     font-weight: 500;
+}
+
+.chapter-name .series-action-btn {
+    margin-top: 8px;
 }
 
 .chapter-read-mark {

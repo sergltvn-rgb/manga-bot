@@ -232,7 +232,7 @@ function toggleImmersiveMode(force = null) {
     }
 }
 
-function toggleQuickSwitcher() {
+function setQuickSwitcherOpen(isOpen) {
     const switcher = document.getElementById('quick-switcher');
     const overlay = document.getElementById('quick-switcher-overlay');
     if (!switcher) return;
@@ -241,20 +241,24 @@ function toggleQuickSwitcher() {
     const fabMenu = document.getElementById('fab-menu');
     if (fabMenu && !fabMenu.classList.contains('hidden')) toggleFab();
 
-    const isActive = switcher.classList.contains('active');
-    
-    if (!isActive) {
+    if (isOpen) {
         renderQuickSwitcherList();
         switcher.classList.add('active');
+        overlay?.classList.remove('hidden');
         overlay?.classList.add('active');
-        haptic('light');
     } else {
         switcher.classList.remove('active');
-        const toc = document.getElementById('toc-panel');
-        if (!toc || !toc.classList.contains('active')) {
-            overlay?.classList.remove('active');
-        }
+        overlay?.classList.remove('active');
+        overlay?.classList.add('hidden');
     }
+}
+
+function toggleQuickSwitcher() {
+    const switcher = document.getElementById('quick-switcher');
+    if (!switcher) return;
+    const willOpen = !switcher.classList.contains('active');
+    setQuickSwitcherOpen(willOpen);
+    if (willOpen) haptic('light');
 }
 
 function renderQuickSwitcherList() {
@@ -262,11 +266,119 @@ function renderQuickSwitcherList() {
     if (!list || !currentChapters) return;
     
     list.innerHTML = currentChapters.map((ch, idx) => `
-        <div class="quick-switcher-item ${idx === currentChapterIdx ? 'active' : ''}" 
-             onclick="openChapter(${idx}); toggleQuickSwitcher();">
+        <div class="quick-switcher-item ${idx === currentChapterIdx ? 'active' : ''}" data-chapter-idx="${idx}">
             ${ch.custom_name || 'Глава ' + ch.chapter}
         </div>
     `).join('');
+}
+
+function setToCOpen(isOpen) {
+    document.getElementById('toc-overlay')?.classList.toggle('active', !!isOpen);
+    document.getElementById('toc-panel')?.classList.toggle('active', !!isOpen);
+}
+
+function closeSettingsPanel({ save = false } = {}) {
+    const overlay = document.getElementById('settings-overlay');
+    const panel = document.getElementById('settings-panel');
+    if (!overlay || !panel) return;
+    if (save && !panel.classList.contains('hidden')) {
+        saveSettings();
+    }
+    overlay.classList.add('hidden');
+    panel.classList.add('hidden');
+}
+
+function resetTransientUiState({ saveSettingsOnClose = false } = {}) {
+    setQuickSwitcherOpen(false);
+    setToCOpen(false);
+    closeSettingsPanel({ save: saveSettingsOnClose });
+    closeEditUrlModal();
+    closeBulkModal();
+    closeTypoModal();
+    closeAdminMenu();
+    document.body.classList.remove('keyboard-open');
+    document.documentElement.style.setProperty('--reader-keyboard-offset', '0px');
+}
+
+function openExternalChapterSource(url) {
+    const safeUrl = String(url || '').trim();
+    if (!safeUrl) return;
+    if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.openTelegramLink === 'function' && /^https?:\/\//i.test(safeUrl)) {
+        window.Telegram.WebApp.openTelegramLink(safeUrl);
+        return;
+    }
+    window.open(safeUrl, '_blank', 'noopener');
+}
+
+function chapterHasAnyContent(chapter) {
+    return !!(chapter && ((typeof chapter.text === 'string' && chapter.text.trim()) || getChapterSourceUrls(chapter).length > 0));
+}
+
+let _delegatedSelectionEventsBound = false;
+
+function bindDelegatedSelectionEvents() {
+    if (_delegatedSelectionEventsBound) return;
+    _delegatedSelectionEventsBound = true;
+
+    document.getElementById('series-list')?.addEventListener('click', (event) => {
+        const actionBtn = event.target.closest('[data-series-action]');
+        if (actionBtn) {
+            const seriesId = actionBtn.dataset.seriesId || '';
+            if (actionBtn.dataset.seriesAction === 'continue') {
+                jumpToLastRead(event, seriesId);
+            } else if (actionBtn.dataset.seriesAction === 'latest') {
+                jumpToLatestChapter(event, seriesId);
+            }
+            return;
+        }
+
+        const card = event.target.closest('.series-card[data-series-id]');
+        if (!card) return;
+        if (event.target.closest('.admin-edit-btn, .admin-reset-btn')) return;
+        selectSeries(card.dataset.seriesId || '');
+    });
+
+    document.getElementById('library-list')?.addEventListener('click', (event) => {
+        const actionBtn = event.target.closest('[data-series-action]');
+        if (actionBtn) {
+            const seriesId = actionBtn.dataset.seriesId || '';
+            if (actionBtn.dataset.seriesAction === 'continue') {
+                jumpToLastRead(event, seriesId);
+            } else if (actionBtn.dataset.seriesAction === 'latest') {
+                jumpToLatestChapter(event, seriesId);
+            }
+            return;
+        }
+
+        const card = event.target.closest('.series-card[data-series-id]');
+        if (!card) return;
+        selectSeries(card.dataset.seriesId || '');
+    });
+
+    document.getElementById('chapters-list')?.addEventListener('click', (event) => {
+        const fallbackBtn = event.target.closest('[data-chapter-fallback-url]');
+        if (fallbackBtn) {
+            event.stopPropagation();
+            openExternalChapterSource(fallbackBtn.dataset.chapterFallbackUrl || '');
+            return;
+        }
+        if (event.target.closest('.admin-edit-btn, .admin-reset-btn, .admin-link-btn, .drag-handle, .admin-bulk-btn')) return;
+
+        const item = event.target.closest('.chapter-item[data-chapter-idx]');
+        if (!item) return;
+        if (item.classList.contains('chapter-item-disabled')) return;
+        const idx = Number(item.dataset.chapterIdx);
+        if (Number.isInteger(idx)) openChapter(idx);
+    });
+
+    document.getElementById('quick-switcher-list')?.addEventListener('click', (event) => {
+        const item = event.target.closest('.quick-switcher-item[data-chapter-idx]');
+        if (!item) return;
+        const idx = Number(item.dataset.chapterIdx);
+        if (!Number.isInteger(idx)) return;
+        openChapter(idx);
+        setQuickSwitcherOpen(false);
+    });
 }
 
 const defaults = { 
@@ -322,11 +434,13 @@ function safeSetLocal(key, val) {
     } catch (e) {}
 }
 
-const READER_API_CACHE_KEY = 'reader_api_snapshot_v1';
+const READER_API_CACHE_PREFIX = 'reader_api_snapshot_v2';
+const READER_CACHE_REV_KEY = 'reader_api_snapshot_rev';
+const READER_SW_SYNC_KEY = 'reader_sw_rev';
 const OFFLINE_CHAPTER_PREFETCH_COUNT = 3;
 
 function getCachedReaderApiSnapshot() {
-    const snapshot = safeGetLocal(READER_API_CACHE_KEY, null);
+    const snapshot = safeGetLocal(getReaderApiCacheKey(), null);
     if (!snapshot || typeof snapshot !== 'object') return null;
     if (!snapshot.payload || typeof snapshot.payload !== 'object') return null;
     return {
@@ -337,7 +451,7 @@ function getCachedReaderApiSnapshot() {
 
 function saveReaderApiSnapshot(payload, etag = '') {
     if (!payload || typeof payload !== 'object') return;
-    safeSetLocal(READER_API_CACHE_KEY, {
+    safeSetLocal(getReaderApiCacheKey(), {
         etag: typeof etag === 'string' ? etag : '',
         payload,
         ts: Date.now()
@@ -406,9 +520,14 @@ async function registerReaderServiceWorker() {
     if (!window.isSecureContext && location.hostname !== 'localhost') return;
 
     try {
-        const reg = await navigator.serviceWorker.register('./sw.js');
+        const swUrl = `./sw.js?rev=${encodeURIComponent(READER_REV)}`;
+        const reg = await navigator.serviceWorker.register(swUrl);
+        safeSetLocal(READER_SW_SYNC_KEY, READER_REV);
         if (reg.waiting) {
             reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+        if (typeof reg.update === 'function') {
+            reg.update().catch(() => {});
         }
         reg.addEventListener('updatefound', () => {
             const installing = reg.installing;
@@ -436,7 +555,42 @@ if (!Object.values(LIBRARY_FILTERS).includes(libraryFilter)) {
 // Приоритет: 1) ?api=... из URL 2) window.location.origin (если бот и WebApp на одном хосте)
 // На GitHub Pages (без ?api=) остаётся '' — функции, зависящие от API, корректно отключаются
 const urlParams = new URLSearchParams(window.location.search);
+const READER_REV = String(urlParams.get('rev') || window.__READER_REV || '16').trim() || '16';
 const API_URL = urlParams.get('api') || (window.location.hostname.includes('github.io') ? '' : window.location.origin);
+
+function getReaderApiCacheKey(rev = READER_REV) {
+    return `${READER_API_CACHE_PREFIX}_${String(rev || 'default')}`;
+}
+
+function clearLegacyReaderApiSnapshots(exceptRev = READER_REV) {
+    const keepKey = getReaderApiCacheKey(exceptRev);
+    try {
+        const toDelete = [];
+        for (let i = 0; i < localStorage.length; i += 1) {
+            const key = localStorage.key(i);
+            if (!key) continue;
+            if ((key.startsWith(READER_API_CACHE_PREFIX) || key === 'reader_api_snapshot_v1') && key !== keepKey) {
+                toDelete.push(key);
+            }
+        }
+        toDelete.forEach((key) => localStorage.removeItem(key));
+    } catch (e) {}
+}
+
+function handleReaderCacheVersionChange() {
+    const previousRev = safeGetLocal(READER_CACHE_REV_KEY, '');
+    if (String(previousRev || '') === READER_REV) return;
+    clearLegacyReaderApiSnapshots(READER_REV);
+    safeSetLocal(READER_CACHE_REV_KEY, READER_REV);
+    sendClientTelemetry('cache_version_mismatch', {
+        module: 'reader.js',
+        previous_rev: String(previousRev || ''),
+        current_rev: READER_REV,
+        screen: getActiveScreenName(),
+        tg_platform: getTelegramPlatform(),
+        has_overlay: hasBlockingOverlay()
+    });
+}
 
 // === API Wrapper ===
 async function apiFetch(url, options = {}) {
@@ -456,7 +610,12 @@ const TELEMETRY_ALLOWED_EVENTS = new Set([
     'client_runtime_error',
     'client_unhandled_rejection',
     'client_state_contract_violation',
-    'client_chapter_open_ms'
+    'client_chapter_open_ms',
+    'series_selected',
+    'chapters_screen_opened',
+    'chapter_click',
+    'chapter_content_load_failed',
+    'cache_version_mismatch'
 ]);
 const _telemetryDedupCache = new Map();
 let _sentClientErrorEvents = 0;
@@ -484,6 +643,40 @@ function sendClientTelemetry(eventType, payload = {}) {
     }
 
     apiFetch(endpoint, { method: 'POST', headers, body, keepalive: true }).catch(() => {});
+}
+
+function getActiveScreenName() {
+    const active = document.querySelector('.screen.active');
+    if (!active || !active.id) return 'unknown';
+    return active.id.replace(/^screen-/, '') || 'unknown';
+}
+
+function getTelegramPlatform() {
+    return String(tg?.platform || tg?.initDataUnsafe?.platform || 'web');
+}
+
+function hasBlockingOverlay() {
+    const selectors = [
+        '#quick-switcher.active',
+        '#toc-panel.active',
+        '#settings-panel:not(.hidden)',
+        '#edit-url-modal:not(.hidden)',
+        '#bulk-upload-modal:not(.hidden)',
+        '#typo-modal:not(.hidden)',
+        '#lightbox-overlay:not(.hidden)'
+    ];
+    return selectors.some((selector) => document.querySelector(selector));
+}
+
+function buildTelemetryContext(extra = {}) {
+    return {
+        module: 'reader.js',
+        rev: READER_REV,
+        screen: getActiveScreenName(),
+        tg_platform: getTelegramPlatform(),
+        has_overlay: hasBlockingOverlay(),
+        ...extra
+    };
 }
 
 function getModuleFromSource(source = '') {
@@ -928,6 +1121,7 @@ async function loadData() {
                     adminIds = allData.admin_ids.map(id => String(id));
                 }
                 if (allData.series && allData.series.length > 0) {
+                    validateCriticalSeriesMappings();
                     renderSeriesList();
                     renderContinueReading();
                     handleStartParam();
@@ -946,11 +1140,12 @@ async function loadData() {
     // 3. Фолбэк на статический JSON
     console.log("Fetching fallback chapters_data.json...");
     try {
-        const resp = await fetch('chapters_data.json?v=' + Date.now(), { signal: getTimeoutSignal(5000) });
+        const resp = await fetch('chapters_data.json?v=' + encodeURIComponent(READER_REV), { signal: getTimeoutSignal(5000) });
         if (resp.ok) {
             allData = await resp.json();
             console.log("Data loaded from fallback JSON, series count:", allData.series?.length);
             if (allData.series && allData.series.length > 0) {
+                validateCriticalSeriesMappings();
                 renderSeriesList();
                 renderContinueReading();
                 handleStartParam(); // ★ Deep link handling (Phase 5)
@@ -990,6 +1185,22 @@ function showNetworkState() {
         actionLabel: '\u041f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u044c',
         onAction: () => loadData()
     });
+}
+
+function validateCriticalSeriesMappings() {
+    if (!Array.isArray(allData.series)) return;
+    const ids = allData.series.map((series) => String(series?.id || ''));
+    const expected = ['akashic_records', 'ranobe_alya', 'manga_ru'];
+    const presentExpected = expected.filter((id) => ids.includes(id));
+    if (presentExpected.length === 0) return;
+
+    const uniqueIds = new Set(ids);
+    if (uniqueIds.size !== ids.length || presentExpected.some((id) => !uniqueIds.has(id))) {
+        reportStateContractViolation('loadData:series_ids', 'critical_series_mapping_invalid', {
+            ids,
+            expected_present: presentExpected
+        });
+    }
 }
 
 function handleStartParam() {
@@ -1048,8 +1259,8 @@ function renderSeriesList() {
             continueBadge = `<span class="continue-badge">▶ Продолжить · Гл. ${lastRead.chapter}</span>`;
         }
         const quickAction = lastRead
-            ? `<button class="series-action-btn primary" onclick="jumpToLastRead(event, '${s.id}')">Продолжить</button>`
-            : `<button class="series-action-btn" onclick="jumpToLatestChapter(event, '${s.id}')">К последней</button>`;
+            ? `<button type="button" class="series-action-btn primary" data-series-action="continue" data-series-id="${escapeHtml(String(s.id))}">Продолжить</button>`
+            : `<button type="button" class="series-action-btn" data-series-action="latest" data-series-id="${escapeHtml(String(s.id))}">К последней</button>`;
 
         const editBtns = isAdminMode ? `
             <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('series_${s.id}'); event.stopPropagation();">&#9998;</button>
@@ -1063,7 +1274,7 @@ function renderSeriesList() {
             : `<div class="series-icon">${['📖', '📕', '📗', '📘', '📙'][i % 5]}</div>`;
 
         return `
-        <div class="series-card" onclick="selectSeries('${s.id}')">
+        <div class="series-card" data-series-id="${escapeHtml(String(s.id))}">
             ${coverEl}
             <div class="series-info">
                 <h3>${escapeHtml(s.title)}${customBadge}${editBtns}</h3>
@@ -1082,6 +1293,11 @@ function selectSeries(seriesId) {
     currentSeries = allData.series.find(s => s.id === seriesId);
     if (!currentSeries) return;
 
+    sendClientTelemetry('series_selected', buildTelemetryContext({
+        series_id: currentSeries.id,
+        volumes_count: Array.isArray(currentSeries.volumes) ? currentSeries.volumes.length : 0
+    }));
+
     document.getElementById('chapters-title').textContent = currentSeries.title; // textContent escapes HTML
     renderVolumeTabs();
 
@@ -1092,6 +1308,10 @@ function selectSeries(seriesId) {
         if (vol) {
             selectVolume(lastRead.volume);
             showScreen('chapters');
+            sendClientTelemetry('chapters_screen_opened', buildTelemetryContext({
+                series_id: currentSeries.id,
+                volume: lastRead.volume
+            }));
             return;
         }
     }
@@ -1101,6 +1321,10 @@ function selectSeries(seriesId) {
     }
 
     showScreen('chapters');
+    sendClientTelemetry('chapters_screen_opened', buildTelemetryContext({
+        series_id: currentSeries.id,
+        volume: currentVolume?.volume ?? ''
+    }));
 }
 
 function openSeriesChapter(seriesId, volumeId, chapterKey, fallbackToLatest = false) {
@@ -1236,12 +1460,17 @@ function renderChaptersList() {
         ` : '';
         const customBadge = (isAdminMode && hasCustom) ? '<span class="custom-name-badge">кастом</span>' : '';
         const isCurrent = lastChapter && String(ch.chapter) === String(lastChapter);
+        const hasContent = chapterHasAnyContent(ch);
+        const sourceUrls = getChapterSourceUrls(ch);
+        const fallbackBtn = !hasContent && sourceUrls[0]
+            ? `<button type="button" class="series-action-btn" data-chapter-fallback-url="${escapeHtml(sourceUrls[0])}">Открыть источник</button>`
+            : '';
 
         return `
-        <div class="chapter-item ${readClass}${isCurrent ? ' current-chapter' : ''}" data-chapter-idx="${idx}" ${isAdminMode ? 'draggable="true"' : ''} onclick="openChapter(${idx})">
+        <div class="chapter-item ${readClass}${isCurrent ? ' current-chapter' : ''}${!hasContent ? ' chapter-item-disabled' : ''}" data-chapter-idx="${idx}" ${isAdminMode ? 'draggable="true"' : ''}>
             ${isAdminMode ? '<div class="drag-handle" title="Перетащить">⠿</div>' : ''}
             <div class="chapter-num">${idx + 1}</div>
-            <div class="chapter-name">${chapName}${customBadge}${linkBtn}${editBtns}</div>
+            <div class="chapter-name">${chapName}${customBadge}${linkBtn}${editBtns}${fallbackBtn}</div>
             ${isCurrent ? '<span style="font-size:12px;color:var(--accent);font-weight:600;">◄</span>' : ''}
             <span class="chapter-read-mark">✓</span>
         </div>`;
@@ -1275,6 +1504,15 @@ function openChapter(idx, usePrefetch = false) {
         return;
     }
 
+    sendClientTelemetry('chapter_click', buildTelemetryContext({
+        series_id: currentSeries?.id || '',
+        volume: currentVolume?.volume ?? '',
+        chapter: chapter.chapter,
+        chapter_idx: idx,
+        has_source: getChapterSourceUrls(chapter).length > 0,
+        has_inline_text: !!(chapter.text && String(chapter.text).trim())
+    }));
+
     // Smooth transition: fade out
     const content = document.getElementById('reader-content');
     if (content) content.classList.add('loading');
@@ -1295,8 +1533,7 @@ function openChapter(idx, usePrefetch = false) {
     if (progressBarEl) progressBarEl.style.width = '0%';
     
     // Auto-close switcher
-    const switcher = document.getElementById('quick-switcher');
-    if (switcher) switcher.classList.add('hidden');
+    setQuickSwitcherOpen(false);
 
     showScreen('reader');
 
@@ -1411,6 +1648,175 @@ function assertReaderState(context = 'unknown') {
     }
 }
 
+function buildChapterContentApiUrl(chapter) {
+    if (!API_URL || !currentSeries || !currentVolume || !chapter?.chapter) return '';
+    const query = new URLSearchParams({
+        series_id: String(currentSeries.id),
+        volume: String(currentVolume.volume),
+        chapter: String(chapter.chapter)
+    });
+    return `${API_URL}/api/chapter-content?${query.toString()}`;
+}
+
+function buildChapterFallbackPayload(chapter, overrides = {}) {
+    const sourceUrls = getChapterSourceUrls(chapter);
+    return {
+        ok: false,
+        source_type: 'fallback',
+        html: '',
+        fallback_url: sourceUrls[0] || null,
+        ...overrides
+    };
+}
+
+function renderUnavailableChapterState(container, chapter, telemetryContext = null, payload = {}) {
+    const resolved = buildChapterFallbackPayload(chapter, payload);
+    const contentArea = document.getElementById('reader-content');
+    if (contentArea) contentArea.classList.remove('loading');
+
+    const hasFallbackUrl = !!resolved.fallback_url;
+    renderStateBlock(container, {
+        variant: hasFallbackUrl ? 'error' : 'empty',
+        icon: hasFallbackUrl ? '📡' : '📂',
+        title: hasFallbackUrl ? 'Не удалось загрузить главу' : 'Глава пока не загружена',
+        description: hasFallbackUrl
+            ? 'Можно открыть оригинальный источник напрямую, пока встроенное чтение недоступно.'
+            : 'Для этой главы пока нет текста или рабочей ссылки.',
+        actionLabel: hasFallbackUrl ? 'Открыть источник' : 'Вернуться к главам',
+        onAction: () => {
+            if (hasFallbackUrl) {
+                openExternalChapterSource(resolved.fallback_url);
+            } else {
+                backFromReader();
+            }
+        }
+    });
+
+    sendClientTelemetry('chapter_content_load_failed', buildTelemetryContext({
+        series_id: currentSeries?.id || '',
+        volume: currentVolume?.volume ?? '',
+        chapter: chapter?.chapter || '',
+        source_type: resolved.source_type || 'fallback',
+        fallback_url: resolved.fallback_url || '',
+        reason: resolved.reason || 'missing_content'
+    }));
+    reportChapterOpenTelemetry(chapter, telemetryContext, 'fallback');
+}
+
+function loadChapterContentFromServer(chapter, telemetryContext = null) {
+    const container = document.getElementById('reader-text');
+    const chapterTelemetryContext = telemetryContext || buildChapterOpenTelemetryContext(currentChapterIdx, false);
+    if (!container) return;
+
+    const endpoint = buildChapterContentApiUrl(chapter);
+    if (!API_URL || !endpoint) {
+        return loadChapterContentDirectFallback(chapter, chapterTelemetryContext);
+    }
+
+    _chapterAbortController = new AbortController();
+    const signal = _chapterAbortController.signal;
+    setTimeout(() => {
+        if (_chapterAbortController && !_chapterAbortController.signal.aborted) {
+            _chapterAbortController.abort(new Error('Timeout'));
+        }
+    }, 15000);
+
+    container.innerHTML = buildSkeletonLoader();
+    document.getElementById('reader-content').scrollTop = 0;
+
+    apiFetch(endpoint, { signal }).then(async (resp) => {
+        if (signal.aborted || chapter !== currentChapters[currentChapterIdx]) return;
+        if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+        }
+        const payload = await resp.json();
+        if (payload && payload.ok && payload.html) {
+            renderLoadedContent(container, payload.html, chapter, chapterTelemetryContext, payload.source_type || 'api');
+            return;
+        }
+        renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
+            source_type: payload?.source_type || 'fallback',
+            fallback_url: payload?.fallback_url || null,
+            reason: payload?.ok === false ? 'server_fallback' : 'empty_html'
+        });
+    }).catch((err) => {
+        if (err.name === 'AbortError') return;
+        console.warn('Chapter API load failed, using direct fallback:', err);
+        loadChapterContentDirectFallback(chapter, chapterTelemetryContext);
+    });
+}
+
+function loadChapterContentDirectFallback(chapter, telemetryContext = null) {
+    const container = document.getElementById('reader-text');
+    const chapterTelemetryContext = telemetryContext || buildChapterOpenTelemetryContext(currentChapterIdx, false);
+    if (!container) return;
+
+    let urlsToLoad = getChapterSourceUrls(chapter);
+    const telegraphUrls = urlsToLoad.filter((u) => u.includes('telegra.ph'));
+    if (telegraphUrls.length > 0) {
+        urlsToLoad = telegraphUrls;
+    } else {
+        const teletypeUrls = urlsToLoad.filter((u) => u.includes('teletype.in'));
+        if (teletypeUrls.length > 0) {
+            urlsToLoad = [teletypeUrls[0]];
+        }
+    }
+
+    if (urlsToLoad.length === 0) {
+        if (chapter.text) {
+            const paragraphs = chapter.text.split('\n\n').map((p) => `<p>${p.trim()}</p>`).join('');
+            renderLoadedContent(container, paragraphs, chapter, chapterTelemetryContext, 'inline_text');
+        } else {
+            renderUnavailableChapterState(container, chapter, chapterTelemetryContext, { reason: 'missing_content' });
+        }
+        return;
+    }
+
+    container.innerHTML = buildSkeletonLoader();
+    _chapterAbortController = new AbortController();
+    const signal = _chapterAbortController.signal;
+    setTimeout(() => {
+        if (_chapterAbortController && !_chapterAbortController.signal.aborted) {
+            _chapterAbortController.abort(new Error('Timeout'));
+        }
+    }, 15000);
+
+    const loadPromises = urlsToLoad.map(async (u) => {
+        if (u.includes('teletype.in')) {
+            return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;" loading="lazy"></iframe>`;
+        }
+        const telegraphMatch = u.match(/telegra\.ph\/(.+)/);
+        if (telegraphMatch) {
+            const resp = await fetch(`https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`, { signal });
+            const data = await resp.json();
+            if (data.ok && data.result && data.result.content) {
+                return renderTelegraphContent(data.result.content);
+            }
+        }
+        return `<iframe src="${u}" frameborder="0" style="width:100%;min-height:80vh;border:none;border-radius:8px;margin-bottom:20px;" loading="lazy"></iframe>`;
+    });
+
+    Promise.all(loadPromises).then((results) => {
+        if (signal.aborted || chapter !== currentChapters[currentChapterIdx]) return;
+        const joined = results.join('').trim();
+        if (!joined) {
+            renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
+                source_type: 'fallback',
+                reason: 'empty_direct_fallback'
+            });
+            return;
+        }
+        renderLoadedContent(container, joined, chapter, chapterTelemetryContext, 'network_fallback');
+    }).catch((err) => {
+        if (err.name === 'AbortError') return;
+        console.error('Chapter direct fallback failed:', err);
+        renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
+            source_type: 'fallback',
+            reason: 'direct_fallback_error'
+        });
+    });
+}
+
 function loadChapterContent(chapter, usePrefetch = false, telemetryContext = null) {
     assertReaderState('loadChapterContent:start');
     const container = document.getElementById('reader-text');
@@ -1428,6 +1834,9 @@ function loadChapterContent(chapter, usePrefetch = false, telemetryContext = nul
         prefetchedChapter = { idx: -1, html: null };
         return;
     }
+
+    loadChapterContentFromServer(chapter, chapterTelemetryContext);
+    return;
 
     let urlsToLoad = [];
     if (chapter.urls && chapter.urls.length > 0) {
@@ -1602,6 +2011,24 @@ function prefetchNextChapter() {
     if (!chapter) return;
 
     _prefetchingIdx = nextIdx;
+
+    if (API_URL && currentSeries && currentVolume && chapter.chapter) {
+        const endpoint = `${API_URL}/api/chapter-content?${new URLSearchParams({
+            series_id: String(currentSeries.id),
+            volume: String(currentVolume.volume),
+            chapter: String(chapter.chapter)
+        }).toString()}`;
+        apiFetch(endpoint).then(async (resp) => {
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const payload = await resp.json();
+            if (payload?.ok && payload.html) {
+                prefetchedChapter = { idx: nextIdx, html: payload.html };
+            }
+        }).catch(() => {}).finally(() => {
+            _prefetchingIdx = -1;
+        });
+        return;
+    }
 
     let urlsToLoad = [];
     if (chapter.urls && chapter.urls.length > 0) {
@@ -2543,10 +2970,7 @@ function showScreen(name) {
         saveScrollPosition();
         if (progressBarEl) progressBarEl.style.width = '0%';
     }
-    if (name !== 'reader') {
-        document.body.classList.remove('keyboard-open');
-        document.documentElement.style.setProperty('--reader-keyboard-offset', '0px');
-    }
+    resetTransientUiState({ saveSettingsOnClose: true });
 
     const screens = document.querySelectorAll('.screen');
     screens.forEach(s => {
@@ -2688,15 +3112,12 @@ function toggleSettings() {
     const overlay = document.getElementById('settings-overlay');
     const panel = document.getElementById('settings-panel');
     const isHidden = panel.classList.contains('hidden');
-    
-    overlay.classList.toggle('hidden');
-    panel.classList.toggle('hidden');
-    
+
     if (!isHidden) {
-        // Closing: save
-        saveSettings();
+        closeSettingsPanel({ save: true });
     } else {
-        // Opening: show default tab
+        overlay.classList.remove('hidden');
+        panel.classList.remove('hidden');
         showSettingsTab('font');
         updateSettingsUI();
     }
@@ -3198,8 +3619,8 @@ function scrollToHeading(idx) {
 }
 
 function toggleToC() {
-    document.getElementById('toc-overlay').classList.toggle('active');
-    document.getElementById('toc-panel').classList.toggle('active');
+    const panel = document.getElementById('toc-panel');
+    setToCOpen(!(panel && panel.classList.contains('active')));
 }
 
 // ==========================================================================
@@ -3553,11 +3974,11 @@ function renderLibraryTabV2() {
         const progressText = `${meta.readCount}/${meta.totalCh || 0}`;
         const coverImg = s.cover_url ? `<img src="${s.cover_url}" class="library-cover" alt="">` : `<div class="series-icon">📖</div>`;
         const quickAction = bm
-            ? `<button class="series-action-btn primary" onclick="jumpToLastRead(event, '${s.id}')">Продолжить</button>`
-            : `<button class="series-action-btn" onclick="jumpToLatestChapter(event, '${s.id}')">К последней</button>`;
+            ? `<button type="button" class="series-action-btn primary" data-series-action="continue" data-series-id="${escapeHtml(String(s.id))}">Продолжить</button>`
+            : `<button type="button" class="series-action-btn" data-series-action="latest" data-series-id="${escapeHtml(String(s.id))}">К последней</button>`;
 
         return `
-        <div class="series-card" style="margin-bottom:12px;" onclick="selectSeries('${s.id}')">
+        <div class="series-card" style="margin-bottom:12px;" data-series-id="${escapeHtml(String(s.id))}">
             ${coverImg}
             <div class="series-info">
                 <h3>${escapeHtml(s.title)}</h3>
@@ -4301,8 +4722,10 @@ async function toggleReaction(type) {
 assertReaderState('bootstrap');
 bindGlobalErrorTelemetry();
 bindNetworkStatusListeners();
+handleReaderCacheVersionChange();
 registerReaderServiceWorker();
 bindReaderKeyboardAwareUI();
+bindDelegatedSelectionEvents();
 updateLibraryFilterButtons();
 restoreSettings();
 loadData();
