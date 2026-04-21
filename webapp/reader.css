@@ -3800,67 +3800,77 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 
 .comments-section {
-    margin-top: 6px;
-    padding-top: 14px;
-    border-top: 1px solid var(--divider);
+    margin-top: var(--space-3);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--surface-border);
 }
 
 .comments-title {
     display: flex;
     align-items: center;
-    gap: 4px;
-    margin: 0 0 10px;
+    gap: 6px;
+    margin: 0 0 var(--space-3);
     font-size: 17px;
     font-weight: 800;
+    color: var(--text);
 }
 
 .comments-count {
     margin-left: 2px;
     font-size: 12px;
-    font-weight: 600;
-    color: var(--text-secondary);
+    font-weight: 700;
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--chip-bg);
 }
 
 .comment-tabs {
     display: inline-flex;
     gap: 4px;
-    margin: 0 0 12px;
+    margin: 0 0 var(--space-3);
     padding: 4px;
-    border: 1px solid var(--divider);
-    border-radius: 999px;
-    background: var(--bg-secondary);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
 }
 
 .comment-tab {
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     min-height: 34px;
-    padding: 0 12px;
+    padding: 0 14px;
     display: inline-flex;
     align-items: center;
     font-size: 12px;
     font-weight: 700;
     color: var(--text-secondary);
     cursor: pointer;
-    transition: background var(--ui-transition-fast), color var(--ui-transition-fast);
+    transition: background var(--ui-transition-fast), color var(--ui-transition-fast), transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
+}
+.comment-tab:active {
+    transform: scale(0.96);
 }
 
 .comment-tab.active {
-    background: var(--accent);
+    background: var(--accent-gradient);
     color: #fff;
+    box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.3);
 }
 
 .comment-form {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: var(--ui-radius-lg);
-    padding: 12px;
-    margin-bottom: 14px;
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-3);
+    margin-bottom: var(--space-4);
     scroll-margin-bottom: 45vh;
+    transition: border-color var(--ui-transition-fast), box-shadow var(--ui-transition-fast);
 }
 
 .comment-form:focus-within {
-    border-color: color-mix(in srgb, var(--accent) 44%, var(--card-border));
-    box-shadow: 0 10px 26px rgba(var(--accent-rgb), 0.14);
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--surface-border));
+    box-shadow: var(--shadow-focus);
 }
 
 .comment-toolbar {
@@ -3937,13 +3947,13 @@ input[type=range]:active::-webkit-slider-thumb {
     max-height: 34vh;
     resize: vertical;
     box-sizing: border-box;
-    background: var(--bg);
-    border: 1px solid var(--divider);
-    border-radius: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
     color: var(--text);
     font-size: 14px;
     line-height: 1.5;
-    padding: 11px 12px;
+    padding: 11px 14px;
     outline: none;
     transition: border-color var(--ui-transition-fast), box-shadow var(--ui-transition-fast);
 }
@@ -3953,29 +3963,31 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 
 .comment-input:focus {
-    border-color: color-mix(in srgb, var(--accent) 52%, var(--divider));
-    box-shadow: var(--ui-focus-ring);
+    border-color: color-mix(in srgb, var(--accent) 52%, var(--surface-border));
+    box-shadow: var(--shadow-focus);
 }
 
 .comment-preview-area {
     margin-top: 10px;
-    padding: 11px 12px;
-    border-radius: 12px;
-    border: 1px dashed var(--divider);
-    background: var(--bg-secondary);
+    padding: 11px 14px;
+    border-radius: var(--radius-md);
+    border: 1px dashed var(--surface-border-strong);
+    background: var(--surface-2);
 }
 
 .comment-submit-btn {
-    margin-top: 10px;
-    min-height: var(--ui-hit-target);
+    margin-top: var(--space-3);
+    min-height: 44px;
     width: 100%;
     border: none;
-    border-radius: 12px;
-    background: var(--accent);
+    border-radius: var(--radius-pill);
+    background: var(--accent-gradient);
     color: #fff;
     font-size: 14px;
     font-weight: 700;
     cursor: pointer;
+    letter-spacing: 0.3px;
+    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.35);
     transition: transform var(--ui-transition-fast), filter var(--ui-transition-fast), opacity var(--ui-transition-fast);
 }
 
