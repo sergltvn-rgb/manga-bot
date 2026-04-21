@@ -311,4 +311,40 @@ test.describe("Reader visual regression", () => {
 
     expect(runtimeErrors, `Runtime errors:\n${runtimeErrors.join("\n")}`).toEqual([]);
   });
+
+  test("theme readability: reader comments in light/dark/sepia/gray/amoled", async ({ page }) => {
+    const state = createVisualState();
+    await installVisualMocks(page, state);
+
+    const runtimeErrors = [];
+    page.on("pageerror", (err) => runtimeErrors.push(`pageerror: ${err.message}`));
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/reader.html?api=http://127.0.0.1:4173");
+
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
+
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("#social-section")).toBeVisible();
+    await page.locator("#social-section").scrollIntoViewIfNeeded();
+
+    const themes = ["light", "dark", "sepia", "gray", "amoled"];
+    for (const theme of themes) {
+      await page.evaluate((nextTheme) => {
+        if (typeof setTheme === "function") {
+          setTheme(nextTheme);
+        }
+      }, theme);
+
+      await expect(page.locator("#social-section")).toHaveScreenshot(`state-theme-${theme}-reader-comments-mobile.png`, {
+        animations: "disabled",
+        caret: "hide"
+      });
+    }
+
+    expect(runtimeErrors, `Runtime errors:\n${runtimeErrors.join("\n")}`).toEqual([]);
+  });
 });

@@ -45,6 +45,7 @@ let typoSelectedText = '';
 let typoContextText = '';
 let typoSelectionRange = null;
 let _readerTapToScrollSuppressUntil = 0;
+let _readerKeyboardUiInitialized = false;
 let _networkStatusHideTimer = null;
 let _networkStatusBound = false;
 
@@ -57,6 +58,78 @@ function suppressReaderTapToScroll(ms = 700) {
 
 function isReaderTapToScrollSuppressed() {
     return Date.now() < _readerTapToScrollSuppressUntil;
+}
+
+function _isReaderEditableElement(el) {
+    if (!el || !(el instanceof HTMLElement)) return false;
+    if (!el.closest('#screen-reader')) return false;
+    if (el.tagName === 'TEXTAREA') return true;
+    if (el.tagName === 'INPUT') {
+        const type = (el.getAttribute('type') || 'text').toLowerCase();
+        return ['text', 'search', 'url', 'email', 'tel', 'number'].includes(type);
+    }
+    return !!el.isContentEditable;
+}
+
+function bindReaderKeyboardAwareUI() {
+    if (_readerKeyboardUiInitialized) return;
+    _readerKeyboardUiInitialized = true;
+
+    const root = document.documentElement;
+    const body = document.body;
+    if (!root || !body) return;
+
+    let keyboardByFocus = false;
+    let keyboardByViewport = false;
+    let viewportBaseline = 0;
+
+    const applyKeyboardState = () => {
+        body.classList.toggle('keyboard-open', keyboardByFocus || keyboardByViewport);
+    };
+
+    const visualViewport = window.visualViewport || null;
+
+    const updateViewportKeyboardState = () => {
+        if (!visualViewport) return;
+        viewportBaseline = Math.max(viewportBaseline, visualViewport.height || 0);
+        const occluded = Math.max(0, window.innerHeight - (visualViewport.height + visualViewport.offsetTop));
+        keyboardByViewport = occluded > 110 || (viewportBaseline - visualViewport.height) > 130;
+        root.style.setProperty('--reader-keyboard-offset', `${Math.max(0, Math.round(occluded))}px`);
+        applyKeyboardState();
+    };
+
+    document.addEventListener('focusin', (event) => {
+        const target = event.target;
+        if (!_isReaderEditableElement(target)) return;
+        keyboardByFocus = true;
+        suppressReaderTapToScroll(900);
+        applyKeyboardState();
+        setTimeout(() => {
+            try {
+                if (target && typeof target.scrollIntoView === 'function') {
+                    target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                }
+            } catch (e) { }
+        }, 120);
+    });
+
+    document.addEventListener('focusout', () => {
+        setTimeout(() => {
+            const activeEl = document.activeElement;
+            if (!_isReaderEditableElement(activeEl)) {
+                keyboardByFocus = false;
+                applyKeyboardState();
+            }
+        }, 60);
+    });
+
+    if (visualViewport) {
+        visualViewport.addEventListener('resize', updateViewportKeyboardState);
+        visualViewport.addEventListener('scroll', updateViewportKeyboardState);
+        updateViewportKeyboardState();
+    } else {
+        root.style.setProperty('--reader-keyboard-offset', '0px');
+    }
 }
 
 function toggleAdminMode(enabled) {
@@ -2470,6 +2543,10 @@ function showScreen(name) {
         saveScrollPosition();
         if (progressBarEl) progressBarEl.style.width = '0%';
     }
+    if (name !== 'reader') {
+        document.body.classList.remove('keyboard-open');
+        document.documentElement.style.setProperty('--reader-keyboard-offset', '0px');
+    }
 
     const screens = document.querySelectorAll('.screen');
     screens.forEach(s => {
@@ -2672,7 +2749,7 @@ function setDimmer(val) {
 
 function applySettings() {
     // Тема
-    document.body.className = '';
+    document.body.classList.remove('theme-sepia', 'theme-dark', 'theme-gray', 'theme-amoled');
     if (settings.theme !== 'light') {
         document.body.classList.add(`theme-${settings.theme}`);
     }
@@ -4225,6 +4302,7 @@ assertReaderState('bootstrap');
 bindGlobalErrorTelemetry();
 bindNetworkStatusListeners();
 registerReaderServiceWorker();
+bindReaderKeyboardAwareUI();
 updateLibraryFilterButtons();
 restoreSettings();
 loadData();
