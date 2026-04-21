@@ -598,10 +598,23 @@ function bindDelegatedSelectionEvents() {
         const moveBtn = event.target.closest('[data-move-chapter]');
         if (moveBtn) {
             event.stopPropagation();
+            event.preventDefault();
+            console.log('[sort] move click', {
+                disabled: moveBtn.disabled,
+                idx: moveBtn.dataset.chapterIdx,
+                dir: moveBtn.dataset.moveChapter,
+                apiUrl: API_URL,
+                adminMode: typeof isAdminMode !== 'undefined' ? isAdminMode : '?'
+            });
             if (moveBtn.disabled) return;
             const idx = Number(moveBtn.dataset.chapterIdx);
             const direction = moveBtn.dataset.moveChapter === 'up' ? -1 : 1;
-            if (Number.isInteger(idx)) moveChapter(idx, direction);
+            if (Number.isInteger(idx)) {
+                showToast(`⇅ Перемещаю главу ${idx + 1}...`);
+                moveChapter(idx, direction);
+            } else {
+                showToast('Ошибка: нет индекса главы');
+            }
             return;
         }
         if (event.target.closest('.admin-edit-btn, .admin-reset-btn, .admin-link-btn, .drag-handle, .admin-bulk-btn, .admin-move-btn')) return;
