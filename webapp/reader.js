@@ -314,6 +314,60 @@ function chapterHasAnyContent(chapter) {
     return !!(chapter && ((typeof chapter.text === 'string' && chapter.text.trim()) || getChapterSourceUrls(chapter).length > 0));
 }
 
+function sameReaderKey(a, b) {
+    return String(a ?? '') === String(b ?? '');
+}
+
+function findSeriesById(seriesId) {
+    if (!Array.isArray(allData?.series)) return null;
+    return allData.series.find((series) => sameReaderKey(series?.id, seriesId)) || null;
+}
+
+function findVolumeByKey(series, volumeKey) {
+    if (!series || !Array.isArray(series.volumes)) return null;
+    return series.volumes.find((volume) => sameReaderKey(volume?.volume, volumeKey)) || null;
+}
+
+function resetCurrentSeriesSelection() {
+    currentVolume = null;
+    currentChapters = [];
+    currentChapterIdx = 0;
+    prefetchedChapter = { idx: -1, html: null };
+
+    const chaptersList = document.getElementById('chapters-list');
+    if (chaptersList) {
+        chaptersList.innerHTML = '';
+    }
+
+    const volumeTabs = document.getElementById('volume-tabs');
+    if (volumeTabs) {
+        volumeTabs.innerHTML = '';
+        volumeTabs.style.display = 'none';
+    }
+}
+
+function handleSeriesSelectionAction(action, seriesId, event = null) {
+    if (event && typeof event.stopPropagation === 'function') {
+        event.stopPropagation();
+    }
+    if (action === 'continue') {
+        jumpToLastRead(null, seriesId);
+        return;
+    }
+    if (action === 'latest') {
+        jumpToLatestChapter(null, seriesId);
+    }
+}
+
+function chapterContentLooksVisible(target) {
+    if (!target) return false;
+    if (target.querySelector('img, iframe, video, picture, object, embed')) {
+        return true;
+    }
+    const text = String(target.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.length > 0;
+}
+
 let _delegatedSelectionEventsBound = false;
 
 function bindDelegatedSelectionEvents() {
@@ -323,12 +377,7 @@ function bindDelegatedSelectionEvents() {
     document.getElementById('series-list')?.addEventListener('click', (event) => {
         const actionBtn = event.target.closest('[data-series-action]');
         if (actionBtn) {
-            const seriesId = actionBtn.dataset.seriesId || '';
-            if (actionBtn.dataset.seriesAction === 'continue') {
-                jumpToLastRead(event, seriesId);
-            } else if (actionBtn.dataset.seriesAction === 'latest') {
-                jumpToLatestChapter(event, seriesId);
-            }
+            handleSeriesSelectionAction(actionBtn.dataset.seriesAction || '', actionBtn.dataset.seriesId || '', event);
             return;
         }
 
@@ -341,18 +390,19 @@ function bindDelegatedSelectionEvents() {
     document.getElementById('library-list')?.addEventListener('click', (event) => {
         const actionBtn = event.target.closest('[data-series-action]');
         if (actionBtn) {
-            const seriesId = actionBtn.dataset.seriesId || '';
-            if (actionBtn.dataset.seriesAction === 'continue') {
-                jumpToLastRead(event, seriesId);
-            } else if (actionBtn.dataset.seriesAction === 'latest') {
-                jumpToLatestChapter(event, seriesId);
-            }
+            handleSeriesSelectionAction(actionBtn.dataset.seriesAction || '', actionBtn.dataset.seriesId || '', event);
             return;
         }
 
         const card = event.target.closest('.series-card[data-series-id]');
         if (!card) return;
         selectSeries(card.dataset.seriesId || '');
+    });
+
+    document.getElementById('continue-reading-container')?.addEventListener('click', (event) => {
+        const actionCard = event.target.closest('[data-series-action][data-series-id]');
+        if (!actionCard) return;
+        handleSeriesSelectionAction(actionCard.dataset.seriesAction || '', actionCard.dataset.seriesId || '', event);
     });
 
     document.getElementById('chapters-list')?.addEventListener('click', (event) => {
@@ -1211,16 +1261,16 @@ function handleStartParam() {
     const match = start.match(/^chapter_([^_]+)_([^_]+)_([^_]+)$/);
     if (match) {
         const [, sId, vNum, cKey] = match;
-        const series = allData.series.find(s => String(s.id) === String(sId));
+        const series = findSeriesById(sId);
         if (!series) return;
         
         currentSeries = series;
-        const vol = series.volumes.find(v => String(v.volume) === String(vNum));
+        const vol = findVolumeByKey(series, vNum);
         if (!vol) return;
         
         currentVolume = vol;
         currentChapters = vol.chapters || [];
-        const cIdx = currentChapters.findIndex(c => String(c.chapter) === String(cKey));
+        const cIdx = currentChapters.findIndex(c => sameReaderKey(c.chapter, cKey));
         
         if (cIdx !== -1) {
             openChapter(cIdx);
@@ -1290,8 +1340,11 @@ function renderSeriesList() {
 
 function selectSeries(seriesId) {
     assertReaderState('selectSeries:start');
-    currentSeries = allData.series.find(s => s.id === seriesId);
-    if (!currentSeries) return;
+    const nextSeries = findSeriesById(seriesId);
+    if (!nextSeries) return;
+
+    currentSeries = nextSeries;
+    resetCurrentSeriesSelection();
 
     sendClientTelemetry('series_selected', buildTelemetryContext({
         series_id: currentSeries.id,
@@ -1303,21 +1356,10 @@ function selectSeries(seriesId) {
 
     // Восстанавливаем последнюю читаемую главу или первый том
     const lastRead = getLastRead(seriesId);
-    if (lastRead) {
-        const vol = currentSeries.volumes.find(v => String(v.volume) === String(lastRead.volume));
-        if (vol) {
-            selectVolume(lastRead.volume);
-            showScreen('chapters');
-            sendClientTelemetry('chapters_screen_opened', buildTelemetryContext({
-                series_id: currentSeries.id,
-                volume: lastRead.volume
-            }));
-            return;
-        }
-    }
-
-    if (currentSeries.volumes.length > 0) {
-        selectVolume(currentSeries.volumes[0].volume);
+    const targetVolume = (lastRead && findVolumeByKey(currentSeries, lastRead.volume))
+        || (currentSeries.volumes.length > 0 ? currentSeries.volumes[0] : null);
+    if (targetVolume) {
+        selectVolume(targetVolume.volume);
     }
 
     showScreen('chapters');
@@ -1328,10 +1370,11 @@ function selectSeries(seriesId) {
 }
 
 function openSeriesChapter(seriesId, volumeId, chapterKey, fallbackToLatest = false) {
-    const series = allData.series.find((s) => String(s.id) === String(seriesId));
+    const series = findSeriesById(seriesId);
     if (!series || !Array.isArray(series.volumes) || series.volumes.length === 0) return;
 
     currentSeries = series;
+    resetCurrentSeriesSelection();
     const title = document.getElementById('chapters-title');
     if (title) {
         title.textContent = currentSeries.title;
@@ -1339,7 +1382,7 @@ function openSeriesChapter(seriesId, volumeId, chapterKey, fallbackToLatest = fa
 
     renderVolumeTabs();
 
-    let targetVolume = series.volumes.find((v) => String(v.volume) === String(volumeId));
+    let targetVolume = findVolumeByKey(series, volumeId);
     if (!targetVolume && fallbackToLatest) {
         targetVolume = series.volumes[series.volumes.length - 1];
     }
@@ -1352,7 +1395,7 @@ function openSeriesChapter(seriesId, volumeId, chapterKey, fallbackToLatest = fa
     showScreen('chapters');
 
     const chapters = Array.isArray(targetVolume.chapters) ? targetVolume.chapters : [];
-    let targetIdx = chapters.findIndex((ch) => String(ch.chapter) === String(chapterKey));
+    let targetIdx = chapters.findIndex((ch) => sameReaderKey(ch.chapter, chapterKey));
     if (targetIdx === -1 && fallbackToLatest) {
         targetIdx = chapters.length - 1;
     }
@@ -1366,7 +1409,7 @@ function jumpToLatestChapter(event, seriesId) {
     if (event && typeof event.stopPropagation === 'function') {
         event.stopPropagation();
     }
-    const series = allData.series.find((s) => String(s.id) === String(seriesId));
+    const series = findSeriesById(seriesId);
     if (!series || !Array.isArray(series.volumes) || series.volumes.length === 0) {
         return;
     }
@@ -1398,7 +1441,7 @@ function jumpToLastRead(event, seriesId) {
 function renderVolumeTabs() {
     const tabs = document.getElementById('volume-tabs');
 
-    if (currentSeries.volumes.length <= 1) {
+    if (!currentSeries || !Array.isArray(currentSeries.volumes) || currentSeries.volumes.length <= 1) {
         tabs.style.display = 'none';
         return;
     }
@@ -1420,11 +1463,12 @@ function renderVolumeTabs() {
 
 function selectVolume(volNum) {
     assertReaderState('selectVolume:start');
-    currentVolume = currentSeries.volumes.find(v => v.volume === volNum);
+    if (!currentSeries) return;
+    currentVolume = findVolumeByKey(currentSeries, volNum);
     if (!currentVolume) return;
 
     document.querySelectorAll('.vol-tab').forEach(t => {
-        t.classList.toggle('active', parseInt(t.dataset.vol) === volNum);
+        t.classList.toggle('active', sameReaderKey(t.dataset.vol, currentVolume.volume));
     });
 
     renderChaptersList();
@@ -1434,6 +1478,15 @@ function renderChaptersList() {
     assertReaderState('renderChaptersList:start');
     cleanupChapterDnD();
     const container = document.getElementById('chapters-list');
+    if (!currentVolume || !Array.isArray(currentVolume.chapters)) {
+        currentChapters = [];
+        renderStateBlock(container, {
+            icon: '\uD83D\uDCC2',
+            title: '\u041D\u0435\u0442 \u0433\u043B\u0430\u0432',
+            description: '\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0442\u043E\u043C. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0441\u0435\u0440\u0438\u044E \u0435\u0449\u0451 \u0440\u0430\u0437.'
+        });
+        return;
+    }
     currentChapters = currentVolume.chapters;
 
     if (currentChapters.length === 0) {
@@ -1447,7 +1500,7 @@ function renderChaptersList() {
 
     // Определяем последнюю читаемую главу для подсветки
     const lastRead = getLastRead(currentSeries.id);
-    const lastChapter = lastRead?.volume === currentVolume.volume ? lastRead.chapter : null;
+    const lastChapter = sameReaderKey(lastRead?.volume, currentVolume.volume) ? lastRead.chapter : null;
 
     container.innerHTML = currentChapters.map((ch, idx) => {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
@@ -1459,7 +1512,7 @@ function renderChaptersList() {
             ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
         ` : '';
         const customBadge = (isAdminMode && hasCustom) ? '<span class="custom-name-badge">кастом</span>' : '';
-        const isCurrent = lastChapter && String(ch.chapter) === String(lastChapter);
+        const isCurrent = lastChapter && sameReaderKey(ch.chapter, lastChapter);
         const hasContent = chapterHasAnyContent(ch);
         const sourceUrls = getChapterSourceUrls(ch);
         const fallbackBtn = !hasContent && sourceUrls[0]
@@ -1601,7 +1654,7 @@ function assertReaderState(context = 'unknown') {
         currentSeries &&
         currentVolume &&
         Array.isArray(currentSeries.volumes) &&
-        !currentSeries.volumes.some((v) => String(v.volume) === String(currentVolume.volume))
+        !currentSeries.volumes.some((v) => sameReaderKey(v.volume, currentVolume.volume))
     ) {
         reportStateContractViolation(context, 'series_volume_mismatch', {
             seriesId: currentSeries.id,
@@ -1732,6 +1785,13 @@ function loadChapterContentFromServer(chapter, telemetryContext = null) {
         const payload = await resp.json();
         if (payload && payload.ok && payload.html) {
             renderLoadedContent(container, payload.html, chapter, chapterTelemetryContext, payload.source_type || 'api');
+            if (!chapterContentLooksVisible(container)) {
+                renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
+                    source_type: payload?.source_type || 'fallback',
+                    fallback_url: payload?.fallback_url || null,
+                    reason: 'empty_rendered_content'
+                });
+            }
             return;
         }
         renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
@@ -3404,20 +3464,20 @@ function renderContinueReading() {
         return;
     }
 
-    const series = allData.series.find(s => String(s.id) === String(latestBm.series_id));
+    const series = findSeriesById(latestBm.series_id);
     if (!series) return;
 
-    const vol = series.volumes.find(v => String(v.volume) === String(latestBm.volume_id));
+    const vol = findVolumeByKey(series, latestBm.volume_id);
     let chTitle = "Глава " + latestBm.chapter_key;
     if (vol) {
-        const chAttr = vol.chapters.find(c => String(c.chapter) === String(latestBm.chapter_key));
+        const chAttr = vol.chapters.find(c => sameReaderKey(c.chapter, latestBm.chapter_key));
         if (chAttr && chAttr.custom_name) chTitle = chAttr.custom_name;
     }
     const volTitle = vol && vol.custom_name ? vol.custom_name : "Том " + latestBm.volume_id;
 
     container.style.display = 'block';
     container.innerHTML = `
-        <div class="continue-reading-card" onclick="jumpToLastRead(event, '${series.id}')">
+        <div class="continue-reading-card" data-series-action="continue" data-series-id="${escapeHtml(String(series.id))}">
             <div class="continue-reading-icon">🔖</div>
             <div class="continue-reading-info">
                 <div class="continue-reading-label">Продолжить чтение</div>
@@ -3961,10 +4021,10 @@ function renderLibraryTabV2() {
 
         let locationText = 'История ещё не начата';
         if (bm) {
-            const v = s.volumes.find((x) => String(x.volume) === String(bm.volume));
+            const v = findVolumeByKey(s, bm.volume);
             let chTitle = `Глава ${bm.chapter}`;
             if (v) {
-                const ch = (v.chapters || []).find((c) => String(c.chapter) === String(bm.chapter));
+                const ch = (v.chapters || []).find((c) => sameReaderKey(c.chapter, bm.chapter));
                 if (ch && ch.custom_name) chTitle = ch.custom_name;
             }
             const volTitle = v && v.custom_name ? v.custom_name : `Том ${bm.volume}`;

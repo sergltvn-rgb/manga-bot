@@ -9,6 +9,7 @@ function nowSql() {
 function createMockState() {
   return {
     nextCommentId: 1,
+    progressBookmarks: [],
     commentsByChapter: {},
     chapterReactionsByChapter: {},
     userReactionByChapter: {},
@@ -58,6 +59,15 @@ function createMockState() {
 function createMobileSelectionState() {
   return {
     nextCommentId: 1,
+    progressBookmarks: [
+      {
+        series_id: "ranobe_alya",
+        volume_id: "1",
+        chapter_key: "2",
+        scroll_pos: 0,
+        updated_at: nowSql(),
+      },
+    ],
     commentsByChapter: {},
     chapterReactionsByChapter: {},
     userReactionByChapter: {},
@@ -130,23 +140,23 @@ function createMobileSelectionState() {
                 {
                   chapter: "75",
                   custom_name: "Глава 75",
-                  url: "https://example.org/manga-75",
+                  url: "https://teletype.in/@slitvin/Zk5q_UBkJ37",
                   __chapterContent: {
-                    ok: false,
-                    source_type: "fallback",
-                    html: "",
-                    fallback_url: "https://example.org/manga-75",
+                    ok: true,
+                    source_type: "teletype",
+                    html: '<figure><img src="https://example.org/manga-75.png" alt="Page 1"></figure>',
+                    fallback_url: "https://teletype.in/@slitvin/Zk5q_UBkJ37",
                   },
                 },
                 {
                   chapter: "76",
                   custom_name: "Глава 76",
-                  url: "https://example.org/manga-76",
+                  url: "https://teletype.in/@slitvin/iOzOzGNO2t3",
                   __chapterContent: {
-                    ok: false,
-                    source_type: "fallback",
-                    html: "",
-                    fallback_url: "https://example.org/manga-76",
+                    ok: true,
+                    source_type: "teletype",
+                    html: "<figure><div><div></div></div></figure>",
+                    fallback_url: "https://teletype.in/@slitvin/iOzOzGNO2t3",
                   },
                 },
               ],
@@ -308,7 +318,7 @@ async function installTelegramAndApiMocks(page, state) {
     }
 
     if (pathname === "/api/progress" && method === "GET") {
-      await fulfillJson(route, { bookmarks: [] });
+      await fulfillJson(route, { bookmarks: state.progressBookmarks || [] });
       return;
     }
 
@@ -598,7 +608,7 @@ test.describe("Reader E2E smoke", () => {
     await expect.poll(() => state.calls.sortPut).toBe(1);
   });
 
-  test("mobile flow: selects the correct title and keeps chapter list tappable after fallback", async ({ browser }) => {
+  test("mobile flow: keeps series selection stable and handles teletype image chapters", async ({ browser }) => {
     const state = createMobileSelectionState();
     const context = await browser.newContext({
       viewport: { width: 393, height: 852 },
@@ -610,9 +620,22 @@ test.describe("Reader E2E smoke", () => {
     await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=mobile-a");
     await expect(page.locator("#series-list .series-card")).toHaveCount(3);
 
+    await expect(page.locator("#continue-reading-container")).toBeVisible();
+    await page.locator("#continue-reading-container .continue-reading-card").click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("#chapter-title-header")).toContainText("2");
+    await expect(page.locator("#reader-text")).toContainText("Воительница Аля");
+
+    await page.locator("#screen-reader .back-btn").click();
+    await page.locator("#screen-chapters .back-btn").click();
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#chapters-title")).toHaveText("Хроники Акаши");
+    await page.locator("#screen-chapters .back-btn").click();
+
     await page.locator("#series-list .series-card").nth(1).click();
     await expect(page.locator("#chapters-title")).toHaveText("Воительница Аля");
     await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(2);
+    await expect(page.locator("#chapters-list .chapter-item").first()).toContainText("Часть 1");
 
     await page.locator("#screen-chapters .back-btn").click();
     await page.locator("#series-list .series-card").nth(2).click();
@@ -620,13 +643,20 @@ test.describe("Reader E2E smoke", () => {
 
     await page.locator("#chapters-list .chapter-item").first().click();
     await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("#reader-text img")).toHaveCount(1);
+    await expect(page.locator("#reader-text")).not.toContainText("Не удалось загрузить главу");
+
+    await page.locator("#screen-reader .back-btn").click();
+    await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
+    await page.locator("#chapters-list .chapter-item").nth(1).click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
     await expect(page.locator("#reader-text")).toContainText("Не удалось загрузить главу");
     await expect(page.locator("#reader-text .state-action-btn")).toHaveText("Открыть источник");
 
     await page.locator("#screen-reader .back-btn").click();
     await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
-    await page.locator("#chapters-list .chapter-item").nth(1).click();
-    await expect(page.locator("#chapter-title-header")).toContainText("76");
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#reader-text img")).toHaveCount(1);
 
     await context.close();
   });

@@ -3456,6 +3456,69 @@ def _extract_teletype_article_fragment(page_html: str) -> str:
     return fragment.strip()
 
 
+def _extract_img_attrs_from_tag(img_tag: str, source_url: str = "") -> tuple[str, str]:
+    if not img_tag:
+        return "", ""
+    src_match = re.search(r'\bsrc\s*=\s*(["\'])(.*?)\1', img_tag, flags=re.IGNORECASE | re.DOTALL)
+    if not src_match:
+        return "", ""
+    raw_src = html.unescape(str(src_match.group(2) or "").strip())
+    normalized_src = _normalize_external_url(urljoin(source_url or "", raw_src), max_len=2048)
+    if not normalized_src:
+        return "", ""
+
+    alt_match = re.search(r'\balt\s*=\s*(["\'])(.*?)\1', img_tag, flags=re.IGNORECASE | re.DOTALL)
+    alt_text = html.unescape(str(alt_match.group(2) or "").strip()) if alt_match else ""
+    return normalized_src, alt_text
+
+
+def _normalize_teletype_article_fragment(fragment: str, source_url: str = "") -> str:
+    if not fragment:
+        return ""
+
+    def replace_figure(match: re.Match[str]) -> str:
+        figure_html = match.group(0)
+        noscript_img = re.search(r"<noscript\b[^>]*>\s*(<img\b.*?>)\s*</noscript>", figure_html, flags=re.IGNORECASE | re.DOTALL)
+        if not noscript_img:
+            return figure_html
+
+        src, alt = _extract_img_attrs_from_tag(noscript_img.group(1), source_url=source_url)
+        if not src:
+            return figure_html
+
+        alt_attr = f' alt="{html.escape(alt, quote=True)}"' if alt else ""
+        caption_match = re.search(r"<figcaption\b[^>]*>(.*?)</figcaption>", figure_html, flags=re.IGNORECASE | re.DOTALL)
+        caption_html = caption_match.group(0) if caption_match else ""
+        return f'<figure><img src="{html.escape(src, quote=True)}"{alt_attr} loading="lazy">{caption_html}</figure>'
+
+    normalized = re.sub(r"<figure\b.*?</figure>", replace_figure, fragment, flags=re.IGNORECASE | re.DOTALL)
+
+    def replace_noscript_img(match: re.Match[str]) -> str:
+        src, alt = _extract_img_attrs_from_tag(match.group(1), source_url=source_url)
+        if not src:
+            return ""
+        alt_attr = f' alt="{html.escape(alt, quote=True)}"' if alt else ""
+        return f'<img src="{html.escape(src, quote=True)}"{alt_attr} loading="lazy">'
+
+    normalized = re.sub(
+        r"<noscript\b[^>]*>\s*(<img\b.*?>)\s*</noscript>",
+        replace_noscript_img,
+        normalized,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return normalized.strip()
+
+
+def _html_fragment_has_visible_content(fragment: str) -> bool:
+    if not fragment:
+        return False
+    if re.search(r"<img\b", fragment, flags=re.IGNORECASE):
+        return True
+    text_only = html.unescape(re.sub(r"<[^>]+>", " ", fragment))
+    text_only = re.sub(r"\s+", " ", text_only).strip()
+    return bool(text_only)
+
+
 def _build_chapter_content_cache_key(series_id: str, volume: str, chapter: str) -> str:
     return f"{str(series_id)}::{str(volume)}::{str(chapter)}"
 
@@ -3518,7 +3581,13 @@ async def _fetch_teletype_html(source_url: str) -> str:
     article_fragment = _extract_teletype_article_fragment(page_html)
     if not article_fragment:
         return ""
-    return _sanitize_html_fragment(article_fragment, base_url=source_url)
+    normalized_fragment = _normalize_teletype_article_fragment(article_fragment, source_url=source_url)
+    if not normalized_fragment:
+        return ""
+    sanitized_fragment = _sanitize_html_fragment(normalized_fragment, base_url=source_url)
+    if not _html_fragment_has_visible_content(sanitized_fragment):
+        return ""
+    return sanitized_fragment
 
 
 async def _build_chapter_content_payload(series_id: str, volume: str, chapter: str) -> tuple[dict | None, int]:
@@ -3561,7 +3630,7 @@ async def _build_chapter_content_payload(series_id: str, volume: str, chapter: s
                 html_fragment = await _fetch_teletype_html(url)
                 source_type = "teletype"
 
-            if html_fragment:
+            if html_fragment and _html_fragment_has_visible_content(html_fragment):
                 return {
                     "ok": True,
                     "source_type": source_type,
