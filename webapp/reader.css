@@ -424,28 +424,154 @@ body {
     -webkit-overflow-scrolling: touch;
 }
 
-/* === КАРТОЧКИ СЕРИЙ === */
-.series-card {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: 16px;
-    padding: 18px 20px;
-    margin-bottom: 12px;
-    cursor: pointer;
-    transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    box-shadow: var(--shadow);
+/* === КАРТОЧКИ СЕРИЙ (Refresh v4 — poster grid) === */
+#series-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4) var(--space-5);
+    align-content: start;
+}
+@media (min-width: 640px) {
+    #series-list {
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: var(--space-4);
+    }
 }
 
-.series-card:hover { transform: translateY(-2px); background: var(--card-hover); }
-.series-card:active { transform: scale(0.98); }
+.series-card {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin-bottom: 0;
+    cursor: pointer;
+    transition: transform var(--ui-transition-fast);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    box-shadow: none;
+    -webkit-tap-highlight-color: transparent;
+}
+.series-card:hover { transform: translateY(-3px); }
+.series-card:hover .series-poster-cover { box-shadow: var(--shadow-hover); }
+.series-card:active { transform: scale(0.97); }
 
+/* --- Постер --- */
+.series-poster-cover {
+    position: relative;
+    aspect-ratio: 2 / 3;
+    width: 100%;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--shadow-card);
+    transition: box-shadow var(--ui-transition-main), transform var(--ui-transition-fast);
+}
+.series-poster-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+div.r4-poster-placeholder.series-poster-img {
+    /* Display `.series-poster-img` размеры наследуются */
+    aspect-ratio: auto;
+}
+
+/* Chips поверх обложки */
+.series-poster-chips {
+    position: absolute;
+    top: var(--space-2);
+    left: var(--space-2);
+    right: var(--space-2);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    pointer-events: none;
+    z-index: 2;
+}
+.series-poster-chips .r4-chip {
+    font-size: 10px;
+    padding: 2px 7px;
+}
+
+/* Админ-оверлей (кнопки в правом нижнем углу обложки) */
+.series-poster-admin {
+    position: absolute;
+    bottom: var(--space-2);
+    right: var(--space-2);
+    display: flex;
+    gap: 4px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 3px;
+    border-radius: var(--radius-pill);
+    z-index: 3;
+}
+.series-poster-admin .admin-edit-btn,
+.series-poster-admin .admin-reset-btn {
+    background: transparent;
+    color: #fff;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    font-size: 12px;
+    border-radius: 50%;
+}
+.series-poster-admin .admin-edit-btn:active,
+.series-poster-admin .admin-reset-btn:active {
+    background: rgba(255,255,255,0.2);
+}
+
+/* Прогресс-полоса внизу обложки */
+.series-poster-progress {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 3px;
+    background: rgba(0,0,0,0.28);
+    z-index: 1;
+}
+.series-poster-progress > span {
+    display: block;
+    height: 100%;
+    background: var(--accent-gradient);
+    transition: width var(--ui-transition-main);
+}
+
+/* --- Инфо под постером --- */
+.series-poster-info {
+    padding: 0 2px;
+    min-width: 0;
+}
+.series-poster-title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text);
+    margin: 0 0 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+}
+.series-poster-meta {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin: 0;
+    font-weight: 500;
+}
+
+/* Legacy-классы (используются e2e и другими экранами) */
 .series-icon {
     width: 50px; height: 50px;
     border-radius: 12px;
-    background: linear-gradient(135deg, var(--accent), #feb47b);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1034,56 +1160,123 @@ input:checked + .slider:before { transform: translateX(20px); }
     text-transform: uppercase;
 }
 
-/* === Карточка Продолжить чтение === */
+/* === Карточка «Продолжить чтение» (Refresh v4 hero-card) === */
+#continue-reading-container {
+    padding: var(--space-3) var(--space-4) 0;
+}
 .continue-reading-card {
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.1), rgba(254, 180, 123, 0.1));
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 24px;
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-3);
+    margin-bottom: var(--space-4);
     cursor: pointer;
-    box-shadow: 0 4px 15px rgba(var(--accent-rgb), 0.1);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: var(--shadow-card);
+    transition: transform var(--ui-transition-fast), box-shadow var(--ui-transition-main);
     display: flex;
-    align-items: center;
+    align-items: stretch;
+    gap: var(--space-3);
     position: relative;
     overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
 }
-.continue-reading-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.15); }
-.continue-reading-card:active { transform: translateY(1px); }
-.continue-reading-icon {
-    font-size: 28px;
-    margin-right: 16px;
-    filter: drop-shadow(0 2px 4px rgba(255,107,129,0.3));
+.continue-reading-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--accent-gradient-soft);
+    pointer-events: none;
+    z-index: 0;
 }
+.continue-reading-card > * { position: relative; z-index: 1; }
+.continue-reading-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.continue-reading-card:active { transform: scale(0.99); }
+
+/* Обложка слева в hero-карточке */
+.continue-reading-cover {
+    width: 72px;
+    aspect-ratio: 2 / 3;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--surface-2);
+    box-shadow: var(--shadow-card);
+}
+.continue-reading-cover img,
+.continue-reading-cover .continue-cover-placeholder {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.continue-cover-placeholder {
+    font-size: clamp(22px, 8vw, 34px);
+}
+
 .continue-reading-info {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
 }
 .continue-reading-label {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 10px;
+    font-weight: 800;
     text-transform: uppercase;
     color: var(--accent);
-    letter-spacing: 0.5px;
-    margin-bottom: 4px;
+    letter-spacing: 0.8px;
+    margin-bottom: 2px;
 }
 .continue-reading-title {
     font-size: 15px;
-    font-weight: 600;
+    font-weight: 700;
     color: var(--text);
-    margin: 0 0 2px 0;
+    margin: 0;
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 .continue-reading-chapter {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
     margin: 0;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
+.continue-reading-progress {
+    margin-top: 6px;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--surface-2);
+    overflow: hidden;
+}
+.continue-reading-progress-bar {
+    height: 100%;
+    background: var(--accent-gradient);
+    transition: width var(--ui-transition-main);
+}
+.continue-reading-progress-text {
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-weight: 600;
+    margin-top: 3px;
+    letter-spacing: 0.3px;
+}
+
 .continue-reading-arrow {
-    font-size: 18px;
+    align-self: center;
+    font-size: 26px;
     color: var(--accent);
-    opacity: 0.7;
+    font-weight: 300;
+    padding-right: var(--space-2);
+    flex-shrink: 0;
 }
 
 /* ==========================================================================

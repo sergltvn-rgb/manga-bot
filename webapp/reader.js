@@ -1602,49 +1602,67 @@ function renderSeriesList() {
         return;
     }
 
-    container.innerHTML = allData.series.map((s, i) => {
-        const totalCh = s.volumes.reduce((sum, v) => sum + (v.chapters || []).length, 0);
-        const readCount = s.volumes.reduce((sum, v) => {
-            return sum + (v.chapters || []).filter(c => isRead(s.id, v.volume, c.chapter)).length;
-        }, 0);
-        const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
-        const progressText = `${readCount}/${totalCh || 0}`;
+    container.innerHTML = allData.series.map((s, i) => renderSeriesPosterCard(s, i)).join('');
+}
 
-        // Бейдж «Продолжить»
-        const lastRead = getLastRead(s.id);
-        let continueBadge = '';
-        if (lastRead) {
-            continueBadge = `<span class="continue-badge">▶ Продолжить · Гл. ${lastRead.chapter}</span>`;
-        }
-        const quickAction = lastRead
-            ? `<button type="button" class="series-action-btn primary" data-series-action="continue" data-series-id="${escapeHtml(String(s.id))}">Продолжить</button>`
-            : `<button type="button" class="series-action-btn" data-series-action="latest" data-series-id="${escapeHtml(String(s.id))}">К последней</button>`;
+// Refresh v4: карточка-постер (2:3 обложка + компактная инфа снизу).
+function renderSeriesPosterCard(s, idx = 0) {
+    const totalCh = s.volumes.reduce((sum, v) => sum + (v.chapters || []).length, 0);
+    const readCount = s.volumes.reduce((sum, v) => {
+        return sum + (v.chapters || []).filter(c => isRead(s.id, v.volume, c.chapter)).length;
+    }, 0);
+    const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
+    const lastRead = getLastRead(s.id);
 
-        const editBtns = isAdminMode ? `
+    // Плейсхолдер без обложки — градиент с первой буквой названия.
+    const firstLetter = (s.title || '?').trim().charAt(0).toUpperCase();
+    const coverInner = s.cover_url
+        ? `<img src="${escapeHtml(s.cover_url)}" alt="${escapeHtml(s.title)}" loading="lazy" class="series-poster-img">`
+        : `<div class="r4-poster-placeholder series-poster-img">${escapeHtml(firstLetter)}</div>`;
+
+    // Chip-ряд поверх обложки: continue (если есть), completed, new.
+    const chips = [];
+    if (progress === 100 && totalCh > 0) {
+        chips.push('<span class="r4-chip r4-chip--accent">✓ Прочитано</span>');
+    } else if (lastRead) {
+        chips.push('<span class="r4-chip r4-chip--accent">▶ Продолжить</span>');
+    }
+    if (isAdminMode) {
+        chips.push('<span class="r4-chip r4-chip--outline">серия</span>');
+    }
+
+    // Админ-действия — плавающая полоска в углу обложки.
+    const adminOverlay = isAdminMode ? `
+        <div class="series-poster-admin" onclick="event.stopPropagation();">
             <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('series_${s.id}'); event.stopPropagation();">&#9998;</button>
             <button class="admin-reset-btn" title="Сброс имени" onclick="resetCustomName('series_${s.id}'); event.stopPropagation();">&#8635;</button>
             <button class="admin-edit-btn" title="Обложка" onclick="openCoverEditModal('${escapeHtml(String(s.id))}'); event.stopPropagation();">&#128247;</button>
-        ` : '';
-        const customBadge = isAdminMode ? `<span class="custom-name-badge">серия</span>` : '';
+        </div>` : '';
 
-        // Cover image support (Batch 3)
-        const coverEl = s.cover_url
-            ? `<img src="${s.cover_url}" class="series-cover-img" alt="${escapeHtml(s.title)}" loading="lazy">`
-            : `<div class="series-icon">${['📖', '📕', '📗', '📘', '📙'][i % 5]}</div>`;
+    // Progress-полоска снизу обложки.
+    const progressBar = totalCh > 0
+        ? `<div class="series-poster-progress" role="progressbar" aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100">
+                <span style="width: ${progress}%"></span>
+           </div>`
+        : '';
 
-        return `
-        <div class="series-card" data-series-id="${escapeHtml(String(s.id))}">
-            ${coverEl}
-            <div class="series-info">
-                <h3>${escapeHtml(s.title)}${customBadge}${editBtns}</h3>
-                <p>${s.volumes.length} том(ов) &middot; ${totalCh} глав</p>
-                <p class="series-progress-text">Прочитано: ${progressText} (${progress}%)</p>
-                ${continueBadge}
-                <div class="series-actions">${quickAction}</div>
-            </div>
-            <span class="series-arrow">&rsaquo;</span>
-        </div>`;
-    }).join('');
+    const meta = lastRead
+        ? `Гл. ${escapeHtml(String(lastRead.chapter))} · ${readCount}/${totalCh}`
+        : `${s.volumes.length} т. · ${totalCh} гл.`;
+
+    return `
+    <div class="series-card series-poster" data-series-id="${escapeHtml(String(s.id))}">
+        <div class="series-poster-cover">
+            ${coverInner}
+            ${chips.length ? `<div class="series-poster-chips">${chips.join('')}</div>` : ''}
+            ${progressBar}
+            ${adminOverlay}
+        </div>
+        <div class="series-poster-info">
+            <h3 class="series-poster-title">${escapeHtml(s.title)}</h3>
+            <p class="series-poster-meta">${meta}</p>
+        </div>
+    </div>`;
 }
 
 function selectSeries(seriesId) {
@@ -3920,16 +3938,32 @@ function renderContinueReading() {
     }
     const volTitle = vol && vol.custom_name ? vol.custom_name : "Том " + latestBm.volume_id;
 
+    // Общий прогресс серии.
+    const totalCh = series.volumes.reduce((sum, v) => sum + (v.chapters || []).length, 0);
+    const readCount = series.volumes.reduce((sum, v) => {
+        return sum + (v.chapters || []).filter(c => isRead(series.id, v.volume, c.chapter)).length;
+    }, 0);
+    const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
+
+    const firstLetter = (series.title || '?').trim().charAt(0).toUpperCase();
+    const coverHtml = series.cover_url
+        ? `<img src="${escapeHtml(series.cover_url)}" alt="${escapeHtml(series.title)}" loading="lazy">`
+        : `<div class="r4-poster-placeholder continue-cover-placeholder">${escapeHtml(firstLetter)}</div>`;
+
     container.style.display = 'block';
     container.innerHTML = `
-        <div class="continue-reading-card" data-series-action="continue" data-series-id="${escapeHtml(String(series.id))}">
-            <div class="continue-reading-icon">🔖</div>
+        <div class="continue-reading-card continue-reading-hero" data-series-action="continue" data-series-id="${escapeHtml(String(series.id))}">
+            <div class="continue-reading-cover">${coverHtml}</div>
             <div class="continue-reading-info">
                 <div class="continue-reading-label">Продолжить чтение</div>
-                <h3 class="continue-reading-title">${series.title}</h3>
-                <p class="continue-reading-chapter">${volTitle}, ${chTitle}</p>
+                <h3 class="continue-reading-title">${escapeHtml(series.title)}</h3>
+                <p class="continue-reading-chapter">${escapeHtml(volTitle)} · ${escapeHtml(chTitle)}</p>
+                <div class="continue-reading-progress">
+                    <div class="continue-reading-progress-bar" style="width: ${progress}%"></div>
+                </div>
+                <div class="continue-reading-progress-text">${readCount}/${totalCh || 0} глав · ${progress}%</div>
             </div>
-            <div class="continue-reading-arrow">→</div>
+            <div class="continue-reading-arrow" aria-hidden="true">›</div>
         </div>
     `;
 }
