@@ -626,9 +626,19 @@ function bindDelegatedSelectionEvents() {
     });
 }
 
+// Refresh v4: тема по умолчанию — тёмная (Tachiyomi-style). Если у пользователя
+// нет сохранённого выбора и ОС предпочитает светлую — уважаем это.
+function _r4DefaultTheme() {
+    try {
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+            return 'light';
+        }
+    } catch (_) {}
+    return 'dark';
+}
 const defaults = { 
     fontSize: 17, 
-    theme: 'light', 
+    theme: _r4DefaultTheme(), 
     textWidth: 90, 
     font: 'serif', 
     lineHeight: 1.8, 
@@ -642,7 +652,12 @@ const defaults = {
 };
 let settings;
 try {
-    settings = JSON.parse(localStorage.getItem('reader_settings') || 'null') || { ...defaults };
+    const saved = JSON.parse(localStorage.getItem('reader_settings') || 'null');
+    if (saved && typeof saved === 'object') {
+        settings = { ...defaults, ...saved };
+    } else {
+        settings = { ...defaults };
+    }
 } catch (e) {
     console.warn("Failed to parse settings from localStorage", e);
     settings = { ...defaults };

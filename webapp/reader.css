@@ -4,39 +4,40 @@
    ========================================================================== */
 
 :root {
+    /* === Legacy (сохранены для обратной совместимости) === */
     --bg: #ffffff;
     --text: #1a1a2e;
     --text-primary: #1a1a2e;
     --text-secondary: #64748b;
     --card-bg: #f8fafc;
-    --card-border: rgba(99, 102, 241, 0.12);
-    --card-hover: rgba(99, 102, 241, 0.05);
+    --card-border: rgba(139, 92, 246, 0.12);
+    --card-hover: rgba(139, 92, 246, 0.05);
     --header-bg: rgba(255, 255, 255, 0.95);
-    --accent: #4f46e5;
-    --accent-light: rgba(79, 70, 229, 0.12);
+    --accent: #8b5cf6;
+    --accent-light: rgba(139, 92, 246, 0.12);
     --divider: rgba(0, 0, 0, 0.06);
     --reader-bg: #fff;
     --reader-text: #2c2c2c;
     --shadow: 0 4px 12px rgba(0,0,0,0.05);
     --tab-bg: #f1f5f9;
-    --tab-active: #4f46e5;
+    --tab-active: #8b5cf6;
     --settings-bg: #ffffff;
     --input-bg: #f8fafc;
     --container-max: 800px;
     --glass-bg: rgba(255, 255, 255, 0.94);
     --glass-border: rgba(255, 255, 255, 0.3);
     --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
-    --progress-gradient: linear-gradient(90deg, #6366f1 0%, #a855f7 100%);
+    --progress-gradient: linear-gradient(90deg, #8b5cf6 0%, #ec4899 100%);
     --overlay: rgba(0,0,0,0.4);
     --para-spacing: 20px;
-    --bg-hover: rgba(99, 102, 241, 0.08);
-    --bg-primary: #4f46e5;
-    --border: rgba(99, 102, 241, 0.12);
+    --bg-hover: rgba(139, 92, 246, 0.08);
+    --bg-primary: #8b5cf6;
+    --border: rgba(139, 92, 246, 0.12);
     --divider-light: rgba(0, 0, 0, 0.04);
-    --badge-bg: rgba(99, 102, 241, 0.1);
+    --badge-bg: rgba(139, 92, 246, 0.1);
     --bg-secondary: #f1f5f9;
     --text-main: #1a1a2e;
-    --accent-rgb: 79, 70, 229;
+    --accent-rgb: 139, 92, 246;
     --ui-space-1: 6px;
     --ui-space-2: 10px;
     --ui-space-3: 14px;
@@ -50,6 +51,102 @@
     --ui-transition-fast: 140ms cubic-bezier(0.2, 0.9, 0.3, 1);
     --ui-transition-main: 220ms cubic-bezier(0.16, 1, 0.3, 1);
     --reader-keyboard-offset: 0px;
+
+    /* === Refresh v4 (MangaLib/Tachiyomi stack) === */
+    /* Акценты (violet + pink — характерные для manga-плееров) */
+    --accent-2: #ec4899;
+    --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+    --accent-gradient-soft: linear-gradient(135deg, rgba(139,92,246,0.18), rgba(236,72,153,0.18));
+
+    /* Трёхуровневая иерархия поверхностей (для карточек/плиток) */
+    --surface-1: #f8fafc;
+    --surface-2: #f1f5f9;
+    --surface-3: #e2e8f0;
+    --surface-border: rgba(15, 23, 42, 0.08);
+    --surface-border-strong: rgba(15, 23, 42, 0.14);
+
+    /* Радиусы */
+    --radius-xs: 6px;
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 18px;
+    --radius-xl: 24px;
+    --radius-pill: 999px;
+
+    /* Отступы (4pt grid) */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+
+    /* Тени — консистентная шкала */
+    --shadow-card: 0 2px 8px rgba(15, 23, 42, 0.06);
+    --shadow-hover: 0 8px 24px rgba(15, 23, 42, 0.12);
+    --shadow-pop: 0 16px 40px rgba(15, 23, 42, 0.16);
+    --shadow-focus: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+
+    /* Chip/bage фон (для статусных пилюль) */
+    --chip-bg: rgba(139, 92, 246, 0.12);
+    --chip-text: #6d28d9;
+}
+
+/* Tachiyomi-style default: тёмная тема, если пользователь не выбрал явно.
+   Реальный переключатель живёт в reader.js (restoreSettings). */
+body.theme-dark {
+    --surface-1: #1e293b;
+    --surface-2: #334155;
+    --surface-3: #475569;
+    --surface-border: rgba(255, 255, 255, 0.08);
+    --surface-border-strong: rgba(255, 255, 255, 0.16);
+    --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
+    --shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.6);
+    --chip-bg: rgba(139, 92, 246, 0.18);
+    --chip-text: #c4b5fd;
+}
+
+body.theme-amoled {
+    --surface-1: #0a0a0a;
+    --surface-2: #141414;
+    --surface-3: #1f1f1f;
+    --surface-border: rgba(255, 255, 255, 0.1);
+    --surface-border-strong: rgba(255, 255, 255, 0.18);
+    --shadow-card: none;
+    --shadow-hover: 0 0 0 1px rgba(139, 92, 246, 0.3);
+    --shadow-pop: 0 8px 32px rgba(139, 92, 246, 0.2);
+}
+
+body.theme-gray {
+    --surface-1: #2d3748;
+    --surface-2: #374151;
+    --surface-3: #4b5563;
+    --surface-border: rgba(255, 255, 255, 0.06);
+    --surface-border-strong: rgba(255, 255, 255, 0.12);
+    --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+body.theme-sepia {
+    --surface-1: #efe3ca;
+    --surface-2: #e7d5b0;
+    --surface-3: #ddc79a;
+    --surface-border: rgba(91, 70, 54, 0.14);
+    --surface-border-strong: rgba(91, 70, 54, 0.22);
+    --chip-bg: rgba(139, 92, 246, 0.14);
+    --chip-text: #5b4636;
+}
+
+/* Обновлённые акценты под тёмные темы */
+body.theme-dark, body.theme-amoled, body.theme-gray {
+    --accent: #a78bfa;
+    --accent-2: #f472b6;
+    --accent-gradient: linear-gradient(135deg, #a78bfa 0%, #f472b6 100%);
+    --accent-rgb: 167, 139, 250;
+    --tab-active: #a78bfa;
+    --progress-gradient: linear-gradient(90deg, #a78bfa 0%, #f472b6 100%);
 }
 
 .theme-sepia {
@@ -3914,6 +4011,161 @@ body.keyboard-open #screen-reader .admin-menu {
 /* Smooth fade transition between chapters */
 .reader-content {
     transition: opacity 0.3s ease;
+}
+
+/* ==========================================================================
+   Refresh v4 — общие утилиты и компоненты (MangaLib/Tachiyomi стиль)
+   Используются последующими итерациями (B..H).
+   ========================================================================== */
+
+/* Поверхности */
+.r4-surface-1 {
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+}
+.r4-surface-2 {
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+}
+.r4-elevated {
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+}
+
+/* Chip/pill — для статусных бейджей ("кастом", "NEW", "3/10" и т.п.) */
+.r4-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    background: var(--chip-bg);
+    color: var(--chip-text);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    line-height: 1.4;
+    white-space: nowrap;
+    border: 1px solid transparent;
+}
+.r4-chip--accent {
+    background: var(--accent-gradient);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
+}
+.r4-chip--outline {
+    background: transparent;
+    border-color: var(--surface-border-strong);
+    color: var(--text-secondary);
+}
+
+/* Pill-кнопка (сегментированный контрол, фильтры) */
+.r4-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 14px;
+    min-height: 36px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid var(--surface-border);
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s, transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
+}
+.r4-pill:active {
+    transform: scale(0.97);
+}
+.r4-pill.is-active {
+    background: var(--accent-gradient);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.3);
+}
+
+/* Градиентный плейсхолдер обложки (когда cover_url пуст) */
+.r4-poster-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent-gradient);
+    color: #fff;
+    font-family: 'Playfair Display', 'Noto Serif', Georgia, serif;
+    font-weight: 700;
+    font-size: clamp(28px, 8vw, 54px);
+    text-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    position: relative;
+    overflow: hidden;
+}
+.r4-poster-placeholder::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 30% 20%, rgba(255,255,255,0.18) 0%, transparent 60%);
+    pointer-events: none;
+}
+
+/* Shimmer-анимация для скелетонов */
+@keyframes r4-shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+}
+.r4-shimmer {
+    background: linear-gradient(
+        90deg,
+        var(--surface-2) 0%,
+        var(--surface-3) 50%,
+        var(--surface-2) 100%
+    );
+    background-size: 200% 100%;
+    animation: r4-shimmer 1.4s ease-in-out infinite;
+    border-radius: var(--radius-sm);
+}
+
+/* Универсальный focus-ring */
+:where(button, a, input, select, textarea):focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-focus);
+    border-radius: var(--radius-sm);
+}
+
+/* Bottom-sheet база (для модалок в E-итерации) */
+.r4-sheet {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    max-height: 85vh;
+    background: var(--surface-1);
+    border-top-left-radius: var(--radius-xl);
+    border-top-right-radius: var(--radius-xl);
+    box-shadow: var(--shadow-pop);
+    transform: translateY(100%);
+    transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.r4-sheet.is-open {
+    transform: translateY(0);
+}
+.r4-sheet-handle {
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--surface-border-strong);
+    margin: 10px auto 6px;
+    flex-shrink: 0;
 }
 .reader-content.loading {
     opacity: 0;
