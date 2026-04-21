@@ -4786,46 +4786,11 @@ function renderLibraryTabV2() {
         return;
     }
 
-    const itemsHtml = filtered.map((meta) => {
-        const s = meta.series;
-        const bm = meta.lastRead;
-        if (!s) return '';
-
-        let locationText = 'История ещё не начата';
-        if (bm) {
-            const v = findVolumeByKey(s, bm.volume);
-            let chTitle = `Глава ${bm.chapter}`;
-            if (v) {
-                const ch = (v.chapters || []).find((c) => sameReaderKey(c.chapter, bm.chapter));
-                if (ch && ch.custom_name) chTitle = ch.custom_name;
-            }
-            const volTitle = v && v.custom_name ? v.custom_name : `Том ${bm.volume}`;
-            locationText = `Остановлено: ${volTitle}, ${chTitle}`;
-        }
-
-        const progressText = `${meta.readCount}/${meta.totalCh || 0}`;
-        const coverImg = s.cover_url ? `<img src="${s.cover_url}" class="library-cover" alt="">` : `<div class="series-icon">📖</div>`;
-        const quickAction = bm
-            ? `<button type="button" class="series-action-btn primary" data-series-action="continue" data-series-id="${escapeHtml(String(s.id))}">Продолжить</button>`
-            : `<button type="button" class="series-action-btn" data-series-action="latest" data-series-id="${escapeHtml(String(s.id))}">К последней</button>`;
-
-        return `
-        <div class="series-card" style="margin-bottom:12px;" data-series-id="${escapeHtml(String(s.id))}">
-            ${coverImg}
-            <div class="series-info">
-                <h3>${escapeHtml(s.title)}</h3>
-                <p style="font-size: 13px; color: var(--text-sec); margin-top:2px;">${locationText}</p>
-                <div class="library-progress-bar">
-                    <div class="library-progress-fill" style="width: ${meta.progress}%"></div>
-                </div>
-                <div style="font-size: 11px; margin-top:4px; text-align:right; color: var(--text-sec);">
-                    ${progressText} &middot; ${meta.progress}% прочитано
-                </div>
-                <div class="series-actions">${quickAction}</div>
-            </div>
-            <span class="series-arrow">&rsaquo;</span>
-        </div>`;
-    }).join('');
+    // Refresh v4: используем единый компонент poster-карточки, чтобы библиотека
+    // выглядела идентично главному экрану.
+    const itemsHtml = filtered
+        .map((meta, idx) => (meta.series ? renderSeriesPosterCard(meta.series, idx) : ''))
+        .join('');
 
     list.innerHTML = itemsHtml;
 }

@@ -1925,61 +1925,110 @@ input:checked + .slider:before { transform: translateX(20px); }
    БИБЛИОТЕКА И СТАТИСТИКА
    ========================================================================== */
 
+/* Refresh v4: библиотека — стат-сетка 2×N + постер-лист */
 .reading-stats-card {
-    display: flex;
-    gap: 16px;
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: 16px;
-    padding: 16px;
-    margin-bottom: 24px;
-    box-shadow: var(--shadow);
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--space-3);
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin-bottom: var(--space-5);
+    box-shadow: none;
 }
 
 .stat-item {
-    flex: 1;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-3);
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    padding: var(--space-3);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    position: relative;
+    overflow: hidden;
+    transition: transform var(--ui-transition-fast), box-shadow var(--ui-transition-main);
 }
+.stat-item::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--accent-gradient-soft);
+    opacity: 0;
+    transition: opacity var(--ui-transition-main);
+    pointer-events: none;
+}
+.stat-item:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+}
+.stat-item:hover::before { opacity: 1; }
+.stat-item > * { position: relative; z-index: 1; }
 
 .stat-icon {
-    font-size: 24px;
-    background: var(--accent-light);
+    font-size: 20px;
+    background: var(--accent-gradient);
+    color: #fff;
     width: 44px;
     height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 12px;
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.35);
+    flex-shrink: 0;
+}
+.stat-icon .icon-sm { color: #fff; }
+
+.stat-info {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
 }
 
 .stat-value {
-    font-size: 16px;
-    font-weight: 700;
+    font-size: 18px;
+    font-weight: 800;
     color: var(--text);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    font-weight: 700;
 }
 
 .library-section-title {
-    font-size: 18px;
-    font-weight: 700;
-    margin-bottom: 16px;
+    font-size: 16px;
+    font-weight: 800;
+    margin-bottom: var(--space-3);
     color: var(--text);
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+.library-section-title::before {
+    content: '';
+    width: 4px;
+    height: 16px;
+    background: var(--accent-gradient);
+    border-radius: 2px;
 }
 
 .library-filter-row {
     display: flex;
-    gap: 8px;
-    margin-bottom: 14px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
     overflow-x: auto;
     padding-bottom: 2px;
+    scroll-snap-type: x proximity;
 }
 
 .library-filter-row::-webkit-scrollbar {
@@ -1987,21 +2036,41 @@ input:checked + .slider:before { transform: translateX(20px); }
 }
 
 .library-filter-btn {
-    border: 1px solid var(--divider);
-    background: var(--card-bg);
+    border: 1px solid var(--surface-border);
+    background: var(--surface-1);
     color: var(--text-secondary);
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     font-size: 12px;
-    font-weight: 600;
-    padding: 7px 12px;
+    font-weight: 700;
+    padding: 8px 14px;
     cursor: pointer;
     white-space: nowrap;
+    transition: all var(--ui-transition-fast);
+    scroll-snap-align: start;
+    -webkit-tap-highlight-color: transparent;
+}
+.library-filter-btn:active {
+    transform: scale(0.96);
 }
 
 .library-filter-btn.active {
     color: #fff;
-    background: var(--accent);
-    border-color: var(--accent);
+    background: var(--accent-gradient);
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.3);
+}
+
+/* Library-list — тоже grid как на главной, но чуть компактнее */
+#library-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: var(--space-3);
+}
+@media (min-width: 640px) {
+    #library-list {
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        gap: var(--space-4);
+    }
 }
 
 .series-progress-text {
