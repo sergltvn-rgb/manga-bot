@@ -99,6 +99,14 @@
                 "https://teletype.in/@slitvin/01KagD2X-bQ",
                 "https://telegra.ph/Hroniki-Akashi--11-tom-04-15"
               ]
+            },
+            {
+              "chapter": "Иллюстрации",
+              "custom_name": "Глава Иллюстрации",
+              "url": "https://telegra.ph/Hroniki-Akashi--Tom-11-Glava-Illyustracii-04-21",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--Tom-11-Glava-Illyustracii-04-21"
+              ]
             }
           ]
         },
@@ -309,5 +317,15 @@
       ]
     }
   ],
-  "bot_username": "Alyamangapage_bot"
+  "bot_username": "Alyamangapage_bot",
+  "admin_ids": [
+    "1424182136",
+    "6210312655",
+    "7623430602",
+    "8033148365",
+    "6573251552",
+    "1577647113",
+    "1747374025",
+    "5477281591"
+  ]
 }
