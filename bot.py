@@ -37,6 +37,7 @@ from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL, API_HOST
 
 # Кэш для коротких ссылок переименования (обход лимита 64 символа в deeplink)
 RENAME_CACHE = {}
+WEBAPP_CACHE_BUSTER = str(os.getenv("WEBAPP_CACHE_BUSTER", "4cd2d40")).strip()
 from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
@@ -76,6 +77,16 @@ async def get_http_session() -> aiohttp.ClientSession:
     if _http_session is None or _http_session.closed:
         _http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
     return _http_session
+
+def build_webapp_url(page_name: str) -> str:
+    base = f"{WEBAPP_URL.rstrip('/')}/webapp/{str(page_name).lstrip('/')}"
+    query_items: list[tuple[str, str]] = []
+    if API_HOST:
+        query_items.append(("api", str(API_HOST)))
+    if WEBAPP_CACHE_BUSTER:
+        query_items.append(("rev", WEBAPP_CACHE_BUSTER))
+    query = urlencode(query_items)
+    return f"{base}?{query}" if query else base
 
 # --- Хелперы ---
 def fmt_name(uid, name):
@@ -606,7 +617,7 @@ def get_main_menu(is_group: bool = False):
 @dp.callback_query(F.data == "section_read")
 async def process_section_read(callback: types.CallbackQuery):
     # Правильный URL читалки
-    reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html" + (f"?api={API_HOST}" if API_HOST else "")
+    reader_url = build_webapp_url("reader.html")
     
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📗 Читать мангу", callback_data="read_langs"))
@@ -650,7 +661,7 @@ async def process_section_ai(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
+    alya_chat_url = build_webapp_url("index.html")
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     await safe_edit_or_reply(callback, "🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -803,7 +814,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
         builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-        alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
+        alya_chat_url = build_webapp_url("index.html")
         builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
         builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
         return await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -847,7 +858,7 @@ async def _redirect_to_dm(message: types.Message, section: str, label: str):
 @dp.message(F.text == "📖 Читать", StateFilter("*"))
 async def handle_reply_read(message: types.Message, state: FSMContext):
     await state.clear()
-    reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html" + (f"?api={API_HOST}" if API_HOST else "")
+    reader_url = build_webapp_url("reader.html")
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📗 Читать мангу", callback_data="read_langs"))
     builder.row(types.InlineKeyboardButton(text="📘 Читать ранобэ", callback_data="read_ranobe_langs"))
@@ -874,7 +885,7 @@ async def handle_reply_ai(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
+    alya_chat_url = build_webapp_url("index.html")
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
     builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
     await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -5671,7 +5682,7 @@ async def main():
     await bot.set_my_commands(commands, BotCommandScopeDefault())
 
     # Configure WebApp button
-    reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html" + (f"?api={API_HOST}" if API_HOST else "")
+    reader_url = build_webapp_url("reader.html")
     await bot.set_chat_menu_button(
         menu_button=types.MenuButtonWebApp(
             text="✨ Читалка",
