@@ -11,7 +11,7 @@
     <script>
         (function () {
             const params = new URLSearchParams(window.location.search);
-            const rev = params.get('rev') || '16';
+            const rev = params.get('rev') || '19';
             window.__READER_REV = rev;
             const css = document.createElement('link');
             css.rel = 'stylesheet';
@@ -192,8 +192,8 @@
                     <span id="pull-next-text">Тяните для следующей главы</span>
                 </div>
             </div>
-
-            <!-- ★ Floating Admin FAB (Phase 4) -->
+        </div>
+        <!-- ★ Floating Admin FAB (Phase 4) -->
             <div id="admin-fab-container" class="admin-fab-container" style="display:none;">
                 <button class="admin-fab-btn" id="admin-fab-btn" onclick="toggleAdminMenu()">
                     <svg class="icon-sm" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -201,13 +201,16 @@
                 <div id="admin-menu" class="admin-menu glass-panel hidden">
                     <div class="admin-menu-header">Инструменты Админа</div>
                     <button class="admin-menu-item" onclick="renameChapterCurrent()"><span class="icon">📝</span> Переименовать главу</button>
+                    <button class="admin-menu-item" onclick="resetCurrentChapterName()"><span class="icon">🔄</span> Сброс имени</button>
                     <button class="admin-menu-item" onclick="openEditUrlModal(currentChapterIdx)"><span class="icon">🔗</span> Ред. ссылки</button>
+                    <button class="admin-menu-item" onclick="openAddChapterForCurrent()"><span class="icon">📄</span> Добавить главу</button>
+                    <button class="admin-menu-item" onclick="deleteChapterCurrent()"><span class="icon">🗑️</span> Удалить главу</button>
                     <button class="admin-menu-item" onclick="openBulkModal()"><span class="icon">📦</span> Масс. загрузка</button>
+                    <button class="admin-menu-item" onclick="openCoverEditForCurrent()"><span class="icon">🖼️</span> Обложка серии</button>
                 </div>
             </div>
-        </div>
-        <div class="reader-bottom-bar" id="reader-bottom-bar">
-            <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">
+            <div class="reader-bottom-bar" id="reader-bottom-bar">
+                <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">
                 <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 Пред.
             </button>
@@ -479,6 +482,42 @@
         </div>
     </div>
 
+    <!-- === Add Chapter Modal (Admin) === -->
+    <div id="add-chapter-overlay" class="modal-overlay hidden" onclick="closeAddChapterModal()"></div>
+    <div id="add-chapter-modal" class="edit-url-modal hidden">
+        <h3>Добавить главу</h3>
+        <p class="edit-url-chapter-name">Будет добавлена в текущий том.</p>
+        <label class="add-chapter-field">
+            <span>Номер главы</span>
+            <input type="text" id="add-chapter-number" class="edit-url-input" placeholder="например: 15 или 15.5">
+        </label>
+        <label class="add-chapter-field">
+            <span>Имя (опционально)</span>
+            <input type="text" id="add-chapter-name" class="edit-url-input" placeholder="Глава 15 — Встреча">
+        </label>
+        <label class="add-chapter-field">
+            <span>Ссылка</span>
+            <input type="text" id="add-chapter-url" class="edit-url-input" placeholder="https://telegra.ph/...">
+        </label>
+        <div class="edit-url-actions">
+            <button class="edit-url-cancel" onclick="closeAddChapterModal()">Отмена</button>
+            <button class="edit-url-save" id="add-chapter-save" onclick="saveAddChapter()">Добавить</button>
+        </div>
+    </div>
+
+    <!-- === Series Cover Edit Modal (Admin) === -->
+    <div id="cover-edit-overlay" class="modal-overlay hidden" onclick="closeCoverEditModal()"></div>
+    <div id="cover-edit-modal" class="edit-url-modal hidden">
+        <h3>Обложка серии</h3>
+        <p class="edit-url-chapter-name" id="cover-edit-series-name"></p>
+        <input type="text" id="cover-edit-input" class="edit-url-input" placeholder="https://..." oninput="updateCoverPreview()">
+        <img id="cover-edit-preview" class="cover-edit-preview" alt="" style="display:none;">
+        <div class="edit-url-actions">
+            <button class="edit-url-cancel" onclick="closeCoverEditModal()">Отмена</button>
+            <button class="edit-url-save" id="cover-edit-save" onclick="saveCoverEdit()">Сохранить</button>
+        </div>
+    </div>
+
     <!-- === Typo Reporter === -->
     <div id="typo-tooltip" class="typo-tooltip">
         <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-1px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -500,7 +539,7 @@
 
     <script>
         (function () {
-            const rev = window.__READER_REV || '16';
+            const rev = window.__READER_REV || '19';
             const script = document.createElement('script');
             script.src = `reader.js?v=${encodeURIComponent(rev)}`;
             document.body.appendChild(script);

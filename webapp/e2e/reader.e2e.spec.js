@@ -23,6 +23,9 @@ function createMockState() {
       renameRequest: 0,
       chapterEdit: 0,
       chapterBulk: 0,
+      chapterAdd: 0,
+      chapterDelete: 0,
+      seriesUpdate: 0,
       sortPut: 0,
     },
     readerData: {
@@ -217,6 +220,29 @@ async function fulfillJson(route, payload, status = 200) {
 }
 
 async function installTelegramAndApiMocks(page, state) {
+  // Disable CSS transitions/animations globally for deterministic click targets.
+  await page.addInitScript(() => {
+    const injectNoMotionCss = () => {
+      const existing = document.getElementById("__pw_no_motion");
+      if (existing) return;
+      const style = document.createElement("style");
+      style.id = "__pw_no_motion";
+      style.textContent = `
+        *, *::before, *::after {
+          transition: none !important;
+          animation-duration: 0s !important;
+          animation-delay: 0s !important;
+        }
+      `;
+      (document.head || document.documentElement).appendChild(style);
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", injectNoMotionCss, { once: true });
+    } else {
+      injectNoMotionCss();
+    }
+  });
+
   await page.addInitScript(({ adminUserId }) => {
     window.Telegram = {
       WebApp: {
@@ -490,6 +516,66 @@ async function installTelegramAndApiMocks(page, state) {
       return;
     }
 
+    if (pathname === "/api/chapters" && method === "POST") {
+      state.calls.chapterAdd += 1;
+      const body = safeJson(request);
+      const volume = findVolume(state, body.series_id, body.volume);
+      if (!volume) {
+        await fulfillJson(route, { error: "unknown volume" }, 400);
+        return;
+      }
+      const chapterId = String(body.chapter || "").trim();
+      if (!chapterId) {
+        await fulfillJson(route, { error: "missing chapter" }, 400);
+        return;
+      }
+      if (volume.chapters.some((ch) => String(ch.chapter) === chapterId)) {
+        await fulfillJson(route, { error: "chapter already exists" }, 409);
+        return;
+      }
+      volume.chapters.push({
+        chapter: chapterId,
+        custom_name: String(body.name || "") || `Chapter ${chapterId}`,
+        text: "Added by e2e add-chapter flow.",
+        url: String(body.url || ""),
+        urls: [String(body.url || "")],
+      });
+      await fulfillJson(route, { ok: true, chapter: chapterId });
+      return;
+    }
+
+    if (pathname === "/api/chapters" && method === "DELETE") {
+      state.calls.chapterDelete += 1;
+      const body = safeJson(request);
+      const volume = findVolume(state, body.series_id, body.volume);
+      if (!volume) {
+        await fulfillJson(route, { error: "unknown volume" }, 400);
+        return;
+      }
+      const before = volume.chapters.length;
+      volume.chapters = volume.chapters.filter((ch) => String(ch.chapter) !== String(body.chapter));
+      const deleted = before - volume.chapters.length;
+      if (deleted === 0) {
+        await fulfillJson(route, { error: "chapter not found" }, 404);
+        return;
+      }
+      await fulfillJson(route, { ok: true, deleted });
+      return;
+    }
+
+    if (pathname === "/api/series" && method === "PUT") {
+      state.calls.seriesUpdate += 1;
+      const body = safeJson(request);
+      const series = state.readerData.series.find((s) => String(s.id) === String(body.series_id));
+      if (!series) {
+        await fulfillJson(route, { error: "unknown series" }, 400);
+        return;
+      }
+      series.cover_url = String(body.cover_url || "");
+      await fulfillJson(route, { ok: true, cover_url: series.cover_url });
+      return;
+    }
+
     if (pathname === "/api/avatar" && method === "GET") {
       await route.fulfill({
         status: 204,
@@ -717,5 +803,113 @@ test.describe("Reader E2E smoke", () => {
     await expect(page.locator("#reader-text")).toContainText("Prefetched chapter body");
     await page.waitForTimeout(250);
     await expect.poll(() => state.calls.chapterContent).toBe(1);
+  });
+
+  test("admin persist: toggle survives reload and FAB appears in reader", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=persist-a");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    // Enable admin-mode then open the reader — FAB must be visible without reload.
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("#admin-fab-container")).toBeVisible();
+    await expect(page.locator(".admin-mode-badge")).toBeVisible();
+
+    // Persist across reload.
+    await page.reload();
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    const persisted = await page.evaluate(() => ({
+      stored: localStorage.getItem("reader_admin_mode"),
+      isAdmin: isAdminMode,
+    }));
+    expect(persisted.stored).toBe("1");
+    expect(persisted.isAdmin).toBe(true);
+  });
+
+  test("admin add chapter flow", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=add-a");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+
+    await page.evaluate(() => openAddChapterModal());
+    await expect(page.locator("#add-chapter-modal")).not.toHaveClass(/hidden/);
+    await expect(page.locator("#add-chapter-number")).toHaveValue("3");
+
+    await page.fill("#add-chapter-url", "https://example.org/added-chapter");
+    await page.fill("#add-chapter-name", "E2E added chapter");
+    await page.click("#add-chapter-save");
+
+    await expect.poll(() => state.calls.chapterAdd).toBe(1);
+    await expect.poll(() => {
+      const v = findVolume(state, "manga_ru", 1);
+      return v ? v.chapters.length : 0;
+    }).toBe(3);
+  });
+
+  test("admin delete chapter flow", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=del-a");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+
+    await page.evaluate(() => deleteChapterCurrent());
+
+    await expect.poll(() => state.calls.chapterDelete).toBe(1);
+    await expect.poll(() => {
+      const v = findVolume(state, "manga_ru", 1);
+      return v ? v.chapters.length : 0;
+    }).toBe(1);
+    await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
+  });
+
+  test("admin cover edit flow", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=cover-a");
+    await page.evaluate(() => toggleAdminMode(true));
+
+    await page.evaluate(() => openCoverEditModal("manga_ru"));
+    await expect(page.locator("#cover-edit-modal")).not.toHaveClass(/hidden/);
+
+    await page.fill("#cover-edit-input", "https://example.org/cover.png");
+    await page.click("#cover-edit-save");
+
+    await expect.poll(() => state.calls.seriesUpdate).toBe(1);
+    await expect.poll(() => {
+      const s = state.readerData.series.find((x) => x.id === "manga_ru");
+      return s ? s.cover_url : "";
+    }).toBe("https://example.org/cover.png");
+  });
+
+  test("non-admin cannot enable editor mode", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.admin_ids = []; // strip admin rights
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=nonadmin-a");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    await page.evaluate(() => toggleAdminMode(true));
+    const result = await page.evaluate(() => ({
+      isAdmin: isAdminMode,
+      stored: localStorage.getItem("reader_admin_mode"),
+    }));
+    expect(result.isAdmin).toBe(false);
+    expect(result.stored).toBeNull();
   });
 });

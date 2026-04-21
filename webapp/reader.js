@@ -27,7 +27,10 @@ let currentSeries = null;
 let currentVolume = null;
 let currentChapterIdx = 0;
 let currentChapters = [];
-let isAdminMode = false;
+const ADMIN_MODE_STORAGE_KEY = 'reader_admin_mode';
+let isAdminMode = (() => {
+    try { return localStorage.getItem(ADMIN_MODE_STORAGE_KEY) === '1'; } catch (e) { return false; }
+})();
 let currentCommentSort = 'top'; 
 let allCommentsCache = []; 
 let commentsData = []; 
@@ -139,37 +142,90 @@ function isCurrentUserAdmin() {
     return !!userId && adminIds.includes(String(userId));
 }
 
+function hasAdminApi() {
+    return !!API_URL;
+}
+
+function persistAdminMode(enabled) {
+    try {
+        if (enabled) localStorage.setItem(ADMIN_MODE_STORAGE_KEY, '1');
+        else localStorage.removeItem(ADMIN_MODE_STORAGE_KEY);
+    } catch (e) { /* ignore storage errors */ }
+}
+
+function syncAdminFabVisibility() {
+    const adminFab = document.getElementById('admin-fab-container');
+    if (!adminFab) return;
+    const readerActive = !!document.getElementById('screen-reader')?.classList.contains('active');
+    adminFab.style.display = (readerActive && isAdminMode && hasAdminApi()) ? 'flex' : 'none';
+    if (!(readerActive && isAdminMode)) {
+        closeAdminMenu();
+    }
+}
+
+function syncAdminBadge() {
+    const header = document.querySelector('#screen-reader .reader-header');
+    if (!header) return;
+    let badge = header.querySelector('.admin-mode-badge');
+    if (isAdminMode && isCurrentUserAdmin()) {
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'admin-mode-badge';
+            badge.textContent = 'РЕДАКТОР';
+            header.appendChild(badge);
+        }
+    } else if (badge) {
+        badge.remove();
+    }
+}
+
 function syncAdminModeControls() {
     const canUseAdminMode = isCurrentUserAdmin();
+    const apiAvailable = hasAdminApi();
+    const adminIdsLoaded = Array.isArray(adminIds) && adminIds.length > 0;
     const toggle = document.getElementById('admin-mode-toggle');
     const hint = document.getElementById('admin-mode-hint');
     const settingRow = document.getElementById('admin-mode-setting');
     const chaptersScreen = document.getElementById('screen-chapters');
 
-    if (!canUseAdminMode && isAdminMode) {
+    // Wipe the persisted toggle only once admin_ids are known and either
+    // the API is missing or the current user is not an admin. This avoids
+    // accidentally clearing the stored preference during bootstrap, when
+    // admin_ids have not yet arrived from the server.
+    if (isAdminMode && ((adminIdsLoaded && !canUseAdminMode) || !apiAvailable)) {
         isAdminMode = false;
+        persistAdminMode(false);
     }
 
+    const effectivelyEnabled = canUseAdminMode && apiAvailable;
+
     if (toggle) {
-        toggle.disabled = false;
-        toggle.checked = canUseAdminMode ? !!isAdminMode : false;
+        toggle.disabled = !effectivelyEnabled;
+        toggle.checked = effectivelyEnabled ? !!isAdminMode : false;
     }
     if (hint) {
-        hint.textContent = canUseAdminMode
-            ? 'Только для администраторов'
-            : 'Недоступно для этого аккаунта';
+        if (!canUseAdminMode) {
+            hint.textContent = 'Недоступно для этого аккаунта';
+        } else if (!apiAvailable) {
+            hint.textContent = 'Недоступно в offline-режиме (без API)';
+        } else {
+            hint.textContent = 'Только для администраторов';
+        }
     }
     if (settingRow) {
-        settingRow.classList.toggle('setting-disabled', !canUseAdminMode);
+        settingRow.classList.toggle('setting-disabled', !effectivelyEnabled);
     }
     if (chaptersScreen) {
         chaptersScreen.classList.toggle('admin-enabled', canUseAdminMode && isAdminMode);
     }
+    syncAdminFabVisibility();
+    syncAdminBadge();
 }
 
 function toggleAdminMode(enabled) {
     if (!isCurrentUserAdmin()) {
         isAdminMode = false;
+        persistAdminMode(false);
         syncAdminModeControls();
         if (enabled) {
             showToast('Режим редактора доступен только администраторам.');
@@ -177,7 +233,17 @@ function toggleAdminMode(enabled) {
         return;
     }
 
+    if (enabled && !hasAdminApi()) {
+        isAdminMode = false;
+        persistAdminMode(false);
+        syncAdminModeControls();
+        showToast('Режим редактора недоступен без подключения к API.');
+        return;
+    }
+
     isAdminMode = !!enabled;
+    persistAdminMode(isAdminMode);
+
     if (document.getElementById('screen-series').classList.contains('active')) renderSeriesList();
     const chaptersScreen = document.getElementById('screen-chapters');
     if (chaptersScreen) {
@@ -186,6 +252,9 @@ function toggleAdminMode(enabled) {
     if (!isAdminMode) {
         closeEditUrlModal();
         closeBulkModal();
+        closeAddChapterModal();
+        closeCoverEditModal();
+        closeAdminMenu();
         const fabMenu = document.getElementById('fab-menu');
         const fabBtn = document.getElementById('fab-btn');
         if (fabMenu) fabMenu.classList.add('hidden');
@@ -199,6 +268,24 @@ function toggleAdminMode(enabled) {
     syncAdminModeControls();
 }
 
+// Unified confirmation helper — uses Telegram showConfirm when available,
+// falls back to native confirm outside the Mini App environment.
+function adminConfirm(message) {
+    return new Promise((resolve) => {
+        try {
+            if (tg && typeof tg.showConfirm === 'function') {
+                tg.showConfirm(String(message || ''), (ok) => resolve(!!ok));
+                return;
+            }
+        } catch (e) { /* fall through */ }
+        try {
+            resolve(!!confirm(String(message || '')));
+        } catch (e) {
+            resolve(false);
+        }
+    });
+}
+
 async function renameItem(objId) {
     if (!API_URL) return showToast('Переименование доступно только при подключенном API.');
     try {
@@ -210,8 +297,18 @@ async function renameItem(objId) {
         const data = await resp.json();
         if (data.ok) {
             const bot_username = allData.bot_username || "Alyamangapage_bot";
-            tg.openTelegramLink('https://t.me/' + bot_username + '?start=ren_' + data.short_id);
-            tg.close();
+            const deepLink = 'https://t.me/' + bot_username + '?start=ren_' + data.short_id;
+            try {
+                if (tg && typeof tg.openTelegramLink === 'function') {
+                    tg.openTelegramLink(deepLink);
+                } else {
+                    window.open(deepLink, '_blank', 'noopener');
+                }
+            } catch (e) {
+                window.open(deepLink, '_blank', 'noopener');
+            }
+            showToast('Завершите переименование в чате с ботом.');
+            haptic('light');
         } else {
             showToast('Ошибка: ' + (data.error || 'неизвестная'));
         }
@@ -222,7 +319,8 @@ async function renameItem(objId) {
 
 async function resetCustomName(objId) {
     if (!API_URL) return showToast('Сброс доступен только через прямое подключение (не GitHub Pages).');
-    if (!confirm(`Сбросить кастомное имя "${objId}" на дефолт?`)) return;
+    const ok = await adminConfirm(`Сбросить кастомное имя "${objId}" на дефолт?`);
+    if (!ok) return;
     try {
         const resp = await apiFetch(`${API_URL}/api/rename`, {
             method: 'DELETE',
@@ -231,14 +329,34 @@ async function resetCustomName(objId) {
         });
         const result = await resp.json();
         if (result.ok) {
-            // Перезагружаем данные чтобы увидеть обновлённые имена
-            await loadData();
+            // Обновляем данные в фоне — без сброса скролла
+            refreshReaderDataInBackground();
             showToast('✅ Имя сброшено на дефолт.');
+            haptic('success');
         } else {
-            showToast('Ошибка: ' + (result.error || 'неизвестная'));
+            showToast('Ошибка: ' + (result.error || `HTTP ${resp.status}`));
         }
     } catch (e) {
         showToast('Ошибка сети: ' + e.message);
+    }
+}
+
+// Background refresh that preserves scroll / current chapter state.
+let _bgRefreshPending = false;
+async function refreshReaderDataInBackground() {
+    if (_bgRefreshPending) return;
+    _bgRefreshPending = true;
+    const scrollEl = document.getElementById('reader-content');
+    const savedScroll = scrollEl ? scrollEl.scrollTop : 0;
+    try {
+        await loadData();
+    } catch (e) {
+        /* noop */
+    } finally {
+        _bgRefreshPending = false;
+        if (scrollEl && savedScroll > 0) {
+            try { scrollEl.scrollTop = savedScroll; } catch (e) { /* noop */ }
+        }
     }
 }
 
@@ -1478,6 +1596,7 @@ function renderSeriesList() {
         const editBtns = isAdminMode ? `
             <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('series_${s.id}'); event.stopPropagation();">&#9998;</button>
             <button class="admin-reset-btn" title="Сброс имени" onclick="resetCustomName('series_${s.id}'); event.stopPropagation();">&#8635;</button>
+            <button class="admin-edit-btn" title="Обложка" onclick="openCoverEditModal('${escapeHtml(String(s.id))}'); event.stopPropagation();">&#128247;</button>
         ` : '';
         const customBadge = isAdminMode ? `<span class="custom-name-badge">серия</span>` : '';
 
@@ -3267,13 +3386,9 @@ function showScreen(name) {
 
     document.getElementById(`screen-${name}`).classList.add('active');
 
-    // Admin FAB visibility (Phase 4)
-    const adminFab = document.getElementById('admin-fab-container');
-    if (adminFab) {
-        adminFab.style.display = (name === 'reader' && isAdminMode) ? 'flex' : 'none';
-        // Close menu if switching screens
-        closeAdminMenu();
-    }
+    // Admin FAB + badge visibility (Phase 4) — delegated to helper
+    syncAdminFabVisibility();
+    syncAdminBadge();
 
     // Update bottom nav
     const navTabs = document.querySelectorAll('.nav-tab');
@@ -4048,22 +4163,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
 let editUrlChapterIdx = null;
 
+// Remember pristine button labels to restore after async operations.
+function captureOriginalLabel(btn) {
+    if (!btn) return;
+    if (!btn.dataset.originalLabel) {
+        btn.dataset.originalLabel = btn.textContent.trim();
+    }
+}
+function restoreOriginalLabel(btn) {
+    if (!btn) return;
+    btn.disabled = false;
+    if (btn.dataset.originalLabel) {
+        btn.textContent = btn.dataset.originalLabel;
+    }
+}
+
 function openEditUrlModal(chIdx) {
-    if (!currentChapters[chIdx]) return;
+    if (!currentChapters[chIdx]) {
+        showToast('Нет главы для редактирования');
+        return;
+    }
+    if (!hasAdminApi()) {
+        showToast('Редактирование доступно только при подключенном API.');
+        return;
+    }
     editUrlChapterIdx = chIdx;
     const ch = currentChapters[chIdx];
     const chapName = ch.custom_name || `Глава ${ch.chapter}`;
     document.getElementById('edit-url-chapter-name').textContent = chapName;
     const currentUrl = (ch.urls && ch.urls.length > 0) ? ch.urls.join('\n') : (ch.url || '');
     document.getElementById('edit-url-input').value = currentUrl;
+    // Reset button to pristine state in case a previous attempt errored out.
+    restoreOriginalLabel(document.getElementById('edit-url-save'));
     document.getElementById('edit-url-overlay').classList.remove('hidden');
     document.getElementById('edit-url-modal').classList.remove('hidden');
     setTimeout(() => document.getElementById('edit-url-input').focus(), 350);
 }
 
 function closeEditUrlModal() {
-    document.getElementById('edit-url-overlay').classList.add('hidden');
-    document.getElementById('edit-url-modal').classList.add('hidden');
+    const overlay = document.getElementById('edit-url-overlay');
+    const modal = document.getElementById('edit-url-modal');
+    if (overlay) overlay.classList.add('hidden');
+    if (modal) modal.classList.add('hidden');
+    restoreOriginalLabel(document.getElementById('edit-url-save'));
     editUrlChapterIdx = null;
 }
 
@@ -4073,8 +4215,11 @@ async function saveEditUrl() {
     const newUrl = document.getElementById('edit-url-input').value.trim();
 
     const saveBtn = document.getElementById('edit-url-save');
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Сохранение...';
+    captureOriginalLabel(saveBtn);
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Сохранение...';
+    }
 
     try {
         const resp = await apiFetch(API_URL + '/api/chapters', {
@@ -4089,20 +4234,23 @@ async function saveEditUrl() {
         });
         const result = await resp.json();
         if (result.ok) {
-            // Update local data
             const urlArr = newUrl.split('\n').map(u => u.trim()).filter(u => u.length > 0);
             ch.urls = urlArr;
             ch.url = urlArr[0] || '';
             closeEditUrlModal();
             showToast('✅ Ссылка обновлена!');
+            haptic('success');
+            // Re-render list silently to reflect updated link state.
+            if (document.getElementById('screen-chapters')?.classList.contains('active')) {
+                renderChaptersList();
+            }
         } else {
-            showToast('Ошибка: ' + (result.error || 'неизвестная'));
+            showToast('Ошибка: ' + (result.error || `HTTP ${resp.status}`));
         }
     } catch (e) {
         showToast('Ошибка сети: ' + e.message);
     } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = '💾 Сохранить';
+        restoreOriginalLabel(saveBtn);
     }
 }
 
@@ -4111,15 +4259,38 @@ async function saveEditUrl() {
 // ==========================================================================
 
 function openBulkModal() {
-    document.getElementById('bulk-upload-input').value = '';
+    if (!hasAdminApi()) {
+        showToast('Массовая загрузка доступна только при подключенном API.');
+        return;
+    }
+    if (!currentSeries || !currentVolume) {
+        showToast('Сначала выберите том.');
+        return;
+    }
+    const input = document.getElementById('bulk-upload-input');
+    if (input) input.value = '';
+    restoreOriginalLabel(document.getElementById('bulk-upload-save'));
     document.getElementById('bulk-upload-overlay').classList.remove('hidden');
     document.getElementById('bulk-upload-modal').classList.remove('hidden');
-    setTimeout(() => document.getElementById('bulk-upload-input').focus(), 350);
+    setTimeout(() => { if (input) input.focus(); }, 350);
 }
 
 function closeBulkModal() {
-    document.getElementById('bulk-upload-overlay').classList.add('hidden');
-    document.getElementById('bulk-upload-modal').classList.add('hidden');
+    const overlay = document.getElementById('bulk-upload-overlay');
+    const modal = document.getElementById('bulk-upload-modal');
+    if (overlay) overlay.classList.add('hidden');
+    if (modal) modal.classList.add('hidden');
+    restoreOriginalLabel(document.getElementById('bulk-upload-save'));
+}
+
+// Pick next chapter number, supporting decimals like "1.5".
+function computeNextChapterNumber(chapters) {
+    const nums = (chapters || [])
+        .map((c) => Number.parseFloat(c?.chapter))
+        .filter((n) => Number.isFinite(n));
+    if (nums.length === 0) return 1;
+    const max = Math.max(...nums);
+    return Math.max(1, Math.floor(max) + 1);
 }
 
 async function executeBulkUpload() {
@@ -4130,13 +4301,14 @@ async function executeBulkUpload() {
     const urls = raw.split('\n').map(u => u.trim()).filter(u => u.length > 0);
     if (urls.length === 0) return showToast('Нет валидных ссылок');
 
-    const lastChNum = currentChapters.length > 0
-        ? Math.max(...currentChapters.map(c => parseInt(c.chapter) || 0))
-        : 0;
+    const nextChNum = computeNextChapterNumber(currentChapters);
 
     const saveBtn = document.getElementById('bulk-upload-save');
-    saveBtn.disabled = true;
-    saveBtn.textContent = `Добавление ${urls.length} глав...`;
+    captureOriginalLabel(saveBtn);
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = `Добавление ${urls.length} глав...`;
+    }
 
     try {
         const resp = await apiFetch(API_URL + '/api/chapters/bulk', {
@@ -4145,7 +4317,7 @@ async function executeBulkUpload() {
             body: JSON.stringify({
                 series_id: currentSeries.id,
                 volume: currentVolume.volume,
-                start_chapter: lastChNum + 1,
+                start_chapter: nextChNum,
                 urls: urls
             })
         });
@@ -4153,15 +4325,223 @@ async function executeBulkUpload() {
         if (result.ok) {
             closeBulkModal();
             showToast(`✅ Добавлено ${result.added} глав!`);
-            await loadData(); // Reload
+            haptic('success');
+            refreshReaderDataInBackground();
         } else {
-            showToast('Ошибка: ' + (result.error || 'неизвестная'));
+            showToast('Ошибка: ' + (result.error || `HTTP ${resp.status}`));
         }
     } catch (e) {
         showToast('Ошибка сети: ' + e.message);
     } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = '📤 Добавить';
+        restoreOriginalLabel(saveBtn);
+    }
+}
+
+// ==========================================================================
+// ADD / DELETE / COVER MODALS (Admin, Iteration D)
+// ==========================================================================
+
+function openAddChapterModal(forIdx) {
+    if (!hasAdminApi()) {
+        showToast('Добавление доступно только при подключенном API.');
+        return;
+    }
+    if (!currentSeries || !currentVolume) {
+        showToast('Сначала выберите том.');
+        return;
+    }
+    closeAdminMenu();
+    const overlay = document.getElementById('add-chapter-overlay');
+    const modal = document.getElementById('add-chapter-modal');
+    const chapInput = document.getElementById('add-chapter-number');
+    const nameInput = document.getElementById('add-chapter-name');
+    const urlInput = document.getElementById('add-chapter-url');
+    if (!overlay || !modal) return;
+    if (chapInput) chapInput.value = String(computeNextChapterNumber(currentChapters));
+    if (nameInput) nameInput.value = '';
+    if (urlInput) urlInput.value = '';
+    restoreOriginalLabel(document.getElementById('add-chapter-save'));
+    overlay.classList.remove('hidden');
+    modal.classList.remove('hidden');
+    setTimeout(() => { if (urlInput) urlInput.focus(); }, 350);
+}
+
+function closeAddChapterModal() {
+    const overlay = document.getElementById('add-chapter-overlay');
+    const modal = document.getElementById('add-chapter-modal');
+    if (overlay) overlay.classList.add('hidden');
+    if (modal) modal.classList.add('hidden');
+    restoreOriginalLabel(document.getElementById('add-chapter-save'));
+}
+
+async function saveAddChapter() {
+    if (!API_URL || !currentSeries || !currentVolume) return;
+    const chapInput = document.getElementById('add-chapter-number');
+    const nameInput = document.getElementById('add-chapter-name');
+    const urlInput = document.getElementById('add-chapter-url');
+    const chapter = (chapInput?.value || '').trim();
+    const name = (nameInput?.value || '').trim();
+    const url = (urlInput?.value || '').trim();
+    if (!chapter) return showToast('Укажите номер главы');
+    if (!url) return showToast('Укажите ссылку');
+
+    const saveBtn = document.getElementById('add-chapter-save');
+    captureOriginalLabel(saveBtn);
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Добавление...'; }
+
+    try {
+        const resp = await apiFetch(API_URL + '/api/chapters', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                series_id: currentSeries.id,
+                volume: currentVolume.volume,
+                chapter: chapter,
+                name: name,
+                url: url
+            })
+        });
+        const result = await resp.json();
+        if (result.ok) {
+            closeAddChapterModal();
+            showToast('✅ Глава добавлена!');
+            haptic('success');
+            refreshReaderDataInBackground();
+        } else {
+            showToast('Ошибка: ' + (result.error || `HTTP ${resp.status}`));
+        }
+    } catch (e) {
+        showToast('Ошибка сети: ' + e.message);
+    } finally {
+        restoreOriginalLabel(saveBtn);
+    }
+}
+
+async function deleteChapterCurrent() {
+    if (!API_URL || !currentSeries || !currentVolume) return;
+    const ch = currentChapters[currentChapterIdx];
+    if (!ch) return showToast('Нет текущей главы');
+    closeAdminMenu();
+    const chapName = ch.custom_name || `Глава ${ch.chapter}`;
+    const confirmed = await adminConfirm(`Удалить "${chapName}"? Это необратимо.`);
+    if (!confirmed) return;
+
+    try {
+        const resp = await apiFetch(API_URL + '/api/chapters', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                series_id: currentSeries.id,
+                volume: currentVolume.volume,
+                chapter: ch.chapter
+            })
+        });
+        const result = await resp.json();
+        if (result.ok) {
+            showToast('✅ Глава удалена.');
+            haptic('success');
+            // Locally drop it from the list and navigate back one chapter if possible.
+            currentChapters.splice(currentChapterIdx, 1);
+            if (currentChapterIdx >= currentChapters.length) {
+                currentChapterIdx = Math.max(0, currentChapters.length - 1);
+            }
+            refreshReaderDataInBackground();
+            // Return to chapters screen so the user sees the new list.
+            showScreen('chapters');
+            renderChaptersList();
+        } else {
+            showToast('Ошибка: ' + (result.error || `HTTP ${resp.status}`));
+        }
+    } catch (e) {
+        showToast('Ошибка сети: ' + e.message);
+    }
+}
+
+function openCoverEditModal(seriesId) {
+    if (!hasAdminApi()) {
+        showToast('Редактирование обложки доступно только при подключенном API.');
+        return;
+    }
+    const series = findSeriesById(seriesId);
+    if (!series) return;
+    const overlay = document.getElementById('cover-edit-overlay');
+    const modal = document.getElementById('cover-edit-modal');
+    const input = document.getElementById('cover-edit-input');
+    const preview = document.getElementById('cover-edit-preview');
+    const title = document.getElementById('cover-edit-series-name');
+    if (!overlay || !modal || !input) return;
+    input.dataset.seriesId = String(series.id);
+    input.value = series.cover_url || '';
+    if (title) title.textContent = series.title || '';
+    if (preview) {
+        preview.src = series.cover_url || '';
+        preview.style.display = series.cover_url ? 'block' : 'none';
+    }
+    restoreOriginalLabel(document.getElementById('cover-edit-save'));
+    overlay.classList.remove('hidden');
+    modal.classList.remove('hidden');
+    setTimeout(() => input.focus(), 350);
+}
+
+function closeCoverEditModal() {
+    const overlay = document.getElementById('cover-edit-overlay');
+    const modal = document.getElementById('cover-edit-modal');
+    if (overlay) overlay.classList.add('hidden');
+    if (modal) modal.classList.add('hidden');
+    restoreOriginalLabel(document.getElementById('cover-edit-save'));
+}
+
+function updateCoverPreview() {
+    const input = document.getElementById('cover-edit-input');
+    const preview = document.getElementById('cover-edit-preview');
+    if (!input || !preview) return;
+    const url = (input.value || '').trim();
+    if (url) {
+        preview.src = url;
+        preview.style.display = 'block';
+    } else {
+        preview.removeAttribute('src');
+        preview.style.display = 'none';
+    }
+}
+
+async function saveCoverEdit() {
+    if (!API_URL) return;
+    const input = document.getElementById('cover-edit-input');
+    if (!input) return;
+    const seriesId = input.dataset.seriesId;
+    const coverUrl = (input.value || '').trim();
+    if (!seriesId) return;
+
+    const saveBtn = document.getElementById('cover-edit-save');
+    captureOriginalLabel(saveBtn);
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Сохранение...'; }
+
+    try {
+        const resp = await apiFetch(API_URL + '/api/series', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ series_id: seriesId, cover_url: coverUrl })
+        });
+        const result = await resp.json();
+        if (result.ok) {
+            // Patch local data so the card updates without a full reload.
+            const series = findSeriesById(seriesId);
+            if (series) series.cover_url = coverUrl;
+            closeCoverEditModal();
+            showToast('✅ Обложка обновлена!');
+            haptic('success');
+            if (document.getElementById('screen-series')?.classList.contains('active')) {
+                renderSeriesList();
+            }
+            refreshReaderDataInBackground();
+        } else {
+            showToast('Ошибка: ' + (result.error || `HTTP ${resp.status}`));
+        }
+    } catch (e) {
+        showToast('Ошибка сети: ' + e.message);
+    } finally {
+        restoreOriginalLabel(saveBtn);
     }
 }
 
@@ -4809,11 +5189,46 @@ function closeAdminMenu() {
 function renameChapterCurrent() {
     closeAdminMenu();
     const ch = currentChapters[currentChapterIdx];
-    if (!ch || !currentSeries || !currentVolume) return;
-    
+    if (!ch || !currentSeries || !currentVolume) {
+        showToast('Нет текущей главы для переименования');
+        return;
+    }
+
     // Use the existing core rename logic
     renameItem(`chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}`);
 }
+
+function resetCurrentChapterName() {
+    closeAdminMenu();
+    const ch = currentChapters[currentChapterIdx];
+    if (!ch || !currentSeries || !currentVolume) {
+        showToast('Нет текущей главы');
+        return;
+    }
+    if (!ch.custom_name) {
+        showToast('У главы нет кастомного имени');
+        return;
+    }
+    resetCustomName(`chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}`);
+}
+
+function openCoverEditForCurrent() {
+    closeAdminMenu();
+    if (!currentSeries) {
+        showToast('Сначала выберите серию');
+        return;
+    }
+    openCoverEditModal(currentSeries.id);
+}
+
+function openAddChapterForCurrent() {
+    openAddChapterModal();
+}
+
+// Close admin menu when virtual keyboard opens to avoid overlap issues.
+document.addEventListener('focusin', (e) => {
+    if (_isReaderEditableElement(e.target)) closeAdminMenu();
+});
 
 // === Gestures: Swipe Back & Pull to Next ===
 let touchStartX = 0;

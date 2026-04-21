@@ -4566,6 +4566,9 @@ RATE_LIMIT_RULES = {
     "admin_rename_delete": {"limit": 30, "window": 60},
     "admin_chapter_edit": {"limit": 30, "window": 60},
     "admin_chapter_bulk": {"limit": 12, "window": 60},
+    "admin_chapter_add": {"limit": 30, "window": 60},
+    "admin_chapter_delete": {"limit": 20, "window": 60},
+    "admin_series_update": {"limit": 20, "window": 60},
     "admin_sort": {"limit": 20, "window": 60},
     "admin_rename_request": {"limit": 40, "window": 60},
 }
@@ -5445,6 +5448,295 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 
+async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """POST: Добавить одну главу. Только для админов."""
+    user_id = ""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_chapter_add", user_id=user_id)
+        if limited:
+            return limited
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = str(data.get('series_id', '')).strip()
+        volume = data.get('volume')
+        chapter = str(data.get('chapter', '')).strip()
+        name = str(data.get('name', '') or '').strip()
+        url_raw = str(data.get('url', '') or '').strip()
+
+        if not series_id or not chapter or not url_raw:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_chapter_token(chapter):
+            return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
+        if len(url_raw) > MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "payload too large"}, status=400, headers=CORS_HEADERS)
+        if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
+            return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
+
+        info = _get_table_info(series_id, volume)
+        if not info:
+            return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
+
+        links = _clean_urls(url_raw)
+        if not links:
+            return aiohttp.web.json_response({"error": "invalid or unsupported URL"}, status=400, headers=CORS_HEADERS)
+        if len(links) > MAX_BULK_URLS_PER_REQUEST:
+            return aiohttp.web.json_response({"error": "too many urls"}, status=400, headers=CORS_HEADERS)
+        new_url = " ".join(links)
+
+        table, _, _, _ = info
+
+        async with aiosqlite.connect('manga.db') as db:
+            # Reject if chapter already exists so callers know to use PUT /api/chapters.
+            if series_id in ('akashic_records', 'british_belle'):
+                async with db.execute(
+                    f"SELECT 1 FROM {table} WHERE volume=? AND chapter=?",
+                    (volume, chapter)
+                ) as cur:
+                    exists_row = await cur.fetchone()
+                if exists_row:
+                    return aiohttp.web.json_response({"error": "chapter already exists"}, status=409, headers=CORS_HEADERS)
+
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE volume=?", (volume,)) as cur:
+                    row = await cur.fetchone()
+                    next_order = (row[0] or 0) + 1
+                await db.execute(
+                    f'INSERT INTO {table} (volume, chapter, url, sort_order) VALUES (?, ?, ?, ?)',
+                    (volume, chapter, new_url, next_order)
+                )
+            else:
+                lang = series_id.split('_', 1)[1] if '_' in series_id else 'ru'
+                async with db.execute(
+                    f"SELECT 1 FROM {table} WHERE chapter_number=? AND lang=?",
+                    (chapter, lang)
+                ) as cur:
+                    exists_row = await cur.fetchone()
+                if exists_row:
+                    return aiohttp.web.json_response({"error": "chapter already exists"}, status=409, headers=CORS_HEADERS)
+
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=?", (lang,)) as cur:
+                    row = await cur.fetchone()
+                    next_order = (row[0] or 0) + 1
+                await db.execute(
+                    f'INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?)',
+                    (chapter, lang, new_url, next_order)
+                )
+
+            # Сохраняем кастомное имя главы, если указано.
+            if name:
+                vol_token = volume if series_id in ('akashic_records', 'british_belle') else 1
+                name_clean = name[:MAX_RENAME_OBJECT_ID_LENGTH]
+                await db.execute(
+                    'INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)',
+                    (f"chap_{series_id}_{vol_token}_{chapter}", name_clean)
+                )
+            await db.commit()
+        invalidate_reader_cache("chapter_added")
+
+        result_data, _, _ = await get_cached_reader_data(force_refresh=True)
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"add chapter {chapter} via webapp"))
+        await _audit_admin_action(
+            action="chapter_add",
+            actor_user_id=user_id,
+            target=f"{series_id}:{chapter}",
+            payload={"series_id": series_id, "volume": volume, "chapter": chapter, "url_count": len(links)},
+            result="ok",
+        )
+
+        return aiohttp.web.json_response({"ok": True, "chapter": chapter}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Chapter Add API Error: {e}")
+        await _audit_admin_action(
+            action="chapter_add",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """DELETE: Удалить главу. Только для админов."""
+    user_id = ""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_chapter_delete", user_id=user_id)
+        if limited:
+            return limited
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = str(data.get('series_id', '')).strip()
+        volume = data.get('volume')
+        chapter = str(data.get('chapter', '')).strip()
+
+        if not series_id or not chapter:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_chapter_token(chapter):
+            return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
+        if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
+            return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
+
+        info = _get_table_info(series_id, volume)
+        if not info:
+            return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
+
+        table, _, _, _ = info
+        deleted = 0
+
+        async with aiosqlite.connect('manga.db') as db:
+            if series_id in ('akashic_records', 'british_belle'):
+                cursor = await db.execute(
+                    f"DELETE FROM {table} WHERE volume=? AND chapter=?",
+                    (volume, chapter)
+                )
+                deleted = cursor.rowcount or 0
+                await cursor.close()
+                vol_token = volume
+            else:
+                lang = series_id.split('_', 1)[1] if '_' in series_id else 'ru'
+                cursor = await db.execute(
+                    f"DELETE FROM {table} WHERE chapter_number=? AND lang=?",
+                    (chapter, lang)
+                )
+                deleted = cursor.rowcount or 0
+                await cursor.close()
+                vol_token = 1
+
+            if deleted == 0:
+                await db.rollback()
+                return aiohttp.web.json_response({"error": "chapter not found"}, status=404, headers=CORS_HEADERS)
+
+            # Убираем связанное кастомное имя главы, если было.
+            await db.execute(
+                'DELETE FROM custom_names WHERE id = ?',
+                (f"chap_{series_id}_{vol_token}_{chapter}",)
+            )
+            await db.commit()
+        invalidate_reader_cache("chapter_deleted")
+
+        result_data, _, _ = await get_cached_reader_data(force_refresh=True)
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"delete chapter {chapter} via webapp"))
+        await _audit_admin_action(
+            action="chapter_delete",
+            actor_user_id=user_id,
+            target=f"{series_id}:{chapter}",
+            payload={"series_id": series_id, "volume": volume, "chapter": chapter},
+            result="ok",
+        )
+
+        return aiohttp.web.json_response({"ok": True, "deleted": deleted}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Chapter Delete API Error: {e}")
+        await _audit_admin_action(
+            action="chapter_delete",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """PUT: Обновить мета-данные серии (пока — только обложка). Только для админов."""
+    user_id = ""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_series_update", user_id=user_id)
+        if limited:
+            return limited
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = str(data.get('series_id', '')).strip()
+        cover_url_raw = str(data.get('cover_url', '') or '').strip()
+
+        if not series_id:
+            return aiohttp.web.json_response({"error": "missing series_id"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+
+        cover_url_clean: str | None = None
+        if cover_url_raw:
+            cover_url_clean = _normalize_external_url(cover_url_raw)
+            if not cover_url_clean:
+                return aiohttp.web.json_response({"error": "invalid cover_url"}, status=400, headers=CORS_HEADERS)
+
+        cover_key = f"cover_{series_id}"
+        async with aiosqlite.connect('manga.db') as db:
+            if cover_url_clean is None:
+                await db.execute('DELETE FROM custom_names WHERE id = ?', (cover_key,))
+            else:
+                await db.execute(
+                    'INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)',
+                    (cover_key, cover_url_clean)
+                )
+            await db.commit()
+        invalidate_reader_cache("series_cover_updated")
+
+        result_data, _, _ = await get_cached_reader_data(force_refresh=True)
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"update cover for {series_id} via webapp"))
+        await _audit_admin_action(
+            action="series_update",
+            actor_user_id=user_id,
+            target=series_id,
+            payload={"series_id": series_id, "has_cover": bool(cover_url_clean)},
+            result="ok",
+        )
+
+        return aiohttp.web.json_response({"ok": True, "cover_url": cover_url_clean or ""}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Series Update API Error: {e}")
+        await _audit_admin_action(
+            action="series_update",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+
 async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Response:
     origin = request.headers.get("Origin", "").strip()
     if origin and not _resolve_allowed_origin(request):
@@ -6141,10 +6433,15 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_options("/api/ai_chat", handle_cors_preflight)
 
     app.router.add_route("PUT", "/api/chapters", handle_chapter_edit)
+    app.router.add_route("POST", "/api/chapters", handle_chapter_add)
+    app.router.add_route("DELETE", "/api/chapters", handle_chapter_delete)
     app.router.add_options("/api/chapters", handle_cors_preflight)
 
     app.router.add_post("/api/chapters/bulk", handle_chapter_bulk)
     app.router.add_options("/api/chapters/bulk", handle_cors_preflight)
+
+    app.router.add_route("PUT", "/api/series", handle_series_update)
+    app.router.add_options("/api/series", handle_cors_preflight)
 
     try:
         app.router.add_static('/webapp', 'webapp', show_index=True)

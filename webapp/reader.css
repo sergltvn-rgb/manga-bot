@@ -193,6 +193,13 @@ body.theme-gray {
     background: var(--text-secondary);
 }
 
+html {
+    /* Screens are position:absolute with translateX(100%) which would otherwise
+       create huge horizontal overflow. Clip at the viewport to stop the
+       browser from scrolling the document when something requests scrollIntoView. */
+    overflow: hidden;
+}
+
 body {
     font-family: Inter, -apple-system, sans-serif;
     background: var(--bg);
@@ -200,6 +207,9 @@ body {
     height: 100vh;
     height: 100dvh;
     overflow: hidden;
+    /* Make body the containing block for position:absolute .screen elements so
+       their translated copies don't add horizontal scroll to the viewport. */
+    position: relative;
     transition: background 0.3s, color 0.3s;
 }
 
@@ -1389,6 +1399,59 @@ input:checked + .slider:before { transform: translateX(20px); }
 }
 .admin-bulk-btn:active { transform: scale(0.97); }
 
+/* === Admin mode badge (in reader header) === */
+.admin-mode-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(245, 158, 11, 0.18);
+    color: #f59e0b;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    align-self: center;
+}
+
+#screen-chapters.admin-enabled::before {
+    content: 'РЕЖИМ РЕДАКТОРА';
+    display: block;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.12);
+    border-bottom: 1px solid rgba(245, 158, 11, 0.25);
+    padding: 4px 0;
+}
+
+/* === Add Chapter / Cover Edit fields === */
+.add-chapter-field {
+    display: block;
+    margin-top: 10px;
+}
+.add-chapter-field > span {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--text-sec);
+}
+
+.cover-edit-preview {
+    display: block;
+    max-width: 100%;
+    max-height: 220px;
+    margin: 12px auto 0;
+    border-radius: 8px;
+    object-fit: contain;
+    background: var(--card-bg);
+}
+
 /* ==========================================================================
    БИБЛИОТЕКА И СТАТИСТИКА
    ========================================================================== */
@@ -1510,6 +1573,19 @@ input:checked + .slider:before { transform: translateX(20px); }
     .library-filter-btn,
     .continue-badge {
         animation: none !important;
+        transition: none !important;
+    }
+
+    /* Instant screen transitions so automated tests don't race the animation. */
+    .screen,
+    .reader-header,
+    .reader-bottom-bar,
+    .reader-top-bar,
+    .fab-container,
+    .admin-fab-container,
+    .edit-url-modal,
+    .bulk-upload-modal,
+    .modal-overlay {
         transition: none !important;
     }
 }
@@ -3679,6 +3755,13 @@ body.keyboard-open .autoscroll-fab {
     transform: translateY(140%);
     opacity: 0;
     pointer-events: none;
+}
+
+/* Keep the admin menu hidden while the virtual keyboard is open. */
+body.keyboard-open #screen-reader .admin-menu {
+    opacity: 0 !important;
+    transform: scale(0.8) translateY(20px) !important;
+    pointer-events: none !important;
 }
 
 @media (max-width: 560px) {

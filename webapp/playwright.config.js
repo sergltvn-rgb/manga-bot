@@ -12,6 +12,9 @@ module.exports = defineConfig({
     headless: true,
     viewport: { width: 1366, height: 900 },
     serviceWorkers: "block",
+    // Reduced motion disables CSS transitions/animations in the reader so that
+    // Playwright's stability / pointer-events checks are deterministic.
+    reducedMotion: "reduce",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
