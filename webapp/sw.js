@@ -1,8 +1,7 @@
-// Cache reset worker:
-// - force-activate
-// - delete all old caches
-// - unregister itself
-// This is needed to recover users stuck with stale Telegram WebView cache.
+// Safe service worker:
+// - activates immediately
+// - clears stale caches once
+// - does NOT force navigation or unregister (avoids reload loops in Telegram WebView)
 
 self.addEventListener('install', () => {
     self.skipWaiting();
@@ -13,17 +12,15 @@ self.addEventListener('activate', (event) => {
         const keys = await caches.keys();
         await Promise.all(keys.map((key) => caches.delete(key)));
         await self.clients.claim();
-        await self.registration.unregister();
-
-        const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-        for (const client of clients) {
-            try {
-                await client.navigate(client.url);
-            } catch (_) {}
-        }
     })());
 });
 
-self.addEventListener('fetch', () => {
-    // No-op: let network handle requests after unregister.
+self.addEventListener('fetch', (event) => {
+    if (event.request.method !== 'GET') return;
+    if (event.request.url.includes('/api/')) return;
+
+    // Network-first strategy with optional cache fallback if network is unavailable.
+    event.respondWith(
+        fetch(event.request).catch(() => caches.match(event.request))
+    );
 });
