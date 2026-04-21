@@ -1840,8 +1840,8 @@ function renderChaptersList() {
             ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
         ` : '';
         const moveBtns = isAdminMode ? `
-            <button type="button" class="admin-move-btn" title="Переместить вверх" data-move-chapter="up" data-chapter-idx="${idx}" ${idx === 0 ? 'disabled' : ''} onclick="window.__MOVE_CHAPTER_CLICKED=true; alert('Клик ▲ глава ' + (${idx}+1)); event.stopPropagation(); event.preventDefault(); moveChapter(${idx}, -1);">&#9650;</button>
-            <button type="button" class="admin-move-btn" title="Переместить вниз" data-move-chapter="down" data-chapter-idx="${idx}" ${idx === currentChapters.length - 1 ? 'disabled' : ''} onclick="window.__MOVE_CHAPTER_CLICKED=true; alert('Клик ▼ глава ' + (${idx}+1)); event.stopPropagation(); event.preventDefault(); moveChapter(${idx}, 1);">&#9660;</button>
+            <button type="button" class="admin-move-btn" title="Переместить вверх" data-move-chapter="up" data-chapter-idx="${idx}" ${idx === 0 ? 'disabled' : ''} onclick="event.stopPropagation(); event.preventDefault(); window.__MOVE_CHAPTER_CLICKED=true; moveChapter(${idx}, -1);">&#9650;</button>
+            <button type="button" class="admin-move-btn" title="Переместить вниз" data-move-chapter="down" data-chapter-idx="${idx}" ${idx === currentChapters.length - 1 ? 'disabled' : ''} onclick="event.stopPropagation(); event.preventDefault(); window.__MOVE_CHAPTER_CLICKED=true; moveChapter(${idx}, 1);">&#9660;</button>
         ` : '';
         const customBadge = (isAdminMode && hasCustom) ? '<span class="custom-name-badge">кастом</span>' : '';
         const isCurrent = lastChapter && sameReaderKey(ch.chapter, lastChapter);
@@ -4960,10 +4960,30 @@ async function reorderChapters(fromIdx, toIdx) {
 }
 
 function moveChapter(fromIdx, direction) {
-    if (!Array.isArray(currentChapters) || !Number.isInteger(fromIdx)) return;
-    const toIdx = fromIdx + (direction > 0 ? 1 : -1);
-    if (toIdx < 0 || toIdx >= currentChapters.length) return;
-    reorderChapters(fromIdx, toIdx);
+    try {
+        showToast(`moveChapter(${fromIdx}, ${direction}) len=${Array.isArray(currentChapters) ? currentChapters.length : 'NaN'}`);
+        if (!Array.isArray(currentChapters)) {
+            showToast('Нет currentChapters (пустой список)');
+            return;
+        }
+        if (!Number.isInteger(fromIdx)) {
+            showToast(`Плохой fromIdx: ${fromIdx}`);
+            return;
+        }
+        const toIdx = fromIdx + (direction > 0 ? 1 : -1);
+        if (toIdx < 0) {
+            showToast('Уже первая глава — вверх нельзя');
+            return;
+        }
+        if (toIdx >= currentChapters.length) {
+            showToast('Уже последняя глава — вниз нельзя');
+            return;
+        }
+        reorderChapters(fromIdx, toIdx);
+    } catch (e) {
+        console.error('moveChapter error', e);
+        showToast('Ошибка moveChapter: ' + (e && e.message ? e.message : e));
+    }
 }
 
 // ==========================================================================
