@@ -48,6 +48,9 @@ let _readerTapToScrollSuppressUntil = 0;
 let _readerKeyboardUiInitialized = false;
 let _networkStatusHideTimer = null;
 let _networkStatusBound = false;
+let _chapterLoadingHintTimer = null;
+let _nextChapterPrefetchTimer = null;
+let _chapterWarmupTimer = null;
 
 function suppressReaderTapToScroll(ms = 700) {
     const until = Date.now() + Number(ms || 0);
@@ -132,17 +135,68 @@ function bindReaderKeyboardAwareUI() {
     }
 }
 
+function isCurrentUserAdmin() {
+    return !!userId && adminIds.includes(String(userId));
+}
+
+function syncAdminModeControls() {
+    const canUseAdminMode = isCurrentUserAdmin();
+    const toggle = document.getElementById('admin-mode-toggle');
+    const hint = document.getElementById('admin-mode-hint');
+    const settingRow = document.getElementById('admin-mode-setting');
+    const chaptersScreen = document.getElementById('screen-chapters');
+
+    if (!canUseAdminMode && isAdminMode) {
+        isAdminMode = false;
+    }
+
+    if (toggle) {
+        toggle.disabled = !canUseAdminMode;
+        toggle.checked = canUseAdminMode && !!isAdminMode;
+    }
+    if (hint) {
+        hint.textContent = canUseAdminMode
+            ? 'Только для администраторов'
+            : 'Недоступно для этого аккаунта';
+    }
+    if (settingRow) {
+        settingRow.classList.toggle('setting-disabled', !canUseAdminMode);
+    }
+    if (chaptersScreen) {
+        chaptersScreen.classList.toggle('admin-enabled', canUseAdminMode && isAdminMode);
+    }
+}
+
 function toggleAdminMode(enabled) {
-    isAdminMode = enabled;
+    if (!isCurrentUserAdmin()) {
+        isAdminMode = false;
+        syncAdminModeControls();
+        if (enabled) {
+            showToast('Режим редактора доступен только администраторам.');
+        }
+        return;
+    }
+
+    isAdminMode = !!enabled;
     if (document.getElementById('screen-series').classList.contains('active')) renderSeriesList();
-    if (isAdminMode) {
-        document.getElementById('screen-chapters').classList.add('admin-enabled');
+    const chaptersScreen = document.getElementById('screen-chapters');
+    if (chaptersScreen) {
+        chaptersScreen.classList.toggle('admin-enabled', isAdminMode);
+    }
+    if (!isAdminMode) {
+        closeEditUrlModal();
+        closeBulkModal();
+        const fabMenu = document.getElementById('fab-menu');
+        const fabBtn = document.getElementById('fab-btn');
+        if (fabMenu) fabMenu.classList.add('hidden');
+        if (fabBtn) fabBtn.classList.remove('active');
     }
     renderContinueReading();
     if (document.getElementById('screen-chapters').classList.contains('active')) {
         renderVolumeTabs();
         renderChaptersList();
     }
+    syncAdminModeControls();
 }
 
 async function renameItem(objId) {
@@ -192,6 +246,13 @@ async function resetCustomName(objId) {
 function getUserRole(userIdStr) {
     if (adminIds.includes(userIdStr)) return { text: 'Админ', css: 'badge-admin' };
     return null;
+}
+
+function clearChapterLoadingHint() {
+    if (_chapterLoadingHintTimer) {
+        clearTimeout(_chapterLoadingHintTimer);
+        _chapterLoadingHintTimer = null;
+    }
 }
 
 // SQLite возвращает время в UTC "YYYY-MM-DD HH:MM:SS". Превращаем его в валидный ISO 8601 UTC.
@@ -333,6 +394,10 @@ function resetCurrentSeriesSelection() {
     currentChapters = [];
     currentChapterIdx = 0;
     prefetchedChapter = { idx: -1, html: null };
+    if (_chapterWarmupTimer) {
+        clearTimeout(_chapterWarmupTimer);
+        _chapterWarmupTimer = null;
+    }
 
     const chaptersList = document.getElementById('chapters-list');
     if (chaptersList) {
@@ -519,6 +584,103 @@ function getChapterSourceUrls(chapter) {
     return urls
         .map((u) => String(u || '').trim())
         .filter((u) => /^https?:\/\//i.test(u));
+}
+
+const CHAPTER_PAYLOAD_CACHE_LIMIT = 16;
+const chapterPayloadCache = new Map();
+const chapterPayloadInflight = new Map();
+
+function buildChapterPayloadCacheKey(seriesId, volume, chapterId) {
+    if (seriesId === undefined || volume === undefined || chapterId === undefined) return '';
+    return `${String(seriesId)}::${String(volume)}::${String(chapterId)}`;
+}
+
+function getCachedChapterPayload(cacheKey) {
+    if (!cacheKey || !chapterPayloadCache.has(cacheKey)) return null;
+    const payload = chapterPayloadCache.get(cacheKey);
+    chapterPayloadCache.delete(cacheKey);
+    chapterPayloadCache.set(cacheKey, payload);
+    return payload;
+}
+
+function rememberCachedChapterPayload(cacheKey, payload) {
+    if (!cacheKey || !payload || typeof payload !== 'object') return;
+    if (chapterPayloadCache.has(cacheKey)) {
+        chapterPayloadCache.delete(cacheKey);
+    }
+    chapterPayloadCache.set(cacheKey, payload);
+    while (chapterPayloadCache.size > CHAPTER_PAYLOAD_CACHE_LIMIT) {
+        const firstKey = chapterPayloadCache.keys().next().value;
+        if (!firstKey) break;
+        chapterPayloadCache.delete(firstKey);
+    }
+}
+
+function buildChapterContentApiUrlFor(seriesId, volume, chapterId) {
+    if (!API_URL || seriesId === undefined || volume === undefined || chapterId === undefined || chapterId === null || chapterId === '') return '';
+    const query = new URLSearchParams({
+        series_id: String(seriesId),
+        volume: String(volume),
+        chapter: String(chapterId)
+    });
+    return `${API_URL}/api/chapter-content?${query.toString()}`;
+}
+
+async function warmChapterPayloadByIndex(idx, options = {}) {
+    const preferPrefetchSlot = !!options.preferPrefetchSlot;
+    if (!API_URL || !currentSeries || !currentVolume || !Array.isArray(currentChapters)) return null;
+
+    const chapter = currentChapters[idx];
+    if (!chapter || chapter.chapter === undefined || chapter.chapter === null || chapter.chapter === '') return null;
+
+    const cacheKey = buildChapterPayloadCacheKey(currentSeries.id, currentVolume.volume, chapter.chapter);
+    if (!cacheKey) return null;
+
+    const cached = getCachedChapterPayload(cacheKey);
+    if (cached) {
+        if (preferPrefetchSlot && cached.ok && cached.html) {
+            prefetchedChapter = { idx, html: cached.html };
+        }
+        return cached;
+    }
+
+    const inflight = chapterPayloadInflight.get(cacheKey);
+    if (inflight) {
+        return inflight;
+    }
+
+    const endpoint = buildChapterContentApiUrlFor(currentSeries.id, currentVolume.volume, chapter.chapter);
+    if (!endpoint) return null;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const request = apiFetch(endpoint, { signal: controller.signal })
+        .then(async (resp) => {
+            if (!resp.ok) {
+                throw new Error(`HTTP ${resp.status}`);
+            }
+            const payload = await resp.json();
+            if (payload && typeof payload === 'object') {
+                rememberCachedChapterPayload(cacheKey, payload);
+                if (preferPrefetchSlot && payload.ok && payload.html) {
+                    prefetchedChapter = { idx, html: payload.html };
+                }
+            }
+            return payload;
+        })
+        .catch((err) => {
+            if (err?.name !== 'AbortError') {
+                console.warn('Background chapter warmup failed:', err);
+            }
+            return null;
+        })
+        .finally(() => {
+            clearTimeout(timeoutId);
+            chapterPayloadInflight.delete(cacheKey);
+        });
+
+    chapterPayloadInflight.set(cacheKey, request);
+    return request;
 }
 
 function toServiceWorkerCacheUrl(rawUrl) {
@@ -1167,9 +1329,8 @@ async function loadData() {
 
             if (apiData) {
                 allData = apiData;
-                if (allData.admin_ids) {
-                    adminIds = allData.admin_ids.map(id => String(id));
-                }
+                adminIds = Array.isArray(allData.admin_ids) ? allData.admin_ids.map(id => String(id)) : [];
+                syncAdminModeControls();
                 if (allData.series && allData.series.length > 0) {
                     validateCriticalSeriesMappings();
                     renderSeriesList();
@@ -1193,6 +1354,8 @@ async function loadData() {
         const resp = await fetch('chapters_data.json?v=' + encodeURIComponent(READER_REV), { signal: getTimeoutSignal(5000) });
         if (resp.ok) {
             allData = await resp.json();
+            adminIds = Array.isArray(allData.admin_ids) ? allData.admin_ids.map(id => String(id)) : [];
+            syncAdminModeControls();
             console.log("Data loaded from fallback JSON, series count:", allData.series?.length);
             if (allData.series && allData.series.length > 0) {
                 validateCriticalSeriesMappings();
@@ -1538,6 +1701,8 @@ function renderChaptersList() {
     if (isAdminMode) {
         initChapterDnD();
     }
+
+    scheduleCurrentVolumeWarmup();
 }
 
 // ==========================================================================
@@ -1702,13 +1867,8 @@ function assertReaderState(context = 'unknown') {
 }
 
 function buildChapterContentApiUrl(chapter) {
-    if (!API_URL || !currentSeries || !currentVolume || !chapter?.chapter) return '';
-    const query = new URLSearchParams({
-        series_id: String(currentSeries.id),
-        volume: String(currentVolume.volume),
-        chapter: String(chapter.chapter)
-    });
-    return `${API_URL}/api/chapter-content?${query.toString()}`;
+    if (!currentSeries || !currentVolume || !chapter?.chapter) return '';
+    return buildChapterContentApiUrlFor(currentSeries.id, currentVolume.volume, chapter.chapter);
 }
 
 function buildChapterFallbackPayload(chapter, overrides = {}) {
@@ -1725,6 +1885,7 @@ function buildChapterFallbackPayload(chapter, overrides = {}) {
 function renderUnavailableChapterState(container, chapter, telemetryContext = null, payload = {}) {
     const resolved = buildChapterFallbackPayload(chapter, payload);
     const contentArea = document.getElementById('reader-content');
+    clearChapterLoadingHint();
     if (contentArea) contentArea.classList.remove('loading');
 
     const hasFallbackUrl = !!resolved.fallback_url;
@@ -1762,8 +1923,55 @@ function loadChapterContentFromServer(chapter, telemetryContext = null) {
     if (!container) return;
 
     const endpoint = buildChapterContentApiUrl(chapter);
+    const cacheKey = buildChapterPayloadCacheKey(currentSeries?.id, currentVolume?.volume, chapter?.chapter);
     if (!API_URL || !endpoint) {
         return loadChapterContentDirectFallback(chapter, chapterTelemetryContext);
+    }
+
+    const cachedPayload = getCachedChapterPayload(cacheKey);
+    if (cachedPayload && cachedPayload.ok && cachedPayload.html) {
+        renderLoadedContent(container, cachedPayload.html, chapter, chapterTelemetryContext, cachedPayload.source_type || 'api_cache');
+        if (!chapterContentLooksVisible(container)) {
+            renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
+                source_type: cachedPayload?.source_type || 'fallback',
+                fallback_url: cachedPayload?.fallback_url || null,
+                reason: 'empty_cached_content'
+            });
+        }
+        return;
+    }
+    if (cachedPayload && !cachedPayload.ok) {
+        renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
+            source_type: cachedPayload?.source_type || 'fallback',
+            fallback_url: cachedPayload?.fallback_url || null,
+            reason: 'cached_fallback'
+        });
+        return;
+    }
+
+    const inflightPayload = cacheKey ? chapterPayloadInflight.get(cacheKey) : null;
+    if (inflightPayload) {
+        showChapterLoadingState(container, chapter);
+        inflightPayload.then((payload) => {
+            if (chapter !== currentChapters[currentChapterIdx]) return;
+            if (payload && payload.ok && payload.html) {
+                renderLoadedContent(container, payload.html, chapter, chapterTelemetryContext, payload.source_type || 'api_warm_cache');
+                if (!chapterContentLooksVisible(container)) {
+                    renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
+                        source_type: payload?.source_type || 'fallback',
+                        fallback_url: payload?.fallback_url || null,
+                        reason: 'empty_warm_content'
+                    });
+                }
+                return;
+            }
+            renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
+                source_type: payload?.source_type || 'fallback',
+                fallback_url: payload?.fallback_url || null,
+                reason: payload?.ok === false ? 'warm_server_fallback' : 'warm_empty_html'
+            });
+        });
+        return;
     }
 
     _chapterAbortController = new AbortController();
@@ -1774,8 +1982,7 @@ function loadChapterContentFromServer(chapter, telemetryContext = null) {
         }
     }, 15000);
 
-    container.innerHTML = buildSkeletonLoader();
-    document.getElementById('reader-content').scrollTop = 0;
+    showChapterLoadingState(container, chapter);
 
     apiFetch(endpoint, { signal }).then(async (resp) => {
         if (signal.aborted || chapter !== currentChapters[currentChapterIdx]) return;
@@ -1783,6 +1990,9 @@ function loadChapterContentFromServer(chapter, telemetryContext = null) {
             throw new Error(`HTTP ${resp.status}`);
         }
         const payload = await resp.json();
+        if (payload && typeof payload === 'object') {
+            rememberCachedChapterPayload(cacheKey, payload);
+        }
         if (payload && payload.ok && payload.html) {
             renderLoadedContent(container, payload.html, chapter, chapterTelemetryContext, payload.source_type || 'api');
             if (!chapterContentLooksVisible(container)) {
@@ -1832,7 +2042,7 @@ function loadChapterContentDirectFallback(chapter, telemetryContext = null) {
         return;
     }
 
-    container.innerHTML = buildSkeletonLoader();
+    showChapterLoadingState(container, chapter);
     _chapterAbortController = new AbortController();
     const signal = _chapterAbortController.signal;
     setTimeout(() => {
@@ -1996,6 +2206,7 @@ function loadChapterContent(chapter, usePrefetch = false, telemetryContext = nul
 }
 
 function renderLoadedContent(container, html, chapter, telemetryContext = null, source = 'unknown') {
+    clearChapterLoadingHint();
     container.innerHTML = html;
 
     // Smooth transition: fade in (remove loading class)
@@ -2021,16 +2232,44 @@ function renderLoadedContent(container, html, chapter, telemetryContext = null, 
     applyIframeDarkMode();
     restoreScrollPosition();
     reportChapterOpenTelemetry(chapter, telemetryContext, source);
+    scheduleNextChapterPrefetch(chapter);
 }
 
 // ★ Skeleton Loader (пункт 5)
-function buildSkeletonLoader() {
+function buildSkeletonLoader(title = 'Загружаем главу', description = 'Подготавливаем текст и изображения...') {
     let lines = '';
     const widths = [100, 92, 85, 95, 70, 88, 96, 80, 60, 90, 100, 75, 88, 50];
     for (let i = 0; i < widths.length; i++) {
         lines += `<div class="skeleton-line" style="width:${widths[i]}%;animation-delay:${i * 0.05}s"></div>`;
     }
-    return `<div class="skeleton-loader">${lines}</div>`;
+    return `
+        <div class="skeleton-loader-card">
+            <div class="skeleton-loader-copy">
+                <strong>${escapeHtml(title)}</strong>
+                <span class="skeleton-loader-caption" data-chapter-loading-hint>${escapeHtml(description)}</span>
+            </div>
+            <div class="skeleton-loader">${lines}</div>
+        </div>
+    `;
+}
+
+function showChapterLoadingState(container, chapter = null) {
+    if (!container) return;
+    clearChapterLoadingHint();
+    const hasRemoteSource = getChapterSourceUrls(chapter).length > 0;
+    const description = hasRemoteSource
+        ? 'Подготавливаем текст и изображения из источника...'
+        : 'Открываем текст главы...';
+    container.innerHTML = buildSkeletonLoader('Загружаем главу', description);
+    const contentArea = document.getElementById('reader-content');
+    if (contentArea) contentArea.scrollTop = 0;
+
+    _chapterLoadingHintTimer = setTimeout(() => {
+        if (container !== document.getElementById('reader-text')) return;
+        const hint = container.querySelector('[data-chapter-loading-hint]');
+        if (!hint) return;
+        hint.textContent = 'Источник отвечает дольше обычного. Для больших глав из TeleType это нормально.';
+    }, 1200);
 }
 
 // ★ Image Fade-in (пункт 6)
@@ -2073,18 +2312,7 @@ function prefetchNextChapter() {
     _prefetchingIdx = nextIdx;
 
     if (API_URL && currentSeries && currentVolume && chapter.chapter) {
-        const endpoint = `${API_URL}/api/chapter-content?${new URLSearchParams({
-            series_id: String(currentSeries.id),
-            volume: String(currentVolume.volume),
-            chapter: String(chapter.chapter)
-        }).toString()}`;
-        apiFetch(endpoint).then(async (resp) => {
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            const payload = await resp.json();
-            if (payload?.ok && payload.html) {
-                prefetchedChapter = { idx: nextIdx, html: payload.html };
-            }
-        }).catch(() => {}).finally(() => {
+        warmChapterPayloadByIndex(nextIdx, { preferPrefetchSlot: true }).catch(() => {}).finally(() => {
             _prefetchingIdx = -1;
         });
         return;
@@ -3183,6 +3411,56 @@ function toggleSettings() {
     }
 }
 
+function scheduleNextChapterPrefetch(chapter) {
+    if (_nextChapterPrefetchTimer) {
+        clearTimeout(_nextChapterPrefetchTimer);
+    }
+    const chapterKey = chapter && chapter.chapter !== undefined ? String(chapter.chapter) : '';
+    _nextChapterPrefetchTimer = setTimeout(() => {
+        const activeChapter = currentChapters[currentChapterIdx];
+        if (!activeChapter || String(activeChapter.chapter) !== chapterKey) return;
+        if (API_URL) {
+            warmChapterPayloadByIndex(currentChapterIdx + 1, { preferPrefetchSlot: true }).catch(() => {});
+        }
+        prefetchNextChapter();
+    }, 180);
+}
+
+function scheduleCurrentVolumeWarmup() {
+    if (_chapterWarmupTimer) {
+        clearTimeout(_chapterWarmupTimer);
+    }
+    if (!API_URL || !currentSeries || !currentVolume || !Array.isArray(currentChapters) || currentChapters.length === 0) {
+        return;
+    }
+
+    const lastRead = getLastRead(currentSeries.id);
+    const preferredIdx = (
+        sameReaderKey(lastRead?.volume, currentVolume.volume)
+            ? currentChapters.findIndex((chapter) => sameReaderKey(chapter?.chapter, lastRead?.chapter))
+            : -1
+    );
+    const candidateIndexes = [];
+    if (preferredIdx >= 0) candidateIndexes.push(preferredIdx);
+    if (!candidateIndexes.includes(0)) candidateIndexes.push(0);
+    if (preferredIdx >= 0 && preferredIdx + 1 < currentChapters.length && !candidateIndexes.includes(preferredIdx + 1)) {
+        candidateIndexes.push(preferredIdx + 1);
+    } else if (currentChapters.length > 1 && !candidateIndexes.includes(1)) {
+        candidateIndexes.push(1);
+    }
+
+    _chapterWarmupTimer = setTimeout(() => {
+        const seriesId = currentSeries?.id;
+        const volumeId = currentVolume?.volume;
+        candidateIndexes.forEach((idx, order) => {
+            setTimeout(() => {
+                if (!sameReaderKey(currentSeries?.id, seriesId) || !sameReaderKey(currentVolume?.volume, volumeId)) return;
+                warmChapterPayloadByIndex(idx, { preferPrefetchSlot: idx === preferredIdx + 1 }).catch(() => {});
+            }, order * 220);
+        });
+    }, 90);
+}
+
 function showSettingsTab(tabName) {
     const contents = document.querySelectorAll('.settings-tab-content');
     const buttons = document.querySelectorAll('.settings-tab-btn');
@@ -3217,6 +3495,7 @@ function updateSettingsUI() {
     document.querySelectorAll('[data-font]').forEach(b => b.classList.toggle('active', b.dataset.font === settings.font));
     document.querySelectorAll('[data-align]').forEach(b => b.classList.toggle('active', b.dataset.align === settings.textAlign));
     document.querySelectorAll('[data-theme]').forEach(b => b.classList.toggle('active', b.dataset.theme === settings.theme));
+    syncAdminModeControls();
 }
 
 function setDimmer(val) {
@@ -4788,6 +5067,7 @@ bindReaderKeyboardAwareUI();
 bindDelegatedSelectionEvents();
 updateLibraryFilterButtons();
 restoreSettings();
+syncAdminModeControls();
 loadData();
 initTypoReporter();
 initGestures();

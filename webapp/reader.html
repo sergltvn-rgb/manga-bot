@@ -427,13 +427,13 @@
                 <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
             </div>
 
-            <div class="setting-item-row" style="margin-top:16px; border-top:1px solid var(--divider); padding-top:16px;">
+            <div class="setting-item-row" id="admin-mode-setting" style="margin-top:16px; border-top:1px solid var(--divider); padding-top:16px;">
                 <div class="setting-info">
                     <label for="admin-mode-toggle">Режим редактора</label>
-                    <p class="setting-hint">Только для администраторов</p>
+                    <p class="setting-hint" id="admin-mode-hint">Только для администраторов</p>
                 </div>
                 <label class="switch">
-                    <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
+                    <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)" disabled>
                     <span class="slider round"></span>
                 </label>
             </div>

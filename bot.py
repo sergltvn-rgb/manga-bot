@@ -3519,6 +3519,43 @@ def _html_fragment_has_visible_content(fragment: str) -> bool:
     return bool(text_only)
 
 
+def _analyze_html_fragment(fragment: str) -> dict[str, int]:
+    raw_fragment = str(fragment or "")
+    text_only = html.unescape(re.sub(r"<[^>]+>", " ", raw_fragment))
+    text_only = re.sub(r"\s+", " ", text_only).strip()
+    return {
+        "text_len": len(text_only),
+        "anchor_count": len(re.findall(r"<a\b", raw_fragment, flags=re.IGNORECASE)),
+        "image_count": len(re.findall(r"<img\b", raw_fragment, flags=re.IGNORECASE)),
+        "block_count": len(
+            re.findall(r"<(?:p|li|blockquote|figure|figcaption|h[1-6]|pre)\b", raw_fragment, flags=re.IGNORECASE)
+        ),
+    }
+
+
+def _is_low_value_html_fragment(fragment: str) -> bool:
+    stats = _analyze_html_fragment(fragment)
+    if stats["image_count"] > 0:
+        return False
+    if stats["text_len"] >= 180:
+        return False
+    if stats["block_count"] >= 3 and stats["text_len"] >= 90:
+        return False
+    if stats["anchor_count"] > 0 and stats["text_len"] <= 120:
+        return True
+    return stats["text_len"] < 60 and stats["block_count"] <= 1
+
+
+def _score_html_fragment(fragment: str) -> tuple[int, int, int, int]:
+    stats = _analyze_html_fragment(fragment)
+    return (
+        1 if stats["image_count"] > 0 else 0,
+        min(stats["block_count"], 12),
+        min(stats["text_len"], 4000),
+        -min(stats["anchor_count"], 32),
+    )
+
+
 def _build_chapter_content_cache_key(series_id: str, volume: str, chapter: str) -> str:
     return f"{str(series_id)}::{str(volume)}::{str(chapter)}"
 
@@ -3619,6 +3656,9 @@ async def _build_chapter_content_payload(series_id: str, volume: str, chapter: s
         key=lambda value: (0 if "telegra.ph" in value else 1 if "teletype.in" in value else 2, source_urls.index(value)),
     )
 
+    best_payload: dict | None = None
+    best_score: tuple[int, int, int, int] | None = None
+
     for url in preferred_urls:
         try:
             html_fragment = ""
@@ -3631,7 +3671,7 @@ async def _build_chapter_content_payload(series_id: str, volume: str, chapter: s
                 source_type = "teletype"
 
             if html_fragment and _html_fragment_has_visible_content(html_fragment):
-                return {
+                candidate_payload = {
                     "ok": True,
                     "source_type": source_type,
                     "html": html_fragment,
@@ -3640,9 +3680,19 @@ async def _build_chapter_content_payload(series_id: str, volume: str, chapter: s
                     "volume": str(volume),
                     "chapter": str(chapter),
                     "chapter_name": chapter_name,
-                }, 200
+                }
+                candidate_score = _score_html_fragment(html_fragment)
+                if best_score is None or candidate_score > best_score:
+                    best_payload = candidate_payload
+                    best_score = candidate_score
+
+                if not _is_low_value_html_fragment(html_fragment):
+                    return candidate_payload, 200
         except Exception as fetch_error:
             logging.warning("Chapter content fetch failed for %s: %s", url, fetch_error)
+
+    if best_payload is not None:
+        return best_payload, 200
 
     return {
         "ok": False,

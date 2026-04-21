@@ -16,6 +16,7 @@ function createMockState() {
     likesByChapter: {},
     calls: {
       reader: 0,
+      chapterContent: 0,
       commentsPost: 0,
       reactionsPost: 0,
       typoPost: 0,
@@ -74,6 +75,7 @@ function createMobileSelectionState() {
     likesByChapter: {},
     calls: {
       reader: 0,
+      chapterContent: 0,
       commentsPost: 0,
       reactionsPost: 0,
       typoPost: 0,
@@ -277,6 +279,7 @@ async function installTelegramAndApiMocks(page, state) {
     }
 
     if (pathname === "/api/chapter-content" && method === "GET") {
+      state.calls.chapterContent += 1;
       const seriesId = url.searchParams.get("series_id") || "";
       const volumeId = url.searchParams.get("volume") || "";
       const chapterId = url.searchParams.get("chapter") || "";
@@ -571,6 +574,17 @@ test.describe("Reader E2E smoke", () => {
     await page.locator("#series-list .series-card").first().click();
     await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
     await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(2);
+    await expect(page.locator("#screen-chapters")).toHaveClass(/admin-enabled/);
+
+    await page.evaluate(() => {
+      toggleAdminMode(false);
+    });
+    await expect(page.locator("#screen-chapters")).not.toHaveClass(/admin-enabled/);
+
+    await page.evaluate(() => {
+      toggleAdminMode(true);
+    });
+    await expect(page.locator("#screen-chapters")).toHaveClass(/admin-enabled/);
 
     await page.evaluate(async () => {
       await renameItem("series_manga_ru");
@@ -678,5 +692,30 @@ test.describe("Reader E2E smoke", () => {
       hasOldKey: false,
       hasNewKey: true,
     });
+  });
+
+  test("chapters screen warms likely chapter and reader reuses cached payload", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.series[0].volumes[0].chapters = [
+      {
+        chapter: "1",
+        custom_name: "Warm Me Up",
+        text: "Prefetched chapter body for cache reuse verification.",
+        url: "",
+      },
+    ];
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=warm-cache");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
+
+    await expect.poll(() => state.calls.chapterContent).toBe(1);
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("#reader-text")).toContainText("Prefetched chapter body");
+    await page.waitForTimeout(250);
+    await expect.poll(() => state.calls.chapterContent).toBe(1);
   });
 });

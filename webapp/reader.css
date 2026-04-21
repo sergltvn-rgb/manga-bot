@@ -869,6 +869,8 @@ input[type="range"]::-webkit-slider-thumb {
 .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
 input:checked + .slider { background-color: var(--accent); }
 input:checked + .slider:before { transform: translateX(20px); }
+.switch input:disabled + .slider { cursor: not-allowed; opacity: 0.45; }
+.setting-item-row.setting-disabled { opacity: 0.72; }
 
 /* === Admin Edit Button === */
 .admin-edit-btn {
@@ -1885,6 +1887,24 @@ input:checked + .slider:before { transform: translateX(20px); }
     display: flex;
     flex-direction: column;
     gap: 14px;
+}
+
+.skeleton-loader-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.skeleton-loader-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--text);
+}
+
+.skeleton-loader-caption {
+    color: var(--text-secondary);
+    font-size: 13px;
 }
 
 .skeleton-line {
