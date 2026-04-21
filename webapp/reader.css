@@ -335,19 +335,20 @@ body {
     opacity: 0;
 }
 
-/* === ШАПКА === */
+/* === ШАПКА (Refresh v4) === */
 .reader-header {
     display: flex;
     align-items: center;
-    padding: 12px 16px;
-    background: var(--glass-bg);
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border-bottom: 1px solid var(--glass-border);
+    padding: var(--space-3) var(--space-4);
+    background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+    backdrop-filter: blur(18px) saturate(180%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    border-bottom: 1px solid var(--surface-border);
     z-index: 20;
-    min-height: 56px;
-    gap: 12px;
+    min-height: 58px;
+    gap: var(--space-3);
     transition: transform 0.3s ease, background 0.3s;
+    position: relative;
 }
 
 .header-title {
@@ -850,22 +851,71 @@ div.r4-poster-placeholder.series-poster-img {
 .reader-text i, .reader-text em { font-style: italic; }
 
 .reader-text blockquote {
-    margin: 1.5em 0;
-    padding: 14px 20px;
-    border-left: 4px solid var(--accent);
-    background: var(--card-hover);
-    border-radius: 0 12px 12px 0;
+    margin: 1.75em 0;
+    padding: 18px 22px;
+    border-left: 3px solid var(--accent);
+    background: var(--surface-2);
+    border-radius: var(--radius-md);
     font-style: italic;
     color: var(--text-secondary);
+    position: relative;
+    box-shadow: var(--shadow-card);
+}
+.reader-text blockquote::before {
+    content: '\201C';
+    position: absolute;
+    top: -6px;
+    left: 10px;
+    font-size: 44px;
+    line-height: 1;
+    color: var(--accent);
+    font-family: Georgia, serif;
+    opacity: 0.5;
 }
 .reader-text blockquote p { text-indent: 0; margin-bottom: 0; }
 .reader-text code {
-    background: var(--card-hover);
+    background: var(--surface-2);
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     font-family: inherit;
     font-size: 0.9em;
+    border: 1px solid var(--surface-border);
 }
+
+/* Refresh v4: Drop-cap — красивая первая буква первого параграфа главы.
+   Активируется классом `.drop-cap-on` на `.reader-text` (см. настройки). */
+.reader-text.drop-cap-on > p:first-of-type::first-letter {
+    float: left;
+    font-family: 'Playfair Display', 'Noto Serif', Georgia, serif;
+    font-size: 3.4em;
+    line-height: 0.9;
+    padding: 0.1em 0.12em 0 0;
+    color: var(--accent);
+    font-weight: 700;
+}
+
+/* Подсветка выделенного текста — для typo-репорта */
+.reader-text ::selection {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+    color: var(--text);
+}
+.reader-text ::-moz-selection {
+    background: color-mix(in srgb, var(--accent) 35%, transparent);
+    color: var(--text);
+}
+
+/* Заголовки внутри текста главы */
+.reader-text h2, .reader-text h3 {
+    margin-top: 1.8em;
+    margin-bottom: 0.6em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--surface-border);
+    font-weight: 700;
+    color: var(--text);
+    font-family: inherit;
+}
+.reader-text h2 { font-size: 1.35em; }
+.reader-text h3 { font-size: 1.15em; }
 
 /* === КРАСИВАЯ ССЫЛКА НА КАНАЛ === */
 .channel-banner {
@@ -899,37 +949,61 @@ div.r4-poster-placeholder.series-poster-img {
 }
 .channel-btn:active { transform: scale(0.95); box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.3); }
 
-/* === НИЖНЯЯ НАВИГАЦИЯ === */
+/* === НИЖНЯЯ НАВИГАЦИЯ (Refresh v4) === */
 .reader-bottom-bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 16px;
-    background: var(--glass-bg);
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border-top: 1px solid var(--glass-border);
+    padding: var(--space-2) var(--space-4);
+    background: color-mix(in srgb, var(--surface-1) 88%, transparent);
+    backdrop-filter: blur(18px) saturate(180%);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    border-top: 1px solid var(--surface-border);
     z-index: 20;
     transition: transform 0.3s ease, background 0.3s;
+    gap: var(--space-2);
 }
 
 .nav-btn {
-    background: var(--accent-light);
-    border: none;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
     padding: 8px 16px;
-    border-radius: 20px;
-    color: var(--accent);
+    border-radius: var(--radius-pill);
+    color: var(--text);
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
-    transition: transform 0.15s, opacity 0.2s;
+    transition: transform 0.15s, opacity 0.2s, background 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 38px;
+    -webkit-tap-highlight-color: transparent;
+}
+.nav-btn:hover { background: var(--surface-3); }
+.nav-btn:active { transform: scale(0.95); }
+.nav-btn:disabled {
+    opacity: 0.35;
+    pointer-events: none;
+    background: transparent;
 }
 
-.nav-btn:active { transform: scale(0.95); }
-.nav-btn:disabled { opacity: 0.3; pointer-events: none; }
-.chapter-indicator { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+/* Центральный индикатор главы — pill с градиентной полоской прогресса */
+.chapter-indicator {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 700;
+    padding: 6px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-pill);
+    letter-spacing: 0.3px;
+    font-variant-numeric: tabular-nums;
+    min-width: 72px;
+    text-align: center;
+}
 
-/* --- Progress Bar --- */
+/* --- Progress Bar (Refresh v4: gradient) --- */
 .reading-progress-container {
     position: fixed;
     top: 0;
@@ -937,7 +1011,7 @@ div.r4-poster-placeholder.series-poster-img {
     right: 0;
     height: 3px;
     z-index: 1000;
-    background: transparent;
+    background: var(--surface-border);
     pointer-events: none;
     transition: none;
 }
@@ -945,8 +1019,9 @@ div.r4-poster-placeholder.series-poster-img {
 .reading-progress-bar {
     height: 100%;
     width: 0%;
-    background: var(--accent);
-    transition: width 0.2s ease-out;
+    background: var(--accent-gradient);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5);
+    transition: width 0.15s ease-out;
 }
 
 /* Immersive state - removed progress bar shift */

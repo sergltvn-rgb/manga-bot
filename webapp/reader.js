@@ -648,7 +648,8 @@ const defaults = {
     letterSpacing: 0,
     paraIndent: 25,
     dimmerValue: 0,
-    readingMode: 'scroll' // 'scroll' or 'pages'
+    readingMode: 'scroll', // 'scroll' or 'pages'
+    dropCap: true
 };
 let settings;
 try {
@@ -3588,6 +3589,13 @@ function setIndent(enabled) {
     saveSettings();
 }
 
+// Refresh v4: drop-cap (первая буква первого параграфа)
+function setDropCap(enabled) {
+    settings.dropCap = !!enabled;
+    applySettings();
+    saveSettings();
+}
+
 // ==========================================================================
 // НАСТРОЙКИ
 // ==========================================================================
@@ -3691,6 +3699,11 @@ function updateSettingsUI() {
     document.querySelectorAll('[data-font]').forEach(b => b.classList.toggle('active', b.dataset.font === settings.font));
     document.querySelectorAll('[data-align]').forEach(b => b.classList.toggle('active', b.dataset.align === settings.textAlign));
     document.querySelectorAll('[data-theme]').forEach(b => b.classList.toggle('active', b.dataset.theme === settings.theme));
+
+    // Refresh v4 toggles
+    const dropCapInput = document.getElementById('input-dropCap');
+    if (dropCapInput) dropCapInput.checked = !!settings.dropCap;
+
     syncAdminModeControls();
 }
 
@@ -3736,6 +3749,9 @@ function applySettings() {
 
         // Отступы
         readerText.classList.toggle('indent-on', settings.indent);
+
+        // Refresh v4: drop-cap (первая буква первого параграфа)
+        readerText.classList.toggle('drop-cap-on', !!settings.dropCap);
 
         // Отступ между абзацами
         readerText.style.setProperty('--para-spacing', settings.paraSpacing + 'px');

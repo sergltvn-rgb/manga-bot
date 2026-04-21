@@ -343,6 +343,17 @@
                     <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
                 </div>
             </div>
+
+            <div class="setting-item-row">
+                <div class="setting-info">
+                    <label for="input-dropCap">Буквица</label>
+                    <p class="setting-hint">Увеличенная первая буква главы</p>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="input-dropCap" onchange="setDropCap(this.checked)" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
         </div>
 
         <!-- Tab: Display -->
