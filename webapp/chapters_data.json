@@ -92,20 +92,20 @@
               ]
             },
             {
+              "chapter": "Иллюстрации",
+              "custom_name": "Цветные Иллюстрации",
+              "url": "https://telegra.ph/Hroniki-Akashi--Tom-11-Glava-Illyustracii-04-21",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--Tom-11-Glava-Illyustracii-04-21"
+              ]
+            },
+            {
               "chapter": "Послесловие",
               "custom_name": "Послесловие",
               "url": "",
               "urls": [
                 "https://teletype.in/@slitvin/01KagD2X-bQ",
                 "https://telegra.ph/Hroniki-Akashi--11-tom-04-15"
-              ]
-            },
-            {
-              "chapter": "Иллюстрации",
-              "custom_name": "Цветные Иллюстрации",
-              "url": "https://telegra.ph/Hroniki-Akashi--Tom-11-Glava-Illyustracii-04-21",
-              "urls": [
-                "https://telegra.ph/Hroniki-Akashi--Tom-11-Glava-Illyustracii-04-21"
               ]
             }
           ]
@@ -321,11 +321,11 @@
   "admin_ids": [
     "1424182136",
     "6210312655",
-    "7623430602",
-    "8033148365",
-    "6573251552",
-    "1577647113",
     "1747374025",
-    "5477281591"
+    "6573251552",
+    "5477281591",
+    "8033148365",
+    "7623430602",
+    "1577647113"
   ]
 }
