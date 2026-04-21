@@ -1869,14 +1869,26 @@ function renderChaptersList() {
             ? `<button type="button" class="series-action-btn" data-chapter-fallback-url="${escapeHtml(sourceUrls[0])}">Открыть источник</button>`
             : '';
 
+        const readState = readClass === 'read';
+        const srcCount = Array.isArray(ch.urls) ? ch.urls.length : (ch.url ? 1 : 0);
+        const metaParts = [];
+        if (!hasContent) metaParts.push('<span class="chapter-meta-warn">нет источника</span>');
+        if (srcCount > 1) metaParts.push(`<span>${srcCount} источника</span>`);
+        if (readState) metaParts.push('<span class="chapter-meta-read">✓ прочитано</span>');
+        else if (isCurrent) metaParts.push('<span class="chapter-meta-current">читается</span>');
+        else metaParts.push('<span>не прочитано</span>');
+        const meta = metaParts.join('<span class="chapter-meta-dot">·</span>');
+
         return `
-        <div class="chapter-item ${readClass}${isCurrent ? ' current-chapter' : ''}${!hasContent ? ' chapter-item-disabled' : ''}" data-chapter-idx="${idx}" ${isAdminMode ? 'draggable="true"' : ''}>
+        <div class="chapter-item chapter-tile ${readClass}${isCurrent ? ' current-chapter' : ''}${!hasContent ? ' chapter-item-disabled' : ''}" data-chapter-idx="${idx}" ${isAdminMode ? 'draggable="true"' : ''}>
             ${isAdminMode ? '<div class="drag-handle" title="Перетащить">⠿</div>' : ''}
             ${isAdminMode ? `<div class="admin-move-group">${moveBtns}</div>` : ''}
-            <div class="chapter-num">${idx + 1}</div>
-            <div class="chapter-name">${chapName}${customBadge}${linkBtn}${editBtns}${fallbackBtn}</div>
-            ${isCurrent ? '<span style="font-size:12px;color:var(--accent);font-weight:600;">◄</span>' : ''}
-            <span class="chapter-read-mark">✓</span>
+            <div class="chapter-num${readState ? ' is-read' : ''}${isCurrent ? ' is-current' : ''}">${idx + 1}</div>
+            <div class="chapter-body">
+                <div class="chapter-name">${chapName}${customBadge}${linkBtn}${editBtns}${fallbackBtn}</div>
+                <div class="chapter-meta">${meta}</div>
+            </div>
+            <span class="chapter-read-mark" aria-hidden="true">✓</span>
         </div>`;
     }).join('');
 
