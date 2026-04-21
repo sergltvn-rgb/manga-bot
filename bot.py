@@ -38,7 +38,39 @@ from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL, API_HOST
 
 # Кэш для коротких ссылок переименования (обход лимита 64 символа в deeplink)
 RENAME_CACHE = {}
-WEBAPP_CACHE_BUSTER = str(os.getenv("WEBAPP_CACHE_BUSTER", "4cd2d40")).strip()
+
+
+def _resolve_webapp_cache_buster() -> str:
+    """Определяет версию ассетов WebApp, чтобы обойти кэш Telegram/браузера.
+
+    Приоритет:
+      1. Явная переменная окружения WEBAPP_CACHE_BUSTER (нестрока пустая).
+      2. Короткий SHA текущего git HEAD (авто-инвалидирует кэш после каждого деплоя).
+      3. Временная метка (fallback, если .git недоступен).
+    """
+    explicit = str(os.getenv("WEBAPP_CACHE_BUSTER", "")).strip()
+    if explicit:
+        return explicit
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        sha = (out.stdout or "").strip()
+        if sha and out.returncode == 0:
+            return sha
+    except Exception:
+        pass
+    # Fallback: epoch seconds — гарантирует свежесть, но меняется на каждом рестарте.
+    return str(int(time.time()))
+
+
+WEBAPP_CACHE_BUSTER = _resolve_webapp_cache_buster()
+logging.getLogger(__name__).info("WebApp cache buster: %s", WEBAPP_CACHE_BUSTER)
 from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
