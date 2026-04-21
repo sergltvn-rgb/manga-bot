@@ -5186,6 +5186,32 @@ function haptic(style = 'light') {
     } catch (e) { }
 }
 
+// Refresh v4: глобальный лёгкий haptic на значимые UI-тапы. Подключаем
+// capturing-режимом чтобы ловить события до их обработки конкретными handlers.
+// Работает только в Telegram-окружении (см. guard в `haptic`).
+(function bindGlobalHaptics() {
+    try {
+        const HAPTIC_SELECTOR = [
+            '.series-card',
+            '.chapter-item',
+            '.nav-tab',
+            '.vol-tab',
+            '.r4-pill',
+            '.comment-tab',
+            '.library-filter-btn',
+            '.manga-action-btn',
+            '.nav-btn',
+            '.fab-btn',
+            '.admin-fab-btn',
+            '.theme-chip'
+        ].join(',');
+        document.addEventListener('pointerdown', (e) => {
+            const t = e.target && e.target.closest && e.target.closest(HAPTIC_SELECTOR);
+            if (t && !t.disabled) haptic('light');
+        }, { capture: true, passive: true });
+    } catch (_) { /* ignore */ }
+})();
+
 // === Custom Toasts ===
 function showToast(message, type = 'info') {
     const container = document.getElementById('toast-container');
