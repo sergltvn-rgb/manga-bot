@@ -4920,9 +4920,15 @@ async function reorderChapters(fromIdx, toIdx) {
             let detail = '';
             try { detail = await resp.text(); } catch (_) {}
             console.warn('sort PUT failed', status, detail);
-            showToast(status === 401 || status === 403
-                ? 'Недостаточно прав для изменения порядка.'
-                : `Не удалось сохранить порядок (HTTP ${status}).`);
+            let msg;
+            if (status === 401 || status === 403) {
+                msg = 'Недостаточно прав для изменения порядка.';
+            } else if (status === 409) {
+                msg = 'Порядок не сохранён: сервер не нашёл главы (диагностика в логе).';
+            } else {
+                msg = `Не удалось сохранить порядок (HTTP ${status}).`;
+            }
+            showToast(msg);
         } else {
             haptic('success');
             showToast('✅ Порядок сохранён');

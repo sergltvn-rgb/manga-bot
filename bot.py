@@ -6361,14 +6361,42 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
         if not table:
             return aiohttp.web.json_response({"error": "unknown series type"}, status=400, headers=CORS_HEADERS)
 
+        total_changes = 0
+        unmatched: list[str] = []
         async with aiosqlite.connect('manga.db') as db:
+            # Probe: how many rows exist for this (table, id_col)?
+            async with db.execute(
+                f'SELECT COUNT(*) FROM {table} WHERE {id_col} = ?',
+                (str(idx_val),),
+            ) as cur:
+                row = await cur.fetchone()
+                existing_rows = int(row[0]) if row else 0
+
             # Update sort_order for each chapter
             for idx, chapter_id in enumerate(normalized_order):
-                await db.execute(
+                cursor = await db.execute(
                     f'UPDATE {table} SET sort_order = ? WHERE {id_col} = ? AND {chapter_col} = ?',
                     (idx, str(idx_val), str(chapter_id))
                 )
+                changed = cursor.rowcount or 0
+                total_changes += changed
+                if changed == 0:
+                    unmatched.append(str(chapter_id))
             await db.commit()
+        logging.info(
+            "sort_chapters: series=%s vol=%r table=%s id_col=%s idx_val=%r sent=%d existing=%d updated=%d unmatched=%s",
+            series_id, volume, table, id_col, idx_val,
+            len(normalized_order), existing_rows, total_changes, unmatched[:5],
+        )
+        if total_changes == 0 and existing_rows > 0:
+            return aiohttp.web.json_response({
+                "error": "No rows updated. Check series_id/volume mapping.",
+                "debug": {
+                    "table": table, "id_col": id_col, "idx_val": str(idx_val),
+                    "sent": len(normalized_order), "existing": existing_rows,
+                    "unmatched_sample": unmatched[:5],
+                },
+            }, status=409, headers=CORS_HEADERS)
         invalidate_reader_cache("chapters_sorted")
 
         # Обновляем JSON и синхронизируем с GitHub
