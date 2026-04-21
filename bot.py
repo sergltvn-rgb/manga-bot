@@ -19,7 +19,7 @@ import io
 import html
 from datetime import datetime
 from typing import Union
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command, StateFilter
