@@ -595,7 +595,16 @@ function bindDelegatedSelectionEvents() {
             openExternalChapterSource(fallbackBtn.dataset.chapterFallbackUrl || '');
             return;
         }
-        if (event.target.closest('.admin-edit-btn, .admin-reset-btn, .admin-link-btn, .drag-handle, .admin-bulk-btn')) return;
+        const moveBtn = event.target.closest('[data-move-chapter]');
+        if (moveBtn) {
+            event.stopPropagation();
+            if (moveBtn.disabled) return;
+            const idx = Number(moveBtn.dataset.chapterIdx);
+            const direction = moveBtn.dataset.moveChapter === 'up' ? -1 : 1;
+            if (Number.isInteger(idx)) moveChapter(idx, direction);
+            return;
+        }
+        if (event.target.closest('.admin-edit-btn, .admin-reset-btn, .admin-link-btn, .drag-handle, .admin-bulk-btn, .admin-move-btn')) return;
 
         const item = event.target.closest('.chapter-item[data-chapter-idx]');
         if (!item) return;
@@ -1642,6 +1651,9 @@ function selectSeries(seriesId) {
         || (currentSeries.volumes.length > 0 ? currentSeries.volumes[0] : null);
     if (targetVolume) {
         selectVolume(targetVolume.volume);
+    } else {
+        // Safety: ensure chapters-list is rendered (empty-state) even without volume.
+        renderChaptersList();
     }
 
     showScreen('chapters');
@@ -1759,9 +1771,25 @@ function selectVolume(volNum) {
 function renderChaptersList() {
     assertReaderState('renderChaptersList:start');
     cleanupChapterDnD();
+    // Defensive: re-resolve currentSeries/currentVolume from the latest allData
+    // to guard against stale object refs after background data refresh (and to
+    // guarantee that chapters-list always reflects the currently selected series).
+    if (currentSeries) {
+        const freshSeries = findSeriesById(currentSeries.id);
+        if (freshSeries && freshSeries !== currentSeries) {
+            currentSeries = freshSeries;
+        }
+    }
+    if (currentSeries && currentVolume) {
+        const freshVolume = findVolumeByKey(currentSeries, currentVolume.volume);
+        if (freshVolume && freshVolume !== currentVolume) {
+            currentVolume = freshVolume;
+        }
+    }
     const container = document.getElementById('chapters-list');
     if (!currentVolume || !Array.isArray(currentVolume.chapters)) {
         currentChapters = [];
+        if (container) container.innerHTML = '';
         renderStateBlock(container, {
             icon: '\uD83D\uDCC2',
             title: '\u041D\u0435\u0442 \u0433\u043B\u0430\u0432',
@@ -1793,6 +1821,10 @@ function renderChaptersList() {
             <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#9998;</button>
             ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
         ` : '';
+        const moveBtns = isAdminMode ? `
+            <button type="button" class="admin-move-btn" title="Переместить вверх" data-move-chapter="up" data-chapter-idx="${idx}" ${idx === 0 ? 'disabled' : ''}>&#9650;</button>
+            <button type="button" class="admin-move-btn" title="Переместить вниз" data-move-chapter="down" data-chapter-idx="${idx}" ${idx === currentChapters.length - 1 ? 'disabled' : ''}>&#9660;</button>
+        ` : '';
         const customBadge = (isAdminMode && hasCustom) ? '<span class="custom-name-badge">кастом</span>' : '';
         const isCurrent = lastChapter && sameReaderKey(ch.chapter, lastChapter);
         const hasContent = chapterHasAnyContent(ch);
@@ -1804,6 +1836,7 @@ function renderChaptersList() {
         return `
         <div class="chapter-item ${readClass}${isCurrent ? ' current-chapter' : ''}${!hasContent ? ' chapter-item-disabled' : ''}" data-chapter-idx="${idx}" ${isAdminMode ? 'draggable="true"' : ''}>
             ${isAdminMode ? '<div class="drag-handle" title="Перетащить">⠿</div>' : ''}
+            ${isAdminMode ? `<div class="admin-move-group">${moveBtns}</div>` : ''}
             <div class="chapter-num">${idx + 1}</div>
             <div class="chapter-name">${chapName}${customBadge}${linkBtn}${editBtns}${fallbackBtn}</div>
             ${isCurrent ? '<span style="font-size:12px;color:var(--accent);font-weight:600;">◄</span>' : ''}
@@ -4857,6 +4890,10 @@ function touchDragEnd(e) {
 }
 
 async function reorderChapters(fromIdx, toIdx) {
+    if (!Array.isArray(currentChapters) || fromIdx < 0 || toIdx < 0) return;
+    if (fromIdx >= currentChapters.length || toIdx >= currentChapters.length) return;
+    if (fromIdx === toIdx) return;
+
     // Reorder locally
     const [moved] = currentChapters.splice(fromIdx, 1);
     currentChapters.splice(toIdx, 0, moved);
@@ -4869,7 +4906,7 @@ async function reorderChapters(fromIdx, toIdx) {
 
     const order = currentChapters.map(c => c.chapter);
     try {
-        await apiFetch(API_URL + '/api/sort', {
+        const resp = await apiFetch(API_URL + '/api/sort', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -4878,9 +4915,25 @@ async function reorderChapters(fromIdx, toIdx) {
                 order: order
             })
         });
+        if (!resp || !resp.ok) {
+            const status = resp?.status || 0;
+            showToast(status === 401 || status === 403
+                ? 'Недостаточно прав для изменения порядка.'
+                : `Не удалось сохранить порядок (HTTP ${status}).`);
+        } else {
+            haptic('success');
+        }
     } catch (e) {
         console.warn('Sort sync error:', e);
+        showToast('Ошибка сети при сохранении порядка.');
     }
+}
+
+function moveChapter(fromIdx, direction) {
+    if (!Array.isArray(currentChapters) || !Number.isInteger(fromIdx)) return;
+    const toIdx = fromIdx + (direction > 0 ? 1 : -1);
+    if (toIdx < 0 || toIdx >= currentChapters.length) return;
+    reorderChapters(fromIdx, toIdx);
 }
 
 // ==========================================================================

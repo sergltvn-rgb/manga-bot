@@ -11,7 +11,7 @@
     <script>
         (function () {
             const params = new URLSearchParams(window.location.search);
-            const rev = params.get('rev') || '19';
+            const rev = params.get('rev') || '20';
             window.__READER_REV = rev;
             const css = document.createElement('link');
             css.rel = 'stylesheet';
@@ -539,7 +539,7 @@
 
     <script>
         (function () {
-            const rev = window.__READER_REV || '19';
+            const rev = window.__READER_REV || '20';
             const script = document.createElement('script');
             script.src = `reader.js?v=${encodeURIComponent(rev)}`;
             document.body.appendChild(script);

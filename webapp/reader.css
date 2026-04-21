@@ -1775,6 +1775,45 @@ input:checked + .slider:before { transform: translateX(20px); }
 .drag-handle:active { cursor: grabbing; opacity: 1; color: var(--accent); }
 .chapter-item[draggable="true"]:hover .drag-handle { opacity: 1; }
 
+/* Up/Down move buttons for reliable mobile chapter reordering */
+.admin-move-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    flex-shrink: 0;
+    margin-right: 4px;
+}
+.admin-move-btn {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    width: 28px;
+    height: 22px;
+    padding: 0;
+    font-size: 12px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+.admin-move-btn:hover:not(:disabled) {
+    background: var(--accent-light);
+    color: var(--accent);
+}
+.admin-move-btn:active:not(:disabled) {
+    transform: scale(0.94);
+}
+.admin-move-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
 .chapter-item.dragging {
     opacity: 0.4;
     background: var(--accent-light) !important;

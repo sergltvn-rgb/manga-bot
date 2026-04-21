@@ -896,6 +896,99 @@ test.describe("Reader E2E smoke", () => {
     }).toBe("https://example.org/cover.png");
   });
 
+  test("admin move chapter: up/down buttons reorder and persist via /api/sort", async ({ page }) => {
+    const state = createMockState();
+    // Expand to 3 chapters so up/down has something to do.
+    state.readerData.series[0].volumes[0].chapters.push({
+      chapter: "3",
+      custom_name: "Chapter 3",
+      text: "Third chapter text.",
+      url: "",
+    });
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=move-a");
+    await page.evaluate(() => toggleAdminMode(true));
+
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(3);
+
+    const names = async () =>
+      page.$$eval("#chapters-list .chapter-item .chapter-name", (els) =>
+        els.map((el) => (el.childNodes[0]?.textContent || "").trim())
+      );
+
+    expect(await names()).toEqual(["Chapter 1", "Chapter 2", "Chapter 3"]);
+
+    // Click "down" on first chapter — should swap with second.
+    await page.locator('#chapters-list [data-move-chapter="down"][data-chapter-idx="0"]').click();
+    await expect.poll(() => state.calls.sortPut).toBe(1);
+    expect(await names()).toEqual(["Chapter 2", "Chapter 1", "Chapter 3"]);
+
+    // Click "up" on the chapter now at index 2 — should move it to index 1.
+    await page.locator('#chapters-list [data-move-chapter="up"][data-chapter-idx="2"]').click();
+    await expect.poll(() => state.calls.sortPut).toBe(2);
+    expect(await names()).toEqual(["Chapter 2", "Chapter 3", "Chapter 1"]);
+
+    // The "up" button on the first item must be disabled, and "down" on the last item must be disabled.
+    await expect(page.locator('#chapters-list [data-move-chapter="up"][data-chapter-idx="0"]')).toBeDisabled();
+    await expect(page.locator('#chapters-list [data-move-chapter="down"][data-chapter-idx="2"]')).toBeDisabled();
+  });
+
+  test("series selection: chapters never bleed between different series", async ({ browser }) => {
+    const state = createMobileSelectionState();
+    const ctx = await browser.newContext({
+      viewport: { width: 393, height: 852 },
+      userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 7)",
+    });
+    const page = await ctx.newPage();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=no-bleed");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(3);
+
+    // Read chapters list text for current screen.
+    const listNames = async () =>
+      page.$$eval("#chapters-list .chapter-item .chapter-name", (els) =>
+        els.map((el) => (el.childNodes[0]?.textContent || "").trim())
+      );
+
+    // Open akashic, then rapidly go back and open alya.
+    await page.locator('.series-card[data-series-id="akashic_records"]').click();
+    await expect(page.locator("#chapters-title")).toHaveText("Хроники Акаши");
+    await page.locator("#screen-chapters .back-btn").click();
+    await page.locator('.series-card[data-series-id="ranobe_alya"]').click();
+    await expect(page.locator("#chapters-title")).toHaveText("Воительница Аля");
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(2);
+    expect(await listNames()).toEqual(["Часть 1", "Часть 2"]);
+
+    // Rapid synchronous switch via evaluate.
+    await page.evaluate(() => {
+      document.querySelector("#screen-chapters .back-btn").click();
+      document.querySelector('.series-card[data-series-id="akashic_records"]').click();
+      document.querySelector("#screen-chapters .back-btn").click();
+      document.querySelector('.series-card[data-series-id="manga_ru"]').click();
+    });
+    await expect(page.locator("#chapters-title")).toHaveText("Аля иногда... Манга");
+    const mangaNames = await listNames();
+    expect(mangaNames, "manga chapters should not include akashic/alya names").not.toContain("Глава 1");
+    expect(mangaNames).toContain("Глава 75");
+
+    // Simulate stale `currentSeries` object ref (as if background refresh swapped allData).
+    // After this, any selectSeries should still produce the correct list for the new series.
+    await page.evaluate(() => {
+      // Re-parse allData to force new object identity for currentSeries
+      const cloned = JSON.parse(JSON.stringify(allData));
+      allData = cloned;
+    });
+    await page.locator("#screen-chapters .back-btn").click();
+    await page.locator('.series-card[data-series-id="ranobe_alya"]').click();
+    await expect(page.locator("#chapters-title")).toHaveText("Воительница Аля");
+    expect(await listNames()).toEqual(["Часть 1", "Часть 2"]);
+
+    await ctx.close();
+  });
+
   test("non-admin cannot enable editor mode", async ({ page }) => {
     const state = createMockState();
     state.readerData.admin_ids = []; // strip admin rights
