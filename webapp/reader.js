@@ -1825,7 +1825,12 @@ function renderChaptersList() {
     const lastRead = getLastRead(currentSeries.id);
     const lastChapter = sameReaderKey(lastRead?.volume, currentVolume.volume) ? lastRead.chapter : null;
 
-    container.innerHTML = currentChapters.map((ch, idx) => {
+    // Diagnostic: visible build marker so user can confirm which version is loaded.
+    const buildMarker = isAdminMode
+        ? `<div style="font-size:11px;color:#f59e0b;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.35);border-radius:6px;padding:6px 10px;margin:0 0 8px;text-align:center;font-weight:700;">build: ${READER_REV} · click-test: ${window.__MOVE_CHAPTER_CLICKED ? 'OK' : 'pending'}</div>`
+        : '';
+
+    container.innerHTML = buildMarker + currentChapters.map((ch, idx) => {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
         const chapName = ch.custom_name || `Глава ${ch.chapter}`;
         const hasCustom = !!ch.custom_name;
@@ -1835,8 +1840,8 @@ function renderChaptersList() {
             ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
         ` : '';
         const moveBtns = isAdminMode ? `
-            <button type="button" class="admin-move-btn" title="Переместить вверх" data-move-chapter="up" data-chapter-idx="${idx}" ${idx === 0 ? 'disabled' : ''} onclick="event.stopPropagation(); event.preventDefault(); moveChapter(${idx}, -1);">&#9650;</button>
-            <button type="button" class="admin-move-btn" title="Переместить вниз" data-move-chapter="down" data-chapter-idx="${idx}" ${idx === currentChapters.length - 1 ? 'disabled' : ''} onclick="event.stopPropagation(); event.preventDefault(); moveChapter(${idx}, 1);">&#9660;</button>
+            <button type="button" class="admin-move-btn" title="Переместить вверх" data-move-chapter="up" data-chapter-idx="${idx}" ${idx === 0 ? 'disabled' : ''} onclick="window.__MOVE_CHAPTER_CLICKED=true; alert('Клик ▲ глава ' + (${idx}+1)); event.stopPropagation(); event.preventDefault(); moveChapter(${idx}, -1);">&#9650;</button>
+            <button type="button" class="admin-move-btn" title="Переместить вниз" data-move-chapter="down" data-chapter-idx="${idx}" ${idx === currentChapters.length - 1 ? 'disabled' : ''} onclick="window.__MOVE_CHAPTER_CLICKED=true; alert('Клик ▼ глава ' + (${idx}+1)); event.stopPropagation(); event.preventDefault(); moveChapter(${idx}, 1);">&#9660;</button>
         ` : '';
         const customBadge = (isAdminMode && hasCustom) ? '<span class="custom-name-badge">кастом</span>' : '';
         const isCurrent = lastChapter && sameReaderKey(ch.chapter, lastChapter);
