@@ -4917,11 +4917,17 @@ async function reorderChapters(fromIdx, toIdx) {
         });
         if (!resp || !resp.ok) {
             const status = resp?.status || 0;
+            let detail = '';
+            try { detail = await resp.text(); } catch (_) {}
+            console.warn('sort PUT failed', status, detail);
             showToast(status === 401 || status === 403
                 ? 'Недостаточно прав для изменения порядка.'
                 : `Не удалось сохранить порядок (HTTP ${status}).`);
         } else {
             haptic('success');
+            showToast('✅ Порядок сохранён');
+            // Invalidate local snapshot so next loadData() hits the server.
+            try { safeSetLocal(getReaderApiCacheKey(), null); } catch (_) {}
         }
     } catch (e) {
         console.warn('Sort sync error:', e);

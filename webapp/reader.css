@@ -1786,12 +1786,12 @@ input:checked + .slider:before { transform: translateX(20px); }
     margin-right: 4px;
 }
 .admin-move-btn {
-    background: var(--card);
-    border: 1px solid var(--border);
+    background: var(--card-bg);
+    border: 1px solid var(--card-border, var(--divider));
     color: var(--text-secondary);
     border-radius: 6px;
-    width: 28px;
-    height: 22px;
+    width: 30px;
+    height: 26px;
     padding: 0;
     font-size: 12px;
     line-height: 1;
@@ -1907,15 +1907,18 @@ input:checked + .slider:before { transform: translateX(20px); }
     position: absolute;
     bottom: 65px;
     right: 0;
-    width: 200px;
+    width: 220px;
     padding: 8px;
     border-radius: 16px;
     display: flex;
     flex-direction: column;
     gap: 4px;
     transform-origin: bottom right;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
+    background: var(--card-bg);
+    border: 1px solid var(--card-border, var(--divider));
+    z-index: 60;
 }
 
 .admin-menu.hidden {
