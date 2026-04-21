@@ -4720,7 +4720,11 @@ def _is_valid_chapter_token(chapter: object) -> bool:
     token = str(chapter or "").strip()
     if not token or len(token) > MAX_CHAPTER_ID_LENGTH:
         return False
-    return bool(re.fullmatch(r"[A-Za-z0-9._-]+", token))
+    # Разрешаем любые печатные символы (включая кириллицу и пробелы),
+    # кроме управляющих и DEL (0x7F), а также HTML/JS-опасных (< > & " ' ` \).
+    # SQL не ломается, так как запросы параметризованы. Сам chapter используется
+    # как идентификатор строк в БД и в URL (client-side encoded).
+    return bool(re.fullmatch(r"[^\x00-\x1f\x7f<>&\"'`\\]+", token))
 
 def _rate_limit_identity(request: aiohttp.web.Request, user_id: str = "") -> str:
     if user_id:

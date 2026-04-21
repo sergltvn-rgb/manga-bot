@@ -595,26 +595,16 @@ function bindDelegatedSelectionEvents() {
             openExternalChapterSource(fallbackBtn.dataset.chapterFallbackUrl || '');
             return;
         }
+        // Inline onclick on .admin-move-btn handles primary action; this is a
+        // defensive fallback in case delegation is the only path that fires.
         const moveBtn = event.target.closest('[data-move-chapter]');
         if (moveBtn) {
             event.stopPropagation();
             event.preventDefault();
-            console.log('[sort] move click', {
-                disabled: moveBtn.disabled,
-                idx: moveBtn.dataset.chapterIdx,
-                dir: moveBtn.dataset.moveChapter,
-                apiUrl: API_URL,
-                adminMode: typeof isAdminMode !== 'undefined' ? isAdminMode : '?'
-            });
             if (moveBtn.disabled) return;
             const idx = Number(moveBtn.dataset.chapterIdx);
             const direction = moveBtn.dataset.moveChapter === 'up' ? -1 : 1;
-            if (Number.isInteger(idx)) {
-                showToast(`⇅ Перемещаю главу ${idx + 1}...`);
-                moveChapter(idx, direction);
-            } else {
-                showToast('Ошибка: нет индекса главы');
-            }
+            if (Number.isInteger(idx)) moveChapter(idx, direction);
             return;
         }
         if (event.target.closest('.admin-edit-btn, .admin-reset-btn, .admin-link-btn, .drag-handle, .admin-bulk-btn, .admin-move-btn')) return;
@@ -1825,12 +1815,7 @@ function renderChaptersList() {
     const lastRead = getLastRead(currentSeries.id);
     const lastChapter = sameReaderKey(lastRead?.volume, currentVolume.volume) ? lastRead.chapter : null;
 
-    // Diagnostic: visible build marker so user can confirm which version is loaded.
-    const buildMarker = isAdminMode
-        ? `<div style="font-size:11px;color:#f59e0b;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.35);border-radius:6px;padding:6px 10px;margin:0 0 8px;text-align:center;font-weight:700;">build: ${READER_REV} · click-test: ${window.__MOVE_CHAPTER_CLICKED ? 'OK' : 'pending'}</div>`
-        : '';
-
-    container.innerHTML = buildMarker + currentChapters.map((ch, idx) => {
+    container.innerHTML = currentChapters.map((ch, idx) => {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
         const chapName = ch.custom_name || `Глава ${ch.chapter}`;
         const hasCustom = !!ch.custom_name;
@@ -1840,8 +1825,8 @@ function renderChaptersList() {
             ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
         ` : '';
         const moveBtns = isAdminMode ? `
-            <button type="button" class="admin-move-btn" title="Переместить вверх" data-move-chapter="up" data-chapter-idx="${idx}" ${idx === 0 ? 'disabled' : ''} onclick="event.stopPropagation(); event.preventDefault(); window.__MOVE_CHAPTER_CLICKED=true; moveChapter(${idx}, -1);">&#9650;</button>
-            <button type="button" class="admin-move-btn" title="Переместить вниз" data-move-chapter="down" data-chapter-idx="${idx}" ${idx === currentChapters.length - 1 ? 'disabled' : ''} onclick="event.stopPropagation(); event.preventDefault(); window.__MOVE_CHAPTER_CLICKED=true; moveChapter(${idx}, 1);">&#9660;</button>
+            <button type="button" class="admin-move-btn" title="Переместить вверх" data-move-chapter="up" data-chapter-idx="${idx}" ${idx === 0 ? 'disabled' : ''} onclick="event.stopPropagation(); event.preventDefault(); moveChapter(${idx}, -1);">&#9650;</button>
+            <button type="button" class="admin-move-btn" title="Переместить вниз" data-move-chapter="down" data-chapter-idx="${idx}" ${idx === currentChapters.length - 1 ? 'disabled' : ''} onclick="event.stopPropagation(); event.preventDefault(); moveChapter(${idx}, 1);">&#9660;</button>
         ` : '';
         const customBadge = (isAdminMode && hasCustom) ? '<span class="custom-name-badge">кастом</span>' : '';
         const isCurrent = lastChapter && sameReaderKey(ch.chapter, lastChapter);
@@ -4960,30 +4945,10 @@ async function reorderChapters(fromIdx, toIdx) {
 }
 
 function moveChapter(fromIdx, direction) {
-    try {
-        showToast(`moveChapter(${fromIdx}, ${direction}) len=${Array.isArray(currentChapters) ? currentChapters.length : 'NaN'}`);
-        if (!Array.isArray(currentChapters)) {
-            showToast('Нет currentChapters (пустой список)');
-            return;
-        }
-        if (!Number.isInteger(fromIdx)) {
-            showToast(`Плохой fromIdx: ${fromIdx}`);
-            return;
-        }
-        const toIdx = fromIdx + (direction > 0 ? 1 : -1);
-        if (toIdx < 0) {
-            showToast('Уже первая глава — вверх нельзя');
-            return;
-        }
-        if (toIdx >= currentChapters.length) {
-            showToast('Уже последняя глава — вниз нельзя');
-            return;
-        }
-        reorderChapters(fromIdx, toIdx);
-    } catch (e) {
-        console.error('moveChapter error', e);
-        showToast('Ошибка moveChapter: ' + (e && e.message ? e.message : e));
-    }
+    if (!Array.isArray(currentChapters) || !Number.isInteger(fromIdx)) return;
+    const toIdx = fromIdx + (direction > 0 ? 1 : -1);
+    if (toIdx < 0 || toIdx >= currentChapters.length) return;
+    reorderChapters(fromIdx, toIdx);
 }
 
 // ==========================================================================

@@ -906,8 +906,6 @@ test.describe("Reader E2E smoke", () => {
       url: "",
     });
     await installTelegramAndApiMocks(page, state);
-    // Diagnostic alert() inside move-button onclick would block Playwright; auto-dismiss it.
-    page.on("dialog", (dialog) => dialog.dismiss().catch(() => {}));
 
     await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=move-a");
     await page.evaluate(() => toggleAdminMode(true));
