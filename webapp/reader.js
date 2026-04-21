@@ -44,8 +44,20 @@ let libraryFilter = LIBRARY_FILTERS.IN_PROGRESS;
 let typoSelectedText = '';
 let typoContextText = '';
 let typoSelectionRange = null;
+let _readerTapToScrollSuppressUntil = 0;
 let _networkStatusHideTimer = null;
 let _networkStatusBound = false;
+
+function suppressReaderTapToScroll(ms = 700) {
+    const until = Date.now() + Number(ms || 0);
+    if (until > _readerTapToScrollSuppressUntil) {
+        _readerTapToScrollSuppressUntil = until;
+    }
+}
+
+function isReaderTapToScrollSuppressed() {
+    return Date.now() < _readerTapToScrollSuppressUntil;
+}
 
 function toggleAdminMode(enabled) {
     isAdminMode = enabled;
@@ -2739,6 +2751,37 @@ let uiHidden = false;
 document.addEventListener('DOMContentLoaded', () => {
     const readerContent = document.getElementById('reader-content');
     if (readerContent) {
+        let pointerDown = false;
+        let pointerStartX = 0;
+        let pointerStartY = 0;
+        let pointerDragged = false;
+
+        readerContent.addEventListener('pointerdown', (e) => {
+            if (!e.isPrimary) return;
+            pointerDown = true;
+            pointerDragged = false;
+            pointerStartX = e.clientX;
+            pointerStartY = e.clientY;
+        }, { passive: true });
+
+        readerContent.addEventListener('pointermove', (e) => {
+            if (!pointerDown || !e.isPrimary) return;
+            if (Math.abs(e.clientX - pointerStartX) > 8 || Math.abs(e.clientY - pointerStartY) > 8) {
+                pointerDragged = true;
+            }
+        }, { passive: true });
+
+        const finishPointer = () => {
+            if (pointerDown && pointerDragged) {
+                // После drag/selection подавляем tap-to-scroll, чтобы не было резкого прыжка.
+                suppressReaderTapToScroll(900);
+            }
+            pointerDown = false;
+            pointerDragged = false;
+        };
+        readerContent.addEventListener('pointerup', finishPointer, { passive: true });
+        readerContent.addEventListener('pointercancel', finishPointer, { passive: true });
+
         let ticking = false;
         readerContent.addEventListener('scroll', () => {
             if (!ticking) {
@@ -2794,6 +2837,13 @@ document.addEventListener('DOMContentLoaded', () => {
         readerContent.addEventListener('click', (e) => {
             // Игнорируем клики по ссылкам, кнопкам, изображениям, textarea, input
             if (e.target.closest('a, button, img, textarea, input, .social-section, .comment-form, iframe')) return;
+            if (isReaderTapToScrollSuppressed()) return;
+
+            const selection = window.getSelection ? window.getSelection() : null;
+            if (selection && selection.rangeCount && !selection.isCollapsed && selection.toString().trim().length >= 2) {
+                suppressReaderTapToScroll(900);
+                return;
+            }
 
             const rect = readerContent.getBoundingClientRect();
             const relativeY = (e.clientY - rect.top) / rect.height;
@@ -3690,6 +3740,7 @@ function handleSelection() {
 
     typoSelectedText = selectedText;
     typoSelectionRange = range.cloneRange();
+    suppressReaderTapToScroll(1200);
 
     // Получаем контекст (текст вокруг) точнее, используя позицию в узле
     const startNode = range.startContainer;
