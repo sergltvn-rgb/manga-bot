@@ -4819,26 +4819,8 @@ def _compute_reader_etag(payload: dict) -> str:
     return f"\"{digest}\""
 
 
-def _normalize_etag(tag: str) -> str:
-    value = (tag or "").strip()
-    if value.startswith("W/"):
-        value = value[2:]
-    return value
-
-
-def _if_none_match_matches(if_none_match_header: str, etag: str) -> bool:
-    if not if_none_match_header:
-        return False
-    etag_norm = _normalize_etag(etag)
-    for raw_tag in if_none_match_header.split(","):
-        tag = raw_tag.strip()
-        if not tag:
-            continue
-        if tag == "*":
-            return True
-        if _normalize_etag(tag) == etag_norm:
-            return True
-    return False
+# ETag/cache-key утилиты вынесены в services/cache_utils.py (Фаза 3 микро-шаг).
+from services.cache_utils import _if_none_match_matches, _normalize_etag  # noqa: E402,F401
 
 
 async def get_cached_reader_data(force_refresh: bool = False) -> tuple[dict, str, bool]:
@@ -5194,8 +5176,8 @@ def _score_html_fragment(fragment: str) -> tuple[int, int, int, int]:
     )
 
 
-def _build_chapter_content_cache_key(series_id: str, volume: str, chapter: str) -> str:
-    return f"{str(series_id)}::{str(volume)}::{str(chapter)}"
+# _build_chapter_content_cache_key вынесен в services/cache_utils.py.
+from services.cache_utils import _build_chapter_content_cache_key  # noqa: E402,F401
 
 
 def _extract_chapter_urls(chapter_data: dict) -> list[str]:
