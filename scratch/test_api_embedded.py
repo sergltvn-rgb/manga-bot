@@ -287,33 +287,42 @@ async def test_admin_validation_errors(session: aiohttp.ClientSession, api_url: 
 async def test_chapter_content_prefers_richer_source(session: aiohttp.ClientSession, api_url: str) -> None:
     print("10) /api/chapter-content should prefer the richer source when mixed links are present")
     original_get_cached_reader_data = bot.get_cached_reader_data
-    original_fetch_telegra_ph_html = bot._fetch_telegra_ph_html
-    original_fetch_teletype_html = bot._fetch_teletype_html
+    # После Фазы 3 шаг 8 fetch-функции живут в services.reader_pipeline
+    # (а `_build_chapter_content_payload` вызывает их там напрямую, без bot.* lookup).
+    # Для monkey-patch надо менять атрибуты модуля-owner'а.
+    from services import reader_pipeline as _reader_pipeline
+
+    original_fetch_telegra_ph_html = _reader_pipeline._fetch_telegra_ph_html
+    original_fetch_teletype_html = _reader_pipeline._fetch_teletype_html
 
     async def fake_get_cached_reader_data(force_refresh: bool = False):
-        return {
-            "series": [
-                {
-                    "id": "manga_ru",
-                    "volumes": [
-                        {
-                            "volume": 1,
-                            "chapters": [
-                                {
-                                    "chapter": "1",
-                                    "custom_name": "Mixed Source Chapter",
-                                    "url": "",
-                                    "urls": [
-                                        "https://telegra.ph/mixed-short",
-                                        "https://teletype.in/@reader/full-chapter",
-                                    ],
-                                }
-                            ],
-                        }
-                    ],
-                }
-            ]
-        }, '"embedded-mixed-source"', force_refresh
+        return (
+            {
+                "series": [
+                    {
+                        "id": "manga_ru",
+                        "volumes": [
+                            {
+                                "volume": 1,
+                                "chapters": [
+                                    {
+                                        "chapter": "1",
+                                        "custom_name": "Mixed Source Chapter",
+                                        "url": "",
+                                        "urls": [
+                                            "https://telegra.ph/mixed-short",
+                                            "https://teletype.in/@reader/full-chapter",
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            '"embedded-mixed-source"',
+            force_refresh,
+        )
 
     async def fake_fetch_telegra_ph_html(_source_url: str) -> str:
         return '<p><a href="https://example.org/gallery">Цветные иллюстрации</a></p>'
@@ -327,13 +336,14 @@ async def test_chapter_content_prefers_richer_source(session: aiohttp.ClientSess
 
     try:
         bot.invalidate_chapter_content_cache("embedded_mixed_source_test")
+        # `_resolve_reader_chapter_entry` (services/) делает lazy `from bot import
+        # get_cached_reader_data`, поэтому патч `bot.get_cached_reader_data` подхватывается.
         bot.get_cached_reader_data = fake_get_cached_reader_data
-        bot._fetch_telegra_ph_html = fake_fetch_telegra_ph_html
-        bot._fetch_teletype_html = fake_fetch_teletype_html
+        # fetch-функции вызываются напрямую внутри services.reader_pipeline — патчим там.
+        _reader_pipeline._fetch_telegra_ph_html = fake_fetch_telegra_ph_html
+        _reader_pipeline._fetch_teletype_html = fake_fetch_teletype_html
 
-        async with session.get(
-            f"{api_url}/api/chapter-content?series_id=manga_ru&volume=1&chapter=1"
-        ) as resp:
+        async with session.get(f"{api_url}/api/chapter-content?series_id=manga_ru&volume=1&chapter=1") as resp:
             ensure(resp.status == 200, f"/api/chapter-content mixed-source expected 200, got {resp.status}")
             payload = await read_json(resp)
 
@@ -345,8 +355,8 @@ async def test_chapter_content_prefers_richer_source(session: aiohttp.ClientSess
         )
     finally:
         bot.get_cached_reader_data = original_get_cached_reader_data
-        bot._fetch_telegra_ph_html = original_fetch_telegra_ph_html
-        bot._fetch_teletype_html = original_fetch_teletype_html
+        _reader_pipeline._fetch_telegra_ph_html = original_fetch_telegra_ph_html
+        _reader_pipeline._fetch_teletype_html = original_fetch_teletype_html
         bot.invalidate_chapter_content_cache("embedded_mixed_source_test_cleanup")
 
 

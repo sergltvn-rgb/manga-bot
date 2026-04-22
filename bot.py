@@ -4832,17 +4832,6 @@ async def get_cached_reader_data(force_refresh: bool = False) -> tuple[dict, str
         return fresh_payload, fresh_etag, False
 
 
-def _render_inline_chapter_html(text: str) -> str:
-    parts = []
-    for block in re.split(r"\n\s*\n", str(text or "").strip()):
-        line = block.strip()
-        if not line:
-            continue
-        escaped = html.escape(line, quote=False).replace("\n", "<br>")
-        parts.append(f"<p>{escaped}</p>")
-    return "".join(parts)
-
-
 # HTML-рендеринг вынесен в services/html_rendering.py (Фаза 3 шаг).
 from services.html_rendering import (  # noqa: E402,F401
     _SafeHtmlFragmentParser,
@@ -4871,175 +4860,18 @@ from services.cache_utils import _build_chapter_content_cache_key  # noqa: E402,
 from services.validators import _extract_chapter_urls  # noqa: E402,F401
 
 
-async def _resolve_reader_chapter_entry(series_id: str, volume: str, chapter: str) -> tuple[dict | None, dict | None, dict | None]:
-    payload, _, _ = await get_cached_reader_data(force_refresh=False)
-    for series in payload.get("series", []):
-        if str(series.get("id")) != str(series_id):
-            continue
-        for vol in series.get("volumes", []):
-            if str(vol.get("volume")) != str(volume):
-                continue
-            for chapter_data in vol.get("chapters", []):
-                if str(chapter_data.get("chapter")) == str(chapter):
-                    return payload, series, chapter_data
-            return payload, series, None
-        return payload, series, None
-    return payload, None, None
-
-
-async def _fetch_telegra_ph_html(source_url: str) -> str:
-    match = re.search(r"telegra\.ph/(.+)$", str(source_url or ""), flags=re.IGNORECASE)
-    if not match:
-        return ""
-    api_url = f"https://api.telegra.ph/getPage/{match.group(1)}?return_content=true"
-    session = await get_http_session()
-    async with session.get(api_url, headers={"Accept": "application/json"}) as resp:
-        if resp.status != 200:
-            return ""
-        data = await resp.json(content_type=None)
-    if not data or not data.get("ok"):
-        return ""
-    return _render_telegraph_nodes_server(data.get("result", {}).get("content") or [])
-
-
-async def _fetch_teletype_html(source_url: str) -> str:
-    session = await get_http_session()
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept-Language": "ru,en;q=0.9",
-        "Accept": "text/html,application/xhtml+xml",
-    }
-    async with session.get(source_url, headers=headers) as resp:
-        if resp.status != 200:
-            return ""
-        page_html = await resp.text()
-    article_fragment = _extract_teletype_article_fragment(page_html)
-    if not article_fragment:
-        return ""
-    normalized_fragment = _normalize_teletype_article_fragment(article_fragment, source_url=source_url)
-    if not normalized_fragment:
-        return ""
-    sanitized_fragment = _sanitize_html_fragment(normalized_fragment, base_url=source_url)
-    if not _html_fragment_has_visible_content(sanitized_fragment):
-        return ""
-    return sanitized_fragment
-
-
-async def _build_chapter_content_payload(series_id: str, volume: str, chapter: str) -> tuple[dict | None, int]:
-    _, series, chapter_data = await _resolve_reader_chapter_entry(series_id, volume, chapter)
-    if not series:
-        return None, 404
-    if not chapter_data:
-        return None, 404
-
-    chapter_text = str(chapter_data.get("text") or "").strip()
-    source_urls = _extract_chapter_urls(chapter_data)
-    fallback_url = source_urls[0] if source_urls else None
-    chapter_name = str(chapter_data.get("custom_name") or f"Глава {chapter}")
-
-    if chapter_text:
-        return {
-            "ok": True,
-            "source_type": "inline",
-            "html": _render_inline_chapter_html(chapter_text),
-            "fallback_url": fallback_url,
-            "series_id": str(series_id),
-            "volume": str(volume),
-            "chapter": str(chapter),
-            "chapter_name": chapter_name,
-        }, 200
-
-    preferred_urls = sorted(
-        source_urls,
-        key=lambda value: (0 if "telegra.ph" in value else 1 if "teletype.in" in value else 2, source_urls.index(value)),
-    )
-
-    best_payload: dict | None = None
-    best_score: tuple[int, int, int, int] | None = None
-
-    for url in preferred_urls:
-        try:
-            html_fragment = ""
-            source_type = "fallback"
-            if "telegra.ph" in url:
-                html_fragment = await _fetch_telegra_ph_html(url)
-                source_type = "telegraph"
-            elif "teletype.in" in url:
-                html_fragment = await _fetch_teletype_html(url)
-                source_type = "teletype"
-
-            if html_fragment and _html_fragment_has_visible_content(html_fragment):
-                candidate_payload = {
-                    "ok": True,
-                    "source_type": source_type,
-                    "html": html_fragment,
-                    "fallback_url": url,
-                    "series_id": str(series_id),
-                    "volume": str(volume),
-                    "chapter": str(chapter),
-                    "chapter_name": chapter_name,
-                }
-                candidate_score = _score_html_fragment(html_fragment)
-                if best_score is None or candidate_score > best_score:
-                    best_payload = candidate_payload
-                    best_score = candidate_score
-
-                if not _is_low_value_html_fragment(html_fragment):
-                    return candidate_payload, 200
-        except Exception as fetch_error:
-            logging.warning("Chapter content fetch failed for %s: %s", url, fetch_error)
-
-    if best_payload is not None:
-        return best_payload, 200
-
-    return {
-        "ok": False,
-        "source_type": "fallback",
-        "html": "",
-        "fallback_url": fallback_url,
-        "series_id": str(series_id),
-        "volume": str(volume),
-        "chapter": str(chapter),
-        "chapter_name": chapter_name,
-    }, 200
+# Reader chapter-content pipeline вынесен в services/reader_pipeline.py (Фаза 3 шаги 8 + 9).
+from services.reader_pipeline import (  # noqa: E402,F401
+    _build_chapter_content_payload,
+    _fetch_telegra_ph_html,
+    _fetch_teletype_html,
+    _render_inline_chapter_html,
+    _resolve_reader_chapter_entry,
+    get_cached_chapter_content,
+)
 
 
 # invalidate_chapter_content_cache вынесена в services/reader_cache.py.
-
-
-async def get_cached_chapter_content(
-    series_id: str, volume: str, chapter: str, force_refresh: bool = False
-) -> tuple[dict | None, bool, int]:
-    cache_key = _build_chapter_content_cache_key(series_id, volume, chapter)
-    now = time.time()
-    cached_entry = _chapter_content_cache.get(cache_key)
-    if (
-        not force_refresh
-        and isinstance(cached_entry, dict)
-        and (now - float(cached_entry.get("built_at") or 0.0)) < CHAPTER_CONTENT_CACHE_TTL_SECONDS
-    ):
-        return cached_entry.get("payload"), True, int(cached_entry.get("status") or 200)
-
-    async with _chapter_content_cache_lock:
-        now = time.time()
-        cached_entry = _chapter_content_cache.get(cache_key)
-        if (
-            not force_refresh
-            and isinstance(cached_entry, dict)
-            and (now - float(cached_entry.get("built_at") or 0.0)) < CHAPTER_CONTENT_CACHE_TTL_SECONDS
-        ):
-            return cached_entry.get("payload"), True, int(cached_entry.get("status") or 200)
-
-        payload, status_code = await _build_chapter_content_payload(series_id, volume, chapter)
-        if payload is not None:
-            _chapter_content_cache[cache_key] = {
-                "payload": payload,
-                "status": status_code,
-                "built_at": time.time(),
-            }
-        else:
-            _chapter_content_cache.pop(cache_key, None)
-        return payload, False, status_code
 
 
 @dp.message(Command("toggle_sync"))
