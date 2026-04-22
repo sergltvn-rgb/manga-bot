@@ -28,6 +28,9 @@ select = [
     "F",        # pyflakes: undefined names, unused imports, **F811 redefined-while-unused**
     "E9",       # runtime SyntaxError
     "E722",     # bare `except:`
+    "SIM102",   # nested-if → единый `if a and b` (читабельнее)
+    "B905",     # `zip(...)` требует явный `strict=` (Python 3.10+)
+    "BLE001",   # blind `except Exception` — заставляет думать, что ловим (см. per-file-ignores)
 ]
 # Осознанные исключения для текущей кодовой базы.
 ignore = [
@@ -42,6 +45,12 @@ ignore = [
 "scratch/*.py" = ["ALL"]
 # Тесты: fixture-override через одноимённые функции — нормальная практика.
 "tests/*.py" = ["F811"]
+# bot.py — legacy-код с ~160 blind `except Exception`. Разгрести отдельным
+# коммитом. Пока BLE001 проверяется только в новых модулях (services/).
+"bot.py" = ["BLE001"]
+"database.py" = ["BLE001"]
+"utils.py" = ["BLE001"]
+"handlers/*.py" = ["BLE001"]
 
 [tool.ruff.format]
 quote-style = "preserve"

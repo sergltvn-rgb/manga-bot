@@ -180,7 +180,7 @@ async def get_telegraph_token() -> str | None:
                 token = data["result"]["access_token"]
                 await set_setting("telegraph_token", token)
                 return token
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — сеть/парсинг/БД могут бросить что угодно, логируем и продолжаем.
         logging.error(f"Telegraph Token Error: {e}")
     return None
 
@@ -214,6 +214,6 @@ async def upload_to_telegraph(title: str, html_content: str) -> str | None:
             if data.get("ok"):
                 return data["result"]["url"]
             logging.error(f"Telegraph API Error: {data}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — сеть/парсинг могут бросить что угодно, логируем и продолжаем.
         logging.error(f"Telegraph Upload Error: {e}")
     return None

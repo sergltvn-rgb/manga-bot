@@ -30,7 +30,7 @@ def _to_finite_float(value: object) -> float | None:
     """
     try:
         number = float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return None
     if not math.isfinite(number):
         return None

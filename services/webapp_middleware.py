@@ -108,7 +108,7 @@ async def apply_webapp_response_headers(
         if "Content-Encoding" not in response.headers and _response_is_compressible(response):
             try:
                 response.enable_compression()
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — aiohttp может бросить разные RuntimeError в зависимости от версии.
                 logging.debug(f"apply_webapp_response_headers: enable_compression failed: {e}")
     if request.path.startswith("/api/"):
         cors_headers = _build_cors_headers(request)

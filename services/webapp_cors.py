@@ -41,7 +41,8 @@ def _extract_origin(url_value: str) -> str:
     """
     try:
         parsed = urlsplit(str(url_value or "").strip())
-    except Exception:
+    except ValueError:
+        # urlsplit может кинуть ValueError на NUL-символы и другие крайние случаи.
         return ""
     if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
         return ""

@@ -42,7 +42,8 @@ def _normalize_external_url(raw_url: str, max_len: int = 2048) -> str | None:
         return None
     try:
         parsed = urlsplit(candidate)
-    except Exception:
+    except ValueError:
+        # urlsplit кидает ValueError на некоторые битые строки (например, с NUL).
         return None
     scheme = parsed.scheme.lower()
     if scheme not in {"http", "https"}:
@@ -76,7 +77,8 @@ def _safe_json_dumps(value: object, max_len: int = MAX_AUDIT_PAYLOAD_LENGTH) -> 
     """
     try:
         encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
+    except (TypeError, ValueError):
+        # TypeError — несериализуемый объект; ValueError — NaN/Inf без allow_nan.
         encoded = str(value)
     return encoded[:max_len] if len(encoded) > max_len else encoded
 
