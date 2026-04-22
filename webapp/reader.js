@@ -179,6 +179,70 @@ function syncAdminBadge() {
     }
 }
 
+// Refresh v4: глобальный admin FAB — контекстное меню с быстрыми действиями.
+function syncGlobalAdminFab(screenName) {
+    const fab = document.getElementById('global-admin-fab');
+    if (!fab) return;
+    const active = screenName || (document.querySelector('.screen.active') || {}).id?.replace('screen-', '') || '';
+    const allowed = ['series', 'chapters', 'library'].includes(active);
+    const canShow = isAdminMode && allowed && hasAdminApi();
+    if (canShow) {
+        fab.hidden = false;
+        fab.setAttribute('data-screen', active);
+    } else {
+        fab.hidden = true;
+        fab.classList.remove('is-open');
+        const menu = document.getElementById('global-admin-menu');
+        if (menu) menu.hidden = true;
+    }
+}
+
+function buildGlobalAdminMenuItems(screenName) {
+    const items = [];
+    if (screenName === 'chapters' && currentSeries && currentVolume) {
+        items.push({ icon: '📦', label: 'Массовая загрузка глав', onClick: 'openBulkModal()' });
+        items.push({ icon: '📄', label: 'Добавить главу', onClick: 'openAddChapterForCurrent()' });
+        items.push({ icon: '🖼️', label: 'Обложка серии', onClick: 'openCoverEditForCurrent()' });
+    } else if (screenName === 'series' || screenName === 'library') {
+        items.push({ icon: '🔄', label: 'Обновить данные', onClick: 'refreshReaderDataInBackground()' });
+    }
+    items.push({ icon: '🚪', label: 'Выйти из режима редактора', onClick: 'toggleAdminMode(false)' });
+    return items;
+}
+
+function toggleGlobalAdminMenu() {
+    const fab = document.getElementById('global-admin-fab');
+    const menu = document.getElementById('global-admin-menu');
+    if (!fab || !menu) return;
+    const isOpen = fab.classList.contains('is-open');
+    if (isOpen) {
+        fab.classList.remove('is-open');
+        setTimeout(() => { menu.hidden = true; }, 200);
+        return;
+    }
+    // Заполнить меню согласно текущему экрану
+    const screenName = fab.getAttribute('data-screen') || 'series';
+    const items = buildGlobalAdminMenuItems(screenName);
+    menu.innerHTML = items.map(it => `
+        <button type="button" class="global-admin-menu-item" onclick="toggleGlobalAdminMenu(); ${it.onClick}">
+            <span class="icon">${it.icon}</span><span>${escapeHtml(it.label)}</span>
+        </button>
+    `).join('');
+    menu.hidden = false;
+    requestAnimationFrame(() => fab.classList.add('is-open'));
+}
+
+// Закрывать меню при клике вне
+document.addEventListener('click', (e) => {
+    const fab = document.getElementById('global-admin-fab');
+    if (!fab || fab.hidden) return;
+    if (!fab.classList.contains('is-open')) return;
+    if (fab.contains(e.target)) return;
+    fab.classList.remove('is-open');
+    const menu = document.getElementById('global-admin-menu');
+    if (menu) setTimeout(() => { menu.hidden = true; }, 200);
+});
+
 function syncAdminModeControls() {
     const canUseAdminMode = isCurrentUserAdmin();
     const apiAvailable = hasAdminApi();
@@ -220,6 +284,7 @@ function syncAdminModeControls() {
     }
     syncAdminFabVisibility();
     syncAdminBadge();
+    syncGlobalAdminFab();
 }
 
 function toggleAdminMode(enabled) {
@@ -3543,6 +3608,8 @@ function showScreen(name) {
     // Admin FAB + badge visibility (Phase 4) — delegated to helper
     syncAdminFabVisibility();
     syncAdminBadge();
+    // Refresh v4: global admin FAB на не-reader экранах
+    syncGlobalAdminFab(name);
 
     // Update bottom nav
     const navTabs = document.querySelectorAll('.nav-tab');

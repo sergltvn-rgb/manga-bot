@@ -1573,6 +1573,95 @@ input[type="range"]::-webkit-slider-thumb {
 .retry-btn:hover { box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.45); }
 .retry-btn:active { transform: scale(0.95); opacity: 0.9; }
 
+/* Refresh v4: глобальный admin FAB (выводится над nav-bar'ом на экранах series/chapters/library) */
+.global-admin-fab {
+    position: fixed;
+    right: 16px;
+    bottom: calc(80px + env(safe-area-inset-bottom));
+    z-index: 55;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-end;
+    gap: 10px;
+    pointer-events: none;
+}
+.global-admin-fab[hidden] { display: none; }
+.global-admin-fab > * { pointer-events: auto; }
+
+.global-admin-fab-btn {
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent-gradient);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.45);
+    transition: transform 0.2s, filter 0.2s, box-shadow 0.2s;
+    -webkit-tap-highlight-color: transparent;
+}
+.global-admin-fab-btn:hover { filter: brightness(1.05); box-shadow: 0 10px 28px rgba(var(--accent-rgb), 0.55); }
+.global-admin-fab-btn:active { transform: scale(0.94); }
+.global-admin-fab.is-open .global-admin-fab-btn {
+    transform: rotate(45deg);
+}
+
+.global-admin-menu {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pop);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    min-width: 220px;
+    max-width: calc(100vw - 40px);
+    transform-origin: bottom right;
+    transform: translateY(6px) scale(0.96);
+    opacity: 0;
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.18s ease;
+}
+.global-admin-menu[hidden] { display: none; }
+.global-admin-fab.is-open .global-admin-menu {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+}
+
+.global-admin-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s, transform 0.12s;
+    -webkit-tap-highlight-color: transparent;
+}
+.global-admin-menu-item:hover { background: var(--surface-2); }
+.global-admin-menu-item:active { transform: scale(0.98); }
+.global-admin-menu-item .icon {
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent);
+    flex-shrink: 0;
+    font-size: 16px;
+}
+
 /* Refresh v4: Pull-to-Refresh — pill-индикатор сверху, управление через JS (inline translateY + data-state) */
 .pull-refresh-indicator {
     position: fixed;

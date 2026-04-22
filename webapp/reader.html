@@ -312,6 +312,14 @@
         </div>
     </div>
 
+    <!-- Refresh v4: глобальный admin FAB (виден только в admin_mode на series/chapters/library) -->
+    <div id="global-admin-fab" class="global-admin-fab" hidden>
+        <button type="button" class="global-admin-fab-btn" id="global-admin-fab-btn" onclick="toggleGlobalAdminMenu()" aria-label="Админ действия">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <div id="global-admin-menu" class="global-admin-menu" hidden></div>
+    </div>
+
     <!-- === ТАБ БАР (Нижняя навигация) === -->
     <div class="bottom-nav-bar" id="main-bottom-nav">
         <button class="nav-tab active" id="tab-series" onclick="showScreen('series')">
