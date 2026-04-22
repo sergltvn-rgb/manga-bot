@@ -6463,13 +6463,18 @@ class StatsMiddleware(BaseMiddleware):
 # БЛОК: API СЕРВЕР ДЛЯ ЧИТАЛКИ (WebApp Reader)
 # ==============================================================================
 
-CORS_BASE_HEADERS = {
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Expose-Headers": "ETag",
-}
-CORS_HEADERS = dict(CORS_BASE_HEADERS)
-_CORS_ALLOWED_ORIGIN_SUFFIXES = ("telegram.org",)
+# CORS-утилиты вынесены в services/webapp_cors.py (Фаза 3 шаг 1).
+from services.webapp_cors import (
+    CORS_ALLOWED_ORIGINS,
+    CORS_BASE_HEADERS,
+    CORS_HEADERS,
+    _build_cors_headers,
+    _extract_origin,
+    _merge_vary_header,
+    _origin_allowed,
+    _resolve_allowed_origin,
+)
+
 API_MAX_BODY_BYTES = int(os.getenv("API_MAX_BODY_BYTES", "262144"))
 
 MAX_CHAPTER_KEY_LENGTH = 160
@@ -6506,79 +6511,6 @@ RATE_LIMIT_RULES = {
 }
 _rate_limit_buckets: dict[str, list[float]] = {}
 _rate_limit_lock = asyncio.Lock()
-
-
-def _extract_origin(url_value: str) -> str:
-    try:
-        parsed = urlsplit(str(url_value or "").strip())
-    except Exception:
-        return ""
-    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
-        return ""
-    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
-
-
-def _load_cors_allowed_origins() -> set[str]:
-    origins: set[str] = set()
-    for raw in (WEBAPP_URL, API_HOST):
-        origin = _extract_origin(raw)
-        if origin:
-            origins.add(origin)
-    extra = os.getenv("WEBAPP_CORS_ALLOWLIST", "")
-    for item in extra.split(","):
-        origin = _extract_origin(item)
-        if origin:
-            origins.add(origin)
-    origins.update(
-        {
-            "http://localhost:8080",
-            "http://127.0.0.1:8080",
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-        }
-    )
-    return origins
-
-
-CORS_ALLOWED_ORIGINS = _load_cors_allowed_origins()
-
-
-def _origin_allowed(origin: str) -> bool:
-    normalized = _extract_origin(origin)
-    if not normalized:
-        return False
-    if normalized in CORS_ALLOWED_ORIGINS:
-        return True
-    host = (urlsplit(normalized).hostname or "").lower()
-    for suffix in _CORS_ALLOWED_ORIGIN_SUFFIXES:
-        sfx = suffix.lower()
-        if host == sfx or host.endswith(f".{sfx}"):
-            return True
-    return False
-
-
-def _resolve_allowed_origin(request: aiohttp.web.Request) -> str:
-    origin = request.headers.get("Origin", "").strip()
-    if not origin:
-        return ""
-    return _extract_origin(origin) if _origin_allowed(origin) else ""
-
-
-def _build_cors_headers(request: aiohttp.web.Request) -> dict:
-    headers = dict(CORS_BASE_HEADERS)
-    headers["Vary"] = "Origin"
-    allowed_origin = _resolve_allowed_origin(request)
-    if allowed_origin:
-        headers["Access-Control-Allow-Origin"] = allowed_origin
-    return headers
-
-
-def _merge_vary_header(existing_value: str, token: str) -> str:
-    values = [v.strip() for v in str(existing_value or "").split(",") if v.strip()]
-    token_norm = token.strip()
-    if token_norm and token_norm not in values:
-        values.append(token_norm)
-    return ", ".join(values) if values else token_norm
 
 
 def _normalize_external_url(raw_url: str, max_len: int = 2048) -> str | None:
