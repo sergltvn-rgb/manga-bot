@@ -348,7 +348,11 @@
 
         <!-- Refresh v5: sticky live-превью текущих стилей -->
         <div class="settings-preview" id="settings-preview">
-            <p class="settings-preview-text">Это пример отрывка текста. Настройки применяются мгновенно — видно, как меняется шрифт, размер, межстрочный интервал и цветовая схема.</p>
+            <div class="settings-preview-inner" id="settings-preview-inner">
+                <p class="settings-preview-text">Это пример отрывка. Настройки применяются мгновенно — видно, как меняется шрифт, размер, межстрочный интервал, красная строка, ширина, яркость и буквица.</p>
+            </div>
+            <!-- Overlay для яркости (dimmer) — синхронизирован с .dimmer-overlay всего приложения -->
+            <div class="settings-preview-dimmer" id="settings-preview-dimmer" aria-hidden="true"></div>
         </div>
 
         <!-- Refresh v5: все настройки в одной прокрутке, разделены section-titles -->

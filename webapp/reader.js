@@ -3876,9 +3876,11 @@ function showSettingsTab(tabName) {
     }
 }
 
-// Refresh v5: live-превью в настройках. Копирует текущие стили `.reader-text` в `.settings-preview-text`.
+// Refresh v5: live-превью в настройках. Зеркалит `.reader-text` стили + индикаторы max-width, dimmer, indent, dropCap.
 function syncSettingsPreview() {
     const preview = document.getElementById('settings-preview');
+    const previewInner = document.getElementById('settings-preview-inner');
+    const previewDimmer = document.getElementById('settings-preview-dimmer');
     const previewText = preview ? preview.querySelector('.settings-preview-text') : null;
     if (!preview || !previewText) return;
 
@@ -3892,13 +3894,35 @@ function syncSettingsPreview() {
     const fontKey = settings && settings.font ? settings.font : 'serif';
     previewText.style.fontFamily = fontMap[fontKey] || fontMap.serif;
 
-    if (settings) {
-        if (settings.fontSize) previewText.style.fontSize = (settings.fontSize * 0.85) + 'px';
-        if (settings.lineHeight) previewText.style.lineHeight = String(settings.lineHeight);
-        if (typeof settings.letterSpacing === 'number') previewText.style.letterSpacing = settings.letterSpacing + 'px';
-        if (settings.textAlign) previewText.style.textAlign = settings.textAlign;
+    if (!settings) return;
+
+    if (settings.fontSize) previewText.style.fontSize = (settings.fontSize * 0.85) + 'px';
+    if (settings.lineHeight) previewText.style.lineHeight = String(settings.lineHeight);
+    if (typeof settings.letterSpacing === 'number') previewText.style.letterSpacing = settings.letterSpacing + 'px';
+    if (settings.textAlign) previewText.style.textAlign = settings.textAlign;
+
+    // Макс. ширина — отражает settings.textWidth (50..100 %)
+    if (previewInner && settings.textWidth) {
+        previewInner.style.maxWidth = settings.textWidth + '%';
     }
-    // Фон и цвет берутся из CSS-переменных темы автоматически через .settings-preview{background:var(--reader-bg)}
+
+    // Красная строка — toggle класс + размер отступа
+    previewText.classList.toggle('indent-on', !!settings.indent);
+    if (typeof settings.paraIndent === 'number') {
+        // В превью шрифт меньше, поэтому переводим px → em ~относительно размера превью.
+        const previewFontPx = (settings.fontSize || 17) * 0.85;
+        const indentEm = settings.paraIndent / previewFontPx;
+        previewText.style.setProperty('--preview-para-indent', indentEm.toFixed(2) + 'em');
+    }
+
+    // Буквица
+    previewText.classList.toggle('drop-cap-on', !!settings.dropCap);
+
+    // Яркость (dimmer)
+    if (previewDimmer && typeof settings.dimmerValue === 'number') {
+        previewDimmer.style.background = `rgba(0, 0, 0, ${settings.dimmerValue / 100})`;
+    }
+    // Фон и цвет берутся из CSS-переменных темы автоматически.
 }
 
 function updateSettingsUI() {

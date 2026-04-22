@@ -1398,13 +1398,20 @@ body.keyboard-open #screen-reader .reader-scrubber-row { display: none; }
 
 /* Refresh v5: live-превью текста сверху */
 .settings-panel .settings-preview {
+    position: relative;
     flex-shrink: 0;
     margin: 0 calc(-1 * var(--space-5)) var(--space-3);
     padding: var(--space-3) var(--space-5);
     background: var(--reader-bg, var(--surface-2));
     border-top: 1px solid var(--surface-border);
     border-bottom: 1px solid var(--surface-border);
+    overflow: hidden;
     transition: background 0.25s ease;
+}
+.settings-preview-inner {
+    max-width: 100%;
+    margin: 0 auto;
+    transition: max-width 0.22s ease;
 }
 .settings-preview-text {
     margin: 0;
@@ -1414,13 +1421,31 @@ body.keyboard-open #screen-reader .reader-scrubber-row { display: none; }
     font-size: 14px;
     line-height: 1.55;
     letter-spacing: 0;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    line-clamp: 3;
+    max-height: 4.4em;
     overflow: hidden;
-    text-overflow: ellipsis;
-    transition: font-family 0.18s, font-size 0.18s, line-height 0.18s, letter-spacing 0.18s, color 0.25s;
+    transition: font-family 0.18s, font-size 0.18s, line-height 0.18s, letter-spacing 0.18s, color 0.25s, text-indent 0.18s;
+}
+/* Красная строка */
+.settings-preview-text.indent-on {
+    text-indent: var(--preview-para-indent, 1.5em);
+}
+/* Буквица — аналогично .reader-text.drop-cap-on */
+.settings-preview-text.drop-cap-on::first-letter {
+    float: left;
+    font-family: 'Playfair Display', 'Noto Serif', Georgia, serif;
+    font-size: 3.4em;
+    line-height: 0.9;
+    padding: 0.1em 0.12em 0 0;
+    color: var(--accent);
+    font-weight: 700;
+}
+/* Dimmer-overlay */
+.settings-preview-dimmer {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0);
+    pointer-events: none;
+    transition: background 0.2s ease;
 }
 
 /* v5: собственно скроллируемое тело настроек */
