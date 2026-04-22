@@ -166,6 +166,36 @@ from services.admin_telegram import (  # noqa: E402,F401
     cmd_delete_admin,
 )
 
+# content_metadata (B.5): LANGUAGES/RANOBE_LANGUAGES/CONTENT_TYPES +
+# get_langs_menu/get_ranobe_langs_menu. Shared-слой между bot.py
+# (read-каталоги) и services/admin_content.py (admin content FSM).
+from services.content_metadata import (  # noqa: E402,F401
+    CONTENT_TYPES,
+    LANGUAGES,
+    RANOBE_LANGUAGES,
+    get_langs_menu,
+    get_ranobe_langs_menu,
+)
+
+# content_router (B.5): admin content FSM + cmd_add/delete chapter/ranobe/
+# akashic/british/art + notify users. Re-export cmd-функций для
+# admin_menu_commands dispatcher'а.
+from services.admin_content import (  # noqa: E402,F401
+    NotifyUsers,
+    UniversalContentDelete,
+    UniversalContentUpload,
+    cmd_add_akashic,
+    cmd_add_british,
+    cmd_add_chapter,
+    cmd_add_ranobe,
+    cmd_delete_akashic,
+    cmd_delete_art,
+    cmd_delete_british,
+    cmd_delete_chapter,
+    cmd_delete_ranobe,
+    content_router,
+)
+
 
 # ============================================================================
 # ANTI-DOUBLE-TAP MIDDLEWARE для callback_query
@@ -358,8 +388,8 @@ def fmt_name(uid, name):
 # (доступны через re-export на top-level этого файла).
 
 
-LANGUAGES = {"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "jp": "🇯🇵 日本語", "color": "🎨 Цветная манга"}
-RANOBE_LANGUAGES = {"alya": "⚔️ Воительница-Аля", "ru": "🇷🇺 Русский (Ранобэ)"}
+# LANGUAGES, RANOBE_LANGUAGES → вынесены в services/content_metadata.py
+# (доступны через re-export на top-level этого файла).
 ITEMS_PER_PAGE = 15
 
 # ART_CACHE → вынесен в services/shared_state.py (доступен через re-export).
@@ -447,8 +477,8 @@ async def check_action_cooldown(
     )
 
 
-class NotifyUsers(StatesGroup):
-    waiting_for_decision = State()
+# NotifyUsers FSM → вынесен в services/admin_content.py
+# (доступен через re-export на top-level этого файла).
 
 
 class TechSupport(StatesGroup):
@@ -500,65 +530,9 @@ class BritishCallback(CallbackData, prefix="british"):
     chapter: str = ""
 
 
-# --- УНИВЕРСАЛЬНЫЕ FSM для добавления/удаления контента ---
-class UniversalContentUpload(StatesGroup):
-    """Единый FSM для добавления контента (manga, ranobe, akashic, british)."""
-
-    waiting_for_id = State()  # Том или язык
-    waiting_for_chapter = State()  # Номер главы
-    waiting_for_link = State()  # Ссылка
-
-
-class UniversalContentDelete(StatesGroup):
-    """Единый FSM для удаления контента."""
-
-    waiting_for_id = State()
-    waiting_for_chapter = State()
-
-
-# Маппинг типов контента → таблицы/колонки БД и UI-имена
-CONTENT_TYPES = {
-    'manga': {
-        'table': 'chapters_urls',
-        'id_col': 'lang',
-        'chapter_col': 'chapter_number',
-        'url_col': 'url',
-        'name': 'Манга',
-        'emoji': '📗',
-        'id_type': 'lang',
-        'names_map': LANGUAGES,
-    },
-    'ranobe': {
-        'table': 'ranobe_urls',
-        'id_col': 'lang',
-        'chapter_col': 'chapter_number',
-        'url_col': 'url',
-        'name': 'Ранобэ',
-        'emoji': '📘',
-        'id_type': 'ranobe_lang',
-        'names_map': RANOBE_LANGUAGES,
-    },
-    'akashic': {
-        'table': 'akashic_ranobe',
-        'id_col': 'volume',
-        'chapter_col': 'chapter',
-        'url_col': 'url',
-        'name': 'Хроники Акаши',
-        'emoji': '📖',
-        'id_type': 'volume',
-        'names_map': {},
-    },
-    'british': {
-        'table': 'british_ranobe',
-        'id_col': 'volume',
-        'chapter_col': 'chapter',
-        'url_col': 'url',
-        'name': 'Британская красавица',
-        'emoji': '👸',
-        'id_type': 'volume',
-        'names_map': {},
-    },
-}
+# UniversalContentUpload, UniversalContentDelete FSM → вынесены
+# в services/admin_content.py. CONTENT_TYPES → в services/content_metadata.py
+# (доступны через re-export на top-level этого файла).
 
 # ==============================================================================
 # БЛОК 2: АНТИСПАМ И КУЛДАУНЫ
@@ -1361,34 +1335,8 @@ async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.answer("Главное меню:", reply_markup=get_main_menu(is_group=is_group))
 
 
-def get_langs_menu(prefix="lang"):
-    builder = InlineKeyboardBuilder()
-    for code, name in LANGUAGES.items():
-        builder.row(types.InlineKeyboardButton(text=name, callback_data=f"{prefix}_{code}"))
-
-    if prefix == "readlang":
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="section_read"))
-    elif prefix in ("ucadd", "ucdel"):
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_state"))
-    else:
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
-    return builder.as_markup()
-
-
-def get_ranobe_langs_menu(prefix="ranobelang"):
-    builder = InlineKeyboardBuilder()
-    for code, name in RANOBE_LANGUAGES.items():
-        builder.row(types.InlineKeyboardButton(text=name, callback_data=f"{prefix}_{code}"))
-
-    if prefix == "readranobelang":
-        builder.row(types.InlineKeyboardButton(text="📖 Хроники Акаши", callback_data="akashic_vols"))
-        builder.row(types.InlineKeyboardButton(text="👸 Британская красавица", callback_data="british_vols"))
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="section_read"))
-    elif prefix in ("adminranobe", "ucadd", "ucdel"):
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_state"))
-    else:
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
-    return builder.as_markup()
+# get_langs_menu, get_ranobe_langs_menu → вынесены в services/content_metadata.py
+# (доступны через re-export на top-level этого файла).
 
 
 # ==============================================================================
@@ -4738,19 +4686,8 @@ async def process_admin_art_view_back(callback: types.CallbackQuery, state: FSMC
     await send_admin_art_item(callback.message.chat.id, 0)
 
 
-@dp.message(Command("delete_art"))
-async def cmd_delete_art(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    try:
-        art_id = int(message.text.split()[1])
-        if await delete_art_by_id(art_id):
-            await message.answer(f"✅ Арт с ID {art_id} успешно удален.")
-        else:
-            await message.answer(f"❌ Арт с ID {art_id} не найден.")
-    except (IndexError, ValueError):
-        await message.answer("❌ Формат: /delete_art <ID_арта>")
+# cmd_delete_art → вынесен в services/admin_content.py
+# (доступен через re-export на top-level этого файла).
 
 
 @dp.message(Command("toggle_ai"))
@@ -4799,290 +4736,10 @@ async def process_cancel_state(callback: types.CallbackQuery, state: FSMContext)
     await callback.answer("Действие отменено ❌", show_alert=True)
 
 
-@dp.message(Command("add_chapter"))
-async def cmd_add_chapter(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.update_data(content_type='manga')
-    await state.set_state(UniversalContentUpload.waiting_for_id)
-    await message.answer("Выберите язык:", reply_markup=get_langs_menu("ucadd"))
-
-
-@dp.message(Command("add_ranobe"))
-async def cmd_add_ranobe(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.update_data(content_type='ranobe')
-    await state.set_state(UniversalContentUpload.waiting_for_id)
-    await message.answer("Выберите ранобэ:", reply_markup=get_ranobe_langs_menu("ucadd"))
-
-
-@dp.message(Command("add_akashic"))
-async def cmd_add_akashic(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.update_data(content_type='akashic')
-    await state.set_state(UniversalContentUpload.waiting_for_id)
-    await message.answer("📖 <b>Добавление Хроник Акаши</b>\nВведите номер тома (число):", parse_mode="HTML")
-
-
-@dp.message(Command("add_british"))
-async def cmd_add_british(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.update_data(content_type='british')
-    await state.set_state(UniversalContentUpload.waiting_for_id)
-    await message.answer("👸 <b>Добавление Британской красавицы</b>\nВведите номер тома (число):", parse_mode="HTML")
-
-
-# --- УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК: выбор ID (язык через callback или том через текст) ---
-@dp.callback_query(UniversalContentUpload.waiting_for_id, F.data.startswith("ucadd_"))
-async def uc_upload_id_callback(callback: types.CallbackQuery, state: FSMContext):
-    """Manga/Ranobe: выбор языка через inline-кнопку."""
-    await state.update_data(content_id=callback.data.split("_", 1)[1])
-    await state.set_state(UniversalContentUpload.waiting_for_chapter)
-    data = await state.get_data()
-    ct = CONTENT_TYPES.get(data.get('content_type', ''), {})
-    prompt = "Введите номер главы (или название, слитно):" if data.get('content_type') == 'ranobe' else "Введите номер главы:"
-    await callback.message.edit_text(prompt)
-
-
-@dp.message(UniversalContentUpload.waiting_for_id)
-async def uc_upload_id_text(message: types.Message, state: FSMContext):
-    """Akashic/British: ввод номера тома текстом."""
-    data = await state.get_data()
-    ct = CONTENT_TYPES.get(data.get('content_type', ''), {})
-    if ct.get('id_type') == 'volume':
-        if not message.text.strip().isdigit():
-            return await message.answer("❌ Введите число (номер тома):")
-        await state.update_data(content_id=int(message.text.strip()))
-    else:
-        await state.update_data(content_id=message.text.strip())
-    await state.set_state(UniversalContentUpload.waiting_for_chapter)
-    await message.answer("Введите номер главы:")
-
-
-@dp.message(UniversalContentUpload.waiting_for_chapter)
-async def uc_upload_chapter(message: types.Message, state: FSMContext):
-    await state.update_data(chapter=message.text.strip())
-    await state.set_state(UniversalContentUpload.waiting_for_link)
-    await message.answer("🔗 Отправьте ссылку на главу (можно несколько ссылок, каждую с новой строки, если глава разделена):")
-
-
-@dp.message(UniversalContentUpload.waiting_for_link, F.text)
-async def uc_upload_link(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    ctype = data.get('content_type', 'manga')
-    ct = CONTENT_TYPES.get(ctype, CONTENT_TYPES['manga'])
-    content_id = data.get('content_id', '')
-    chapter = data.get('chapter', '')
-    text_input = message.html_text.strip()
-
-    # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ
-    links = _clean_urls(text_input)
-
-    # ЛОГИКА:
-    # 1. Если в сообщении есть ЛЮБЫЕ готовые ссылки (Teletype, Telegraph, сторонние
-    #    ридеры) — сохраняем их как есть. Сопроводительный текст игнорируем: название
-    #    главы уже задано на прошлом шаге FSM, описание читалке не нужно.
-    # 2. Если ссылок нет, но есть длинный текст — конвертируем в Telegraph.
-    # 3. Короткий текст без ссылок — сохраняем как есть (fallback).
-
-    if links:
-        link = " ".join(links)
-    elif len(text_input) > 20:
-        # Чистый текст главы без ссылок -> собираем Telegraph-страницу.
-        wait_msg = await message.answer("📝 <i>Готовлю страницу Telegraph...</i>", parse_mode="HTML")
-        id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
-        title = f"{ct['emoji']} {ct['name']} — {id_label}, Глава {chapter}"
-
-        # Передаем HTML как есть, upload_to_telegraph теперь умеет его парсить
-        new_link = await upload_to_telegraph(title, text_input)
-        if new_link:
-            link = new_link
-            await wait_msg.delete()
-        else:
-            await wait_msg.edit_text("⚠️ Не удалось загрузить в Телеграф, сохраняю как есть.")
-            link = text_input  # Fallback
-    else:
-        # Совсем короткий текст без ссылок — сохраняем как есть.
-        link = text_input
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        # Получаем текущий макс. sort_order для этого тайтла/тома
-        async with db.execute(f'SELECT MAX(sort_order) FROM {ct["table"]} WHERE {ct["id_col"]} = ?', (content_id,)) as cursor:
-            row = await cursor.fetchone()
-            next_order = (row[0] or 0) + 1 if row else 1
-
-        await db.execute(
-            f'INSERT INTO {ct["table"]} ({ct["id_col"]}, {ct["chapter_col"]}, {ct["url_col"]}, sort_order) VALUES (?, ?, ?, ?) '
-            f'ON CONFLICT({ct["id_col"]}, {ct["chapter_col"]}) DO UPDATE SET {ct["url_col"]}=excluded.{ct["url_col"]}',
-            (content_id, chapter, link, next_order),
-        )
-        await db.commit()
-
-    # СИНХРОНИЗАЦИЯ: Обновляем JSON и пушим в GitHub
-    try:
-        invalidate_reader_cache("chapter_uploaded_via_bot")
-        result, _, _ = await get_cached_reader_data(force_refresh=True)
-        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-        # Раньше здесь был антипаттерн `series_id if 'series_id' in locals() else content_id`
-        # — `series_id` нигде не устанавливается, всегда работает fallback на content_id.
-        spawn_bg(run_git_sync(f"tg upload sync: {content_id}"), name="run_git_sync:tg_upload")
-    except Exception as e:
-        logging.error(f"Sync error: {e}")
-
-    # Формируем имя для уведомления
-    id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
-    await message.answer(f"✅ {ct['emoji']} {ct['name']}: глава {chapter} ({id_label}) добавлена!\n🔗 Ссылка: {link}")
-
-    builder = InlineKeyboardBuilder()
-    builder.button(text="🔔 Разослать по закладкам", callback_data="notify_bookmarks")
-    builder.button(text="📢 Разослать ВСЕМ", callback_data="notify_all")
-    builder.button(text="❌ Отмена", callback_data="notify_no")
-    builder.adjust(1)
-    series_key = (
-        f"manga_{content_id}"
-        if ctype == "manga"
-        else f"ranobe_{content_id}"
-        if ctype == "ranobe"
-        else "akashic_records"
-        if ctype == "akashic"
-        else "british_belle"
-        if ctype == "british"
-        else str(content_id)
-    )
-
-    await state.set_state(NotifyUsers.waiting_for_decision)
-    safe_id_label = escape_html_text(id_label)
-    safe_chapter = escape_html_text(chapter)
-    safe_link = escape_html_text(link)
-    await state.update_data(
-        notify_text=f"{ct['emoji']} <b>Вышла новая глава {ct['name']}!</b>\n{safe_id_label}, Глава {safe_chapter}\n🔗 {safe_link}",
-        series_id=series_key,
-    )
-    await message.answer("Выберите способ уведомления:", reply_markup=builder.as_markup())
-
-
-# --- УВЕДОМЛЕНИЯ ---
-@dp.callback_query(NotifyUsers.waiting_for_decision, F.data.startswith("notify_"))
-async def process_notification_decision(callback: types.CallbackQuery, state: FSMContext):
-    decision = callback.data.split("_")[1]
-    data = await state.get_data()
-    text = data.get("notify_text", "")
-    await state.clear()
-
-    if decision == "no":
-        return await callback.message.edit_text("Уведомление отменено.")
-
-    series_id = data.get("series_id")
-
-    if decision == "bookmarks":
-        await callback.message.edit_text("⏳ <i>Рассылаю уведомления читателям этого тайтла...</i>", parse_mode="HTML")
-        users = await get_users_with_bookmark(series_id)
-    else:
-        await callback.message.edit_text("⏳ <i>Начинаю массовую рассылку ВСЕМ пользователям...</i>", parse_mode="HTML")
-        users = await get_all_users()
-
-    count = 0
-    for user_id in users:
-        try:
-            await bot.send_message(chat_id=user_id, text=text, parse_mode="HTML")
-            count += 1
-            await asyncio.sleep(0.05)
-        except Exception as e:
-            logging.debug(f"notifications: failed to send to {user_id}: {e}")
-
-    await callback.message.answer(f"✅ Рассылка завершена!\nСообщение получили <b>{count}</b> пользователей.", parse_mode="HTML")
-
-
-# --- УНИВЕРСАЛЬНОЕ УДАЛЕНИЕ КОНТЕНТА ---
-@dp.message(Command("delete_chapter"))
-async def cmd_delete_chapter(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.update_data(content_type='manga')
-    await state.set_state(UniversalContentDelete.waiting_for_id)
-    await message.answer("Выберите язык для удаления главы манги:", reply_markup=get_langs_menu("ucdel"))
-
-
-@dp.message(Command("delete_ranobe"))
-async def cmd_delete_ranobe(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.update_data(content_type='ranobe')
-    await state.set_state(UniversalContentDelete.waiting_for_id)
-    await message.answer("Выберите ранобэ для удаления главы:", reply_markup=get_ranobe_langs_menu("ucdel"))
-
-
-@dp.message(Command("delete_akashic"))
-async def cmd_delete_akashic(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.update_data(content_type='akashic')
-    await state.set_state(UniversalContentDelete.waiting_for_id)
-    await message.answer("🗑 <b>Удаление Хроник Акаши</b>\nВведите номер тома (число):", parse_mode="HTML")
-
-
-@dp.message(Command("delete_british"))
-async def cmd_delete_british(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.update_data(content_type='british')
-    await state.set_state(UniversalContentDelete.waiting_for_id)
-    await message.answer("🗑 <b>Удаление Британской красавицы</b>\nВведите номер тома (число):", parse_mode="HTML")
-
-
-@dp.callback_query(UniversalContentDelete.waiting_for_id, F.data.startswith("ucdel_"))
-async def uc_delete_id_callback(callback: types.CallbackQuery, state: FSMContext):
-    await state.update_data(content_id=callback.data.split("_", 1)[1])
-    await state.set_state(UniversalContentDelete.waiting_for_chapter)
-    await callback.message.edit_text("Введите номер/название главы для удаления:")
-
-
-@dp.message(UniversalContentDelete.waiting_for_id)
-async def uc_delete_id_text(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    ct = CONTENT_TYPES.get(data.get('content_type', ''), {})
-    if ct.get('id_type') == 'volume':
-        if not message.text.strip().isdigit():
-            return await message.answer("❌ Введите число (номер тома):")
-        await state.update_data(content_id=int(message.text.strip()))
-    else:
-        await state.update_data(content_id=message.text.strip())
-    await state.set_state(UniversalContentDelete.waiting_for_chapter)
-    await message.answer("Введите номер/название главы для удаления:")
-
-
-@dp.message(UniversalContentDelete.waiting_for_chapter)
-async def uc_delete_chapter(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    ctype = data.get('content_type', 'manga')
-    ct = CONTENT_TYPES.get(ctype, CONTENT_TYPES['manga'])
-    content_id = data.get('content_id', '')
-    chapter = message.text.strip()
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(f'DELETE FROM {ct["table"]} WHERE {ct["chapter_col"]} = ? AND {ct["id_col"]} = ?', (chapter, content_id))
-        deleted = cursor.rowcount > 0
-        id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
-        if deleted:
-            await message.answer(f"✅ {ct['emoji']} {ct['name']}: глава {chapter} ({id_label}) успешно удалена из базы!")
-        else:
-            await message.answer(f"❌ {ct['emoji']} {ct['name']}: глава {chapter} ({id_label}) не найдена!")
-        await db.commit()
-    if deleted:
-        await sync_reader_snapshot(f"delete chapter via fsm: {ctype}_{content_id}_{chapter}")
-    await state.clear()
+# cmd_add_chapter/ranobe/akashic/british, cmd_delete_chapter/ranobe/akashic/british,
+# cmd_delete_art, uc_upload_*, uc_delete_*, process_notification_decision →
+# вынесены в services/admin_content.py (зарегистрированы на content_router
+# через декораторы при импорте на top-level; dp.include_router в main()).
 
 
 # ----------------------------------------
@@ -6331,6 +5988,7 @@ async def main():
     # `dp = Dispatcher()`). Attach к dp — только здесь, ОДИН раз за жизнь процесса.
     dp.include_router(art_router)
     dp.include_router(admin_router)
+    dp.include_router(content_router)
     await init_db()
 
     dp.message.outer_middleware(StatsMiddleware())
