@@ -3789,9 +3789,9 @@ function setDimmer(val) {
 
 
 function applySettings() {
-    // Тема
-    document.body.classList.remove('theme-sepia', 'theme-dark', 'theme-gray', 'theme-amoled');
-    if (settings.theme !== 'light') {
+    // Тема (Refresh v4: добавлены warm, high-contrast)
+    document.body.classList.remove('theme-sepia', 'theme-dark', 'theme-gray', 'theme-amoled', 'theme-warm', 'theme-high-contrast');
+    if (settings.theme && settings.theme !== 'light') {
         document.body.classList.add(`theme-${settings.theme}`);
     }
 
@@ -3810,9 +3810,10 @@ function applySettings() {
         readerText.style.lineHeight = settings.lineHeight;
         readerText.style.letterSpacing = settings.letterSpacing + 'px';
 
-        // Шрифт
+        // Шрифт (Refresh v4: поддержка mono)
         readerText.classList.remove('font-sans', 'font-slab', 'font-mono', 'font-montserrat', 'font-display');
         if (settings.font === 'sans') readerText.classList.add('font-sans');
+        if (settings.font === 'mono') readerText.classList.add('font-mono');
         if (settings.font === 'montserrat') readerText.classList.add('font-montserrat');
         if (settings.font === 'display') readerText.classList.add('font-display');
 

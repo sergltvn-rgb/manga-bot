@@ -274,6 +274,78 @@ body.theme-gray {
     --glass-border: rgba(255, 255, 255, 0.05);
 }
 
+/* Refresh v4: тёплая тема (мягкий тёмный с жёлтым акцентом) */
+body.theme-warm {
+    --bg: #1a1510;
+    --text: #e8dcc0;
+    --text-primary: #faf3e4;
+    --text-secondary: #b8a788;
+    --card-bg: #2a2218;
+    --card-border: rgba(251, 191, 36, 0.12);
+    --header-bg: #1a1510;
+    --accent: #fbbf24;
+    --accent-2: #f59e0b;
+    --accent-rgb: 251, 191, 36;
+    --accent-gradient: linear-gradient(135deg, #fbbf24 0%, #f97316 100%);
+    --accent-gradient-soft: linear-gradient(135deg, rgba(251,191,36,0.18), rgba(249,115,22,0.18));
+    --accent-light: rgba(251, 191, 36, 0.15);
+    --tab-active: #fbbf24;
+    --divider: rgba(251, 191, 36, 0.1);
+    --reader-bg: #1a1510;
+    --reader-text: #e8dcc0;
+    --input-bg: #2a2218;
+    --settings-bg: #1a1510;
+    --tab-bg: #2a2218;
+    --card-hover: rgba(251, 191, 36, 0.08);
+    --progress-gradient: linear-gradient(90deg, #fbbf24 0%, #f97316 100%);
+    --bg-secondary: #2a2218;
+    --text-main: #e8dcc0;
+    --glass-bg: rgba(26, 21, 16, 0.88);
+    --glass-border: rgba(251, 191, 36, 0.12);
+    --surface-1: #241c13;
+    --surface-2: #2e251a;
+    --surface-3: #3a2f22;
+    --surface-border: rgba(251, 191, 36, 0.1);
+    --surface-border-strong: rgba(251, 191, 36, 0.2);
+}
+
+/* Refresh v4: high-contrast тема (чистый чёрный + белый, для доступности) */
+body.theme-high-contrast {
+    --bg: #000000;
+    --text: #ffffff;
+    --text-primary: #ffffff;
+    --text-secondary: #d1d5db;
+    --card-bg: #000000;
+    --card-border: #ffffff;
+    --header-bg: #000000;
+    --accent: #ffff00;
+    --accent-2: #ffff00;
+    --accent-rgb: 255, 255, 0;
+    --accent-gradient: linear-gradient(135deg, #ffff00 0%, #ffd700 100%);
+    --accent-gradient-soft: rgba(255, 255, 0, 0.18);
+    --accent-light: rgba(255, 255, 0, 0.2);
+    --tab-active: #ffff00;
+    --divider: #ffffff;
+    --reader-bg: #000000;
+    --reader-text: #ffffff;
+    --input-bg: #000000;
+    --settings-bg: #000000;
+    --tab-bg: #000000;
+    --card-hover: rgba(255, 255, 255, 0.1);
+    --progress-gradient: linear-gradient(90deg, #ffff00 0%, #ffd700 100%);
+    --bg-secondary: #000000;
+    --text-main: #ffffff;
+    --glass-bg: rgba(0, 0, 0, 0.95);
+    --glass-border: #ffffff;
+    --surface-1: #000000;
+    --surface-2: #111111;
+    --surface-3: #222222;
+    --surface-border: rgba(255, 255, 255, 0.5);
+    --surface-border-strong: #ffffff;
+    --chip-bg: rgba(255, 255, 0, 0.2);
+    --chip-text: #ffff00;
+}
+
 /* === ГЛОБАЛЬНЫЕ ТЕМНЫЕ СКРОЛЛБАРЫ === */
 *::-webkit-scrollbar {
     width: 8px;
@@ -969,6 +1041,10 @@ div.r4-poster-placeholder.series-detail-cover-img { aspect-ratio: auto; }
 
 .reader-text.align-justify {
     text-align: justify;
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    word-break: normal;
+    overflow-wrap: break-word;
 }
 
 .reader-text a {
@@ -3583,6 +3659,15 @@ input:checked + .slider:before { transform: translateX(20px); }
 .theme-chip.theme-amoled::before {
     background: linear-gradient(135deg, #000000 50%, #141414 50%);
     box-shadow: inset 0 -8px 0 0 #a78bfa;
+}
+.theme-chip.theme-warm::before {
+    background: linear-gradient(135deg, #1a1510 50%, #2a2218 50%);
+    box-shadow: inset 0 -8px 0 0 #fbbf24;
+}
+.theme-chip.theme-high-contrast::before {
+    background: linear-gradient(135deg, #000000 50%, #222222 50%);
+    box-shadow: inset 0 -8px 0 0 #ffff00;
+    border: 1px solid #ffffff;
 }
 
 .theme-chip.active {
