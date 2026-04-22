@@ -249,17 +249,19 @@
           "custom_name": "Том 1",
           "chapters": [
             {
-              "chapter": "1",
-              "custom_name": "Часть 1",
-              "url": "",
-              "urls": []
-            },
-            {
               "chapter": "2",
               "custom_name": "Часть 2",
               "url": "https://teletype.in/@slitvin/The_warrior_Alya_part_2",
               "urls": [
                 "https://teletype.in/@slitvin/The_warrior_Alya_part_2"
+              ]
+            },
+            {
+              "chapter": "1",
+              "custom_name": "Часть 1",
+              "url": "https://teletype.in/@slitvin/The_warrior_Alya_part_1",
+              "urls": [
+                "https://teletype.in/@slitvin/The_warrior_Alya_part_1"
               ]
             }
           ]
