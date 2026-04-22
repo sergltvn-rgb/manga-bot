@@ -3924,17 +3924,21 @@ async def cmd_delete_admin(message: types.Message):
 @dp.message(Command("admin"), StateFilter("*"))
 async def cmd_admin(message: types.Message, state: FSMContext):
     logging.info(f"cmd_admin: enter uid={message.from_user.id} chat={message.chat.type}")
-    await state.clear()
-    if not await _is_bot_admin(message.from_user.id):
-        return
     try:
-        await message.answer(
-            await _build_admin_menu_text(),
-            parse_mode="HTML",
-            reply_markup=_build_admin_menu_kb(),
-        )
+        await state.clear()
+        logging.info("cmd_admin: step1 state cleared")
+        admin_ok = await _is_bot_admin(message.from_user.id)
+        logging.info(f"cmd_admin: step2 admin_ok={admin_ok}")
+        if not admin_ok:
+            return
+        text = await _build_admin_menu_text()
+        logging.info(f"cmd_admin: step3 menu text len={len(text)}")
+        kb = _build_admin_menu_kb()
+        logging.info("cmd_admin: step4 kb built, sending answer")
+        await message.answer(text, parse_mode="HTML", reply_markup=kb)
+        logging.info("cmd_admin: step5 answer sent")
     except Exception as e:
-        logging.exception(f"cmd_admin: answer failed: {e}")
+        logging.exception(f"cmd_admin: failed: {e}")
 
 
 @dp.callback_query(F.data == "admin_menu")
