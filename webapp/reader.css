@@ -1324,6 +1324,25 @@ body.keyboard-open #screen-reader .reader-scrubber-row { display: none; }
 /* Immersive state - removed progress bar shift */
 .immersive .reader-top-bar { transform: translateY(-100%); }
 .immersive .reader-bottom-bar { transform: translateY(100%); }
+/* Refresh v4.1: в immersive режиме FAB/admin-FAB сжимаются и блёкнут,
+   чтобы не перекрывать текст. Тап по ним всё ещё работает. */
+#screen-reader.immersive .fab-container,
+#screen-reader.immersive .admin-fab-container,
+#screen-reader.immersive .autoscroll-fab {
+    transform: scale(0.7);
+    opacity: 0.38;
+    filter: saturate(0.85);
+}
+#screen-reader.immersive .fab-container:hover,
+#screen-reader.immersive .admin-fab-container:hover,
+#screen-reader.immersive .autoscroll-fab:hover,
+#screen-reader.immersive .fab-container:active,
+#screen-reader.immersive .admin-fab-container:active,
+#screen-reader.immersive .autoscroll-fab:active {
+    transform: scale(1);
+    opacity: 1;
+    filter: none;
+}
 
 /* === ПАНЕЛЬ НАСТРОЕК === */
 .settings-overlay {
@@ -3088,6 +3107,29 @@ input:checked + .slider:before { transform: translateX(20px); }
    ★ READER 2.0: Auto-Hide UI Bars (Spring Physics)
    ========================================================================== */
 
+/* Overlay-режим: bars лежат поверх .reader-content, чтобы текст просвечивал
+   через blur-фон, а при скрытии UI текст заполнял весь экран без reflow. */
+#screen-reader .reader-top-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+}
+#screen-reader .reader-bottom-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+}
+/* Compensate for overlay: scroll-container занимает всю высоту,
+   а padding обеспечивает отступ под барами (чтобы первая/последняя строка
+   не скрывались). Safe-area учитывается через env(...). */
+#screen-reader .reader-content {
+    padding-top: calc(58px + env(safe-area-inset-top, 0px));
+}
+
 .reader-top-bar,
 .reader-bottom-bar {
     transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
@@ -3971,7 +4013,11 @@ input:checked + .slider:before { transform: translateX(20px); }
 }
 
 .reader-header, .reader-bottom-bar, .fab-container {
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, filter 0.25s ease;
+}
+#screen-reader .admin-fab-container,
+#screen-reader .autoscroll-fab {
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease, filter 0.25s ease;
 }
 
 /* --- Comment Roles & Branches --- */
