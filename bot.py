@@ -7369,6 +7369,150 @@ async def close_webapp_resources(_app: aiohttp.web.Application) -> None:
             logging.exception("Failed to close bot session during cleanup")
 
 
+# ============================================================================
+# АВТООЧИСТКА ГРУПП: сервисные сообщения + админ-команды
+# ----------------------------------------------------------------------------
+# 1) `/cleanup_service on|off` (админ чата) — переключатель.
+# 2) При включении бот (если сам админ) удаляет join/leave/pinned и др. сервисные.
+# 3) `/clean N` (админ чата) — удалить последние N bot-ответов в этом чате
+#    (скользит message_id назад от текущего сообщения команды).
+# ============================================================================
+
+CLEANUP_SERVICE_KEY_PREFIX = "cleanup_service:"
+
+
+async def _is_chat_admin(chat_id: int, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        return member.status in ("creator", "administrator")
+    except Exception:
+        return False
+
+
+async def _is_bot_admin(chat_id: int) -> bool:
+    try:
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id, me.id)
+        return member.status == "administrator"
+    except Exception:
+        return False
+
+
+@dp.message(Command("cleanup_service"))
+async def cmd_cleanup_service(message: types.Message):
+    if message.chat.type not in ("group", "supergroup"):
+        return await temp_reply(message, "Команда работает только в группах.", delay=TTL_ERROR)
+
+    if not await _is_chat_admin(message.chat.id, message.from_user.id):
+        return await temp_reply(message, "Только админы чата могут включать автоочистку.", delay=TTL_ERROR)
+
+    parts = (message.text or "").split(maxsplit=1)
+    arg = parts[1].strip().lower() if len(parts) > 1 else ""
+
+    key = f"{CLEANUP_SERVICE_KEY_PREFIX}{message.chat.id}"
+    current = (await get_setting(key)) or "off"
+
+    if arg in ("on", "вкл"):
+        if not await _is_bot_admin(message.chat.id):
+            return await temp_reply(
+                message,
+                "⚠️ Бот должен быть админом чата с правом удаления сообщений, чтобы чистить сервисные.",
+                delay=TTL_ERROR,
+            )
+        await set_setting(key, "on")
+        await reply_and_forget(message, "✅ Автоочистка сервисных сообщений включена.", ttl=TTL_MENU)
+    elif arg in ("off", "выкл"):
+        await set_setting(key, "off")
+        await reply_and_forget(message, "⛔ Автоочистка сервисных сообщений выключена.", ttl=TTL_MENU)
+    else:
+        await reply_and_forget(
+            message,
+            f"Автоочистка сервисных: <b>{current}</b>\nИспользование: /cleanup_service on|off",
+            ttl=TTL_MENU,
+            parse_mode="HTML",
+        )
+
+
+_SERVICE_CONTENT_TYPES = {
+    types.ContentType.NEW_CHAT_MEMBERS,
+    types.ContentType.LEFT_CHAT_MEMBER,
+    types.ContentType.PINNED_MESSAGE,
+    types.ContentType.NEW_CHAT_TITLE,
+    types.ContentType.NEW_CHAT_PHOTO,
+    types.ContentType.DELETE_CHAT_PHOTO,
+    types.ContentType.GROUP_CHAT_CREATED,
+    types.ContentType.SUPERGROUP_CHAT_CREATED,
+    types.ContentType.CHANNEL_CHAT_CREATED,
+    types.ContentType.MIGRATE_TO_CHAT_ID,
+    types.ContentType.MIGRATE_FROM_CHAT_ID,
+    types.ContentType.VIDEO_CHAT_STARTED,
+    types.ContentType.VIDEO_CHAT_ENDED,
+    types.ContentType.VIDEO_CHAT_PARTICIPANTS_INVITED,
+}
+
+
+@dp.message(F.content_type.in_(_SERVICE_CONTENT_TYPES))
+async def handle_service_message(message: types.Message):
+    """Удаляет сервисные сообщения, если автоочистка включена и бот — админ."""
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    key = f"{CLEANUP_SERVICE_KEY_PREFIX}{message.chat.id}"
+    state = await get_setting(key)
+    if state != "on":
+        return
+    try:
+        await message.delete()
+    except Exception as e:
+        logging.debug(f"handle_service_message: delete failed: {e}")
+
+
+@dp.message(Command("clean"))
+async def cmd_clean(message: types.Message):
+    if message.chat.type not in ("group", "supergroup"):
+        return await temp_reply(message, "Команда работает только в группах.", delay=TTL_ERROR)
+
+    if not await _is_chat_admin(message.chat.id, message.from_user.id):
+        return await temp_reply(message, "Только админы могут запускать /clean.", delay=TTL_ERROR)
+
+    parts = (message.text or "").split()
+    try:
+        n = int(parts[1]) if len(parts) > 1 else 10
+    except ValueError:
+        return await temp_reply(message, "Формат: /clean N (1-100)", delay=TTL_ERROR)
+
+    n = max(1, min(n, 100))
+    chat_id = message.chat.id
+    last_id = message.message_id
+
+    # Удаляем саму команду сразу.
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    deleted = 0
+    # Итерируем message_id назад от команды. Не все id бот удалит (только свои
+    # сообщения + не старше 48h), но Telegram вернёт ошибку и мы её проглотим.
+    for offset in range(1, n * 5 + 1):
+        mid = last_id - offset
+        if mid <= 0:
+            break
+        try:
+            await bot.delete_message(chat_id, mid)
+            deleted += 1
+            if deleted >= n:
+                break
+        except Exception:
+            continue
+
+    # Краткий итог ephemeral — исчезает через TTL_ERROR.
+    try:
+        note = await bot.send_message(chat_id, f"🧹 Удалено: {deleted}")
+        schedule_delete_once(note, TTL_ERROR)
+    except Exception:
+        pass
+
+
 async def main():
     dp.include_router(rp_router)
 
