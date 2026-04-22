@@ -345,151 +345,158 @@
     <div id="settings-overlay" class="modal-overlay hidden" onclick="toggleSettings()"></div>
     <div id="settings-panel" class="settings-panel hidden glass-panel">
         <div class="settings-header">Настройки читалки</div>
-        
-        <div class="settings-tabs">
-            <button class="settings-tab-btn active" id="tab-btn-font" onclick="showSettingsTab('font')">Шрифт</button>
-            <button class="settings-tab-btn" id="tab-btn-display" onclick="showSettingsTab('display')">Вид</button>
-            <button class="settings-tab-btn" id="tab-btn-nav" onclick="showSettingsTab('nav')">Навигация</button>
+
+        <!-- Refresh v5: sticky live-превью текущих стилей -->
+        <div class="settings-preview" id="settings-preview">
+            <p class="settings-preview-text">Это пример отрывка текста. Настройки применяются мгновенно — видно, как меняется шрифт, размер, межстрочный интервал и цветовая схема.</p>
         </div>
 
-        <!-- Tab: Font -->
-        <div id="settings-tab-font" class="settings-tab-content">
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-fontSize">Размер текста</label>
-                    <span id="label-fontSize" class="setting-value-badge">17px</span>
+        <!-- Refresh v5: все настройки в одной прокрутке, разделены section-titles -->
+        <div class="settings-scroll-body">
+
+            <div class="settings-section">
+                <div class="settings-section-title">Шрифт</div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-fontSize">Размер текста</label>
+                        <span id="label-fontSize" class="setting-value-badge">17px</span>
+                    </div>
+                    <input type="range" id="input-fontSize" min="12" max="30" value="17" step="1" oninput="setFontSize(this.value)">
                 </div>
-                <input type="range" id="input-fontSize" min="12" max="30" value="17" step="1" oninput="setFontSize(this.value)">
-            </div>
-            
-            <div class="setting-item-block">
-                <label>Шрифт</label>
-                <div class="segmented-control">
-                    <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">С засечками</button>
-                    <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
-                    <button onclick="setFont('mono')" data-font="mono" style="font-family: 'JetBrains Mono', monospace">Моно</button>
+
+                <div class="setting-item-block">
+                    <label>Шрифт</label>
+                    <div class="segmented-control">
+                        <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">С засечками</button>
+                        <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
+                        <button onclick="setFont('mono')" data-font="mono" style="font-family: 'JetBrains Mono', monospace">Моно</button>
+                    </div>
+                </div>
+
+                <div class="setting-item-block">
+                    <label>Выравнивание</label>
+                    <div class="segmented-control">
+                        <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
+                        <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
+                    </div>
+                </div>
+
+                <div class="setting-item-row">
+                    <div class="setting-info">
+                        <label for="input-dropCap">Буквица</label>
+                        <p class="setting-hint">Увеличенная первая буква главы</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="input-dropCap" onchange="setDropCap(this.checked)" checked>
+                        <span class="slider"></span>
+                    </label>
                 </div>
             </div>
 
-            <div class="setting-item-block">
-                <label>Выравнивание</label>
-                <div class="segmented-control">
-                    <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
-                    <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
+            <div class="settings-section">
+                <div class="settings-section-title">Дисплей</div>
+
+                <div class="setting-item-block">
+                    <label>Цветовая схема</label>
+                    <div class="theme-grid">
+                        <button class="theme-chip theme-light active" onclick="setTheme('light')" data-theme="light">Светлая</button>
+                        <button class="theme-chip theme-sepia" onclick="setTheme('sepia')" data-theme="sepia">Сепия</button>
+                        <button class="theme-chip theme-gray" onclick="setTheme('gray')" data-theme="gray">Серая</button>
+                        <button class="theme-chip theme-dark" onclick="setTheme('dark')" data-theme="dark">Темная</button>
+                        <button class="theme-chip theme-warm" onclick="setTheme('warm')" data-theme="warm">Тёплая</button>
+                        <button class="theme-chip theme-amoled" onclick="setTheme('amoled')" data-theme="amoled">Amoled</button>
+                        <button class="theme-chip theme-high-contrast" onclick="setTheme('high-contrast')" data-theme="high-contrast">Контраст</button>
+                    </div>
+                </div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-textWidth">Макс. ширина</label>
+                        <span id="label-textWidth" class="setting-value-badge">90%</span>
+                    </div>
+                    <input type="range" id="input-textWidth" min="50" max="100" value="90" step="1" oninput="setTextWidth(this.value)">
+                </div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-dimmerValue">Яркость экрана</label>
+                        <span id="label-dimmerValue" class="setting-value-badge">0%</span>
+                    </div>
+                    <input type="range" id="input-dimmerValue" min="0" max="85" value="0" step="5" oninput="setDimmer(this.value)">
+                </div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-lineHeight">Межстрочный интервал</label>
+                        <span id="label-lineHeight" class="setting-value-badge">1.8</span>
+                    </div>
+                    <input type="range" id="input-lineHeight" min="1.0" max="2.5" value="1.8" step="0.1" oninput="setLineHeight(this.value)">
+                </div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-letterSpacing">Расстояние между букв</label>
+                        <span id="label-letterSpacing" class="setting-value-badge">0px</span>
+                    </div>
+                    <input type="range" id="input-letterSpacing" min="-1" max="5" value="0" step="0.5" oninput="setLetterSpacing(this.value)">
                 </div>
             </div>
 
-            <div class="setting-item-row">
-                <div class="setting-info">
-                    <label for="input-dropCap">Буквица</label>
-                    <p class="setting-hint">Увеличенная первая буква главы</p>
+            <div class="settings-section">
+                <div class="settings-section-title">Навигация</div>
+
+                <div class="setting-item-row">
+                    <div class="setting-info">
+                        <label for="indent-toggle">Красная строка</label>
+                        <p class="setting-hint">Отступ первого абзаца</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="indent-toggle" checked onchange="setIndent(this.checked)">
+                        <span class="slider round"></span>
+                    </label>
                 </div>
-                <label class="switch">
-                    <input type="checkbox" id="input-dropCap" onchange="setDropCap(this.checked)" checked>
-                    <span class="slider"></span>
-                </label>
+
+                <div class="setting-item-block" id="para-indent-group">
+                    <div class="setting-label-row">
+                        <label for="input-paraIndent">Размер отступа</label>
+                        <span id="label-paraIndent" class="setting-value-badge">25px</span>
+                    </div>
+                    <input type="range" id="input-paraIndent" min="0" max="60" value="25" step="5" oninput="setParaIndent(this.value)">
+                </div>
+
+                <div class="setting-item-row">
+                    <div class="setting-info">
+                        <label for="autoscroll-toggle">Автопрокрутка</label>
+                        <p class="setting-hint">Листать текст автоматически</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+
+                <div class="setting-item-block autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
+                    <div class="setting-label-row">
+                        <label for="autoscroll-speed">Скорость прокрутки</label>
+                    </div>
+                    <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
+                </div>
+
+                <div class="setting-item-row" id="admin-mode-setting">
+                    <div class="setting-info">
+                        <label for="admin-mode-toggle">Режим редактора</label>
+                        <p class="setting-hint" id="admin-mode-hint">Только для администраторов</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
             </div>
+
         </div>
 
-        <!-- Tab: Display -->
-        <div id="settings-tab-display" class="settings-tab-content hidden">
-            <div class="setting-item-block">
-                <label>Цветовая схема</label>
-                <div class="theme-grid">
-                    <button class="theme-chip theme-light active" onclick="setTheme('light')" data-theme="light">Светлая</button>
-                    <button class="theme-chip theme-sepia" onclick="setTheme('sepia')" data-theme="sepia">Сепия</button>
-                    <button class="theme-chip theme-gray" onclick="setTheme('gray')" data-theme="gray">Серая</button>
-                    <button class="theme-chip theme-dark" onclick="setTheme('dark')" data-theme="dark">Темная</button>
-                    <button class="theme-chip theme-warm" onclick="setTheme('warm')" data-theme="warm">Тёплая</button>
-                    <button class="theme-chip theme-amoled" onclick="setTheme('amoled')" data-theme="amoled">Amoled</button>
-                    <button class="theme-chip theme-high-contrast" onclick="setTheme('high-contrast')" data-theme="high-contrast">Контраст</button>
-                </div>
-            </div>
-
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-textWidth">Макс. ширина</label>
-                    <span id="label-textWidth" class="setting-value-badge">90%</span>
-                </div>
-                <input type="range" id="input-textWidth" min="50" max="100" value="90" step="1" oninput="setTextWidth(this.value)">
-            </div>
-
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-dimmerValue">Яркость экрана</label>
-                    <span id="label-dimmerValue" class="setting-value-badge">0%</span>
-                </div>
-                <input type="range" id="input-dimmerValue" min="0" max="85" value="0" step="5" oninput="setDimmer(this.value)">
-            </div>
-
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-lineHeight">Межстрочный интервал</label>
-                    <span id="label-lineHeight" class="setting-value-badge">1.8</span>
-                </div>
-                <input type="range" id="input-lineHeight" min="1.0" max="2.5" value="1.8" step="0.1" oninput="setLineHeight(this.value)">
-            </div>
-            
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-letterSpacing">Расстояние между букв</label>
-                    <span id="label-letterSpacing" class="setting-value-badge">0px</span>
-                </div>
-                <input type="range" id="input-letterSpacing" min="-1" max="5" value="0" step="0.5" oninput="setLetterSpacing(this.value)">
-            </div>
-        </div>
-
-        <!-- Tab: Navigation -->
-        <div id="settings-tab-nav" class="settings-tab-content hidden">
-            <div class="setting-item-row">
-                <div class="setting-info">
-                    <label for="indent-toggle">Красная строка</label>
-                    <p class="setting-hint">Отступ первого абзаца</p>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="indent-toggle" checked onchange="setIndent(this.checked)">
-                    <span class="slider round"></span>
-                </label>
-            </div>
-
-            <div class="setting-item-block" id="para-indent-group">
-                <div class="setting-label-row">
-                    <label for="input-paraIndent">Размер отступа</label>
-                    <span id="label-paraIndent" class="setting-value-badge">25px</span>
-                </div>
-                <input type="range" id="input-paraIndent" min="0" max="60" value="25" step="5" oninput="setParaIndent(this.value)">
-            </div>
-            
-            <div class="setting-item-row">
-                <div class="setting-info">
-                    <label for="autoscroll-toggle">Автопрокрутка</label>
-                    <p class="setting-hint">Листать текст автоматически</p>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
-                    <span class="slider round"></span>
-                </label>
-            </div>
-
-            <div class="setting-item-block autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
-                <div class="setting-label-row">
-                    <label for="autoscroll-speed">Скорость прокрутки</label>
-                </div>
-                <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
-            </div>
-
-            <div class="setting-item-row" id="admin-mode-setting" style="margin-top:16px; border-top:1px solid var(--divider); padding-top:16px;">
-                <div class="setting-info">
-                    <label for="admin-mode-toggle">Режим редактора</label>
-                    <p class="setting-hint" id="admin-mode-hint">Только для администраторов</p>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
-                    <span class="slider round"></span>
-                </label>
-            </div>
-        </div>
-        
         <button class="close-settings-btn" onclick="toggleSettings()">Готово</button>
     </div>
 

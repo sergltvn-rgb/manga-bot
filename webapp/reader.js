@@ -3868,21 +3868,37 @@ function scheduleCurrentVolumeWarmup() {
     }, 90);
 }
 
+// Refresh v5: табы удалены — функция осталась no-op для обратной совместимости
 function showSettingsTab(tabName) {
-    const contents = document.querySelectorAll('.settings-tab-content');
-    const buttons = document.querySelectorAll('.settings-tab-btn');
-    
-    contents.forEach(content => {
-        content.classList.add('hidden');
-        content.classList.remove('animate-slide-in');
-    });
-    buttons.forEach(btn => btn.classList.remove('active'));
-    
     const activeContent = document.getElementById(`settings-tab-${tabName}`);
-    activeContent.classList.remove('hidden');
-    activeContent.classList.add('animate-slide-in');
-    
-    document.getElementById(`tab-btn-${tabName}`).classList.add('active');
+    if (activeContent) {
+        activeContent.classList.remove('hidden');
+    }
+}
+
+// Refresh v5: live-превью в настройках. Копирует текущие стили `.reader-text` в `.settings-preview-text`.
+function syncSettingsPreview() {
+    const preview = document.getElementById('settings-preview');
+    const previewText = preview ? preview.querySelector('.settings-preview-text') : null;
+    if (!preview || !previewText) return;
+
+    // Маппинг font-key → font-family (зеркалит applySettings)
+    const fontMap = {
+        serif: "'Noto Serif', Georgia, serif",
+        sans: "Inter, -apple-system, system-ui, sans-serif",
+        mono: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
+        display: "'Playfair Display', serif"
+    };
+    const fontKey = settings && settings.font ? settings.font : 'serif';
+    previewText.style.fontFamily = fontMap[fontKey] || fontMap.serif;
+
+    if (settings) {
+        if (settings.fontSize) previewText.style.fontSize = (settings.fontSize * 0.85) + 'px';
+        if (settings.lineHeight) previewText.style.lineHeight = String(settings.lineHeight);
+        if (typeof settings.letterSpacing === 'number') previewText.style.letterSpacing = settings.letterSpacing + 'px';
+        if (settings.textAlign) previewText.style.textAlign = settings.textAlign;
+    }
+    // Фон и цвет берутся из CSS-переменных темы автоматически через .settings-preview{background:var(--reader-bg)}
 }
 
 function updateSettingsUI() {
@@ -3982,6 +3998,9 @@ function applySettings() {
         };
         tg.setHeaderColor(colors[settings.theme] || '#ffffff');
     } catch (e) { }
+
+    // Refresh v5: синхронизация live-превью в настройках (если панель открыта)
+    syncSettingsPreview();
 }
 
 function saveSettings() {

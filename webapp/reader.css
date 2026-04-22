@@ -1375,7 +1375,9 @@ body.keyboard-open #screen-reader .reader-scrubber-row { display: none; }
     transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
     box-shadow: var(--shadow-pop);
     max-height: 88vh;
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* v5: скролл только внутри .settings-scroll-body */
     overscroll-behavior: contain;
 }
 /* Drag-handle поверх панели (псевдоэлемент — можно грейбить визуально) */
@@ -1387,10 +1389,87 @@ body.keyboard-open #screen-reader .reader-scrubber-row { display: none; }
     border-radius: 2px;
     background: var(--surface-border-strong);
     margin: var(--space-3) auto var(--space-3);
+    flex-shrink: 0;
 }
 
 .settings-panel.hidden {
     transform: translateY(100%);
+}
+
+/* Refresh v5: live-превью текста сверху */
+.settings-panel .settings-preview {
+    flex-shrink: 0;
+    margin: 0 calc(-1 * var(--space-5)) var(--space-3);
+    padding: var(--space-3) var(--space-5);
+    background: var(--reader-bg, var(--surface-2));
+    border-top: 1px solid var(--surface-border);
+    border-bottom: 1px solid var(--surface-border);
+    transition: background 0.25s ease;
+}
+.settings-preview-text {
+    margin: 0;
+    color: var(--reader-text, var(--text-main));
+    /* live-свойства обновляются из JS: font-family, font-size, line-height, letter-spacing, text-align */
+    font-family: 'Noto Serif', Georgia, serif;
+    font-size: 14px;
+    line-height: 1.55;
+    letter-spacing: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    line-clamp: 3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: font-family 0.18s, font-size 0.18s, line-height 0.18s, letter-spacing 0.18s, color 0.25s;
+}
+
+/* v5: собственно скроллируемое тело настроек */
+.settings-scroll-body {
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+}
+.settings-scroll-body::-webkit-scrollbar { width: 4px; }
+.settings-scroll-body::-webkit-scrollbar-thumb {
+    background: var(--surface-border-strong);
+    border-radius: 3px;
+}
+
+.settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.settings-section-title {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--surface-border);
+    margin-bottom: 4px;
+}
+
+/* Flat setting-blocks — без фона/border, тонкие разделители. */
+.settings-panel .setting-item-block,
+.settings-panel .setting-item-row {
+    background: transparent;
+    border: none;
+    padding: 6px 0;
+}
+.settings-panel .setting-item-block + .setting-item-block,
+.settings-panel .setting-item-block + .setting-item-row,
+.settings-panel .setting-item-row + .setting-item-block,
+.settings-panel .setting-item-row + .setting-item-row {
+    border-top: 1px solid color-mix(in srgb, var(--surface-border) 60%, transparent);
+    padding-top: 10px;
+    margin-top: 2px;
 }
 
 .reaction-item.active .reaction-icon-wrapper {
@@ -3789,38 +3868,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 
 /* Deleted duplicate progress bar styles */
 
-/* --- Categorized Settings Panel --- */
-.settings-tabs {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 20px;
-    border-bottom: 1px solid var(--divider);
-    padding-bottom: 8px;
-}
-
-.settings-tab-btn {
-    padding: 8px 12px;
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-    border-radius: 8px;
-}
-
-.settings-tab-btn.active {
-    color: var(--accent);
-    background: var(--badge-bg);
-}
-
-.settings-tab-content {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
+/* Refresh v5: tabs удалены. Осталось только скрытие .hidden для обратной совместимости. */
 .settings-tab-content.hidden {
     display: none;
 }
