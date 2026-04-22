@@ -408,6 +408,12 @@ class AdminRename(StatesGroup):
     waiting_for_name = State()
 
 
+class AdminManage(StatesGroup):
+    """FSM для управления админами из /admin-панели."""
+    waiting_for_new_admin_id = State()
+    waiting_for_blacklist_id = State()
+
+
 class BritishCallback(CallbackData, prefix="british"):
     action: str
     volume: int = 0
@@ -3685,11 +3691,141 @@ async def handle_grid_art_number_input(message: types.Message, state: FSMContext
 
 # ==============================================================================
 # БЛОК 10: АДМИН-ПАНЕЛЬ
+# ------------------------------------------------------------------------------
+# Helpers ниже используются всеми callback'ами панели. Главное меню теперь
+# собирается один раз через _build_admin_menu_kb() и показывает живые метрики
+# через _fetch_admin_metrics(). Каждый callback проверяет права через
+# _require_admin() чтобы незалогиненный юзер не мог дергать admin-кнопки по
+# старому сообщению или переслаке.
 # ==============================================================================
+
+MAIN_ADMIN_ID = 6210312655  # Главного админа нельзя удалить
+
+
+async def _is_bot_admin(user_id: int) -> bool:
+    """True если user_id в списке админов бота."""
+    try:
+        admins = await get_admins()
+    except Exception as e:
+        logging.debug(f"_is_bot_admin: get_admins failed: {e}")
+        return False
+    return user_id in admins
+
+
+async def _require_admin(event: Union[types.Message, types.CallbackQuery]) -> bool:
+    """Единая проверка прав админа.
+    Для callback — отвечает через answer(alert=False) и возвращает False.
+    Для message — молча возвращает False (не спамим в чат).
+    """
+    uid = event.from_user.id if event.from_user else 0
+    if await _is_bot_admin(uid):
+        return True
+    if isinstance(event, types.CallbackQuery):
+        try:
+            await event.answer("🚫 Нет прав.", show_alert=False)
+        except Exception:
+            pass
+    return False
+
+
+async def _fetch_admin_metrics() -> dict:
+    """Одним блоком собирает живые метрики для главного меню /admin."""
+    metrics: dict = {
+        "users_total": 0, "users_active_24h": 0,
+        "msgs_24h": 0, "cmt_24h": 0,
+        "ch_manga": 0, "ch_ranobe": 0, "ch_akashic": 0, "ch_british": 0,
+        "marriages": 0, "total_balance": 0,
+    }
+    try:
+        async with aiosqlite.connect('manga.db') as db:
+            async with db.execute('SELECT COUNT(*) FROM users_stats') as c:
+                row = await c.fetchone()
+                metrics["users_total"] = row[0] if row else 0
+            # messages за 24ч через events (если есть), иначе из users_stats диффа
+            async with db.execute('SELECT COALESCE(SUM(balance), 0) FROM users_stats') as c:
+                row = await c.fetchone()
+                metrics["total_balance"] = row[0] if row else 0
+            async with db.execute('SELECT COUNT(*) FROM chapters_urls') as c:
+                row = await c.fetchone()
+                metrics["ch_manga"] = row[0] if row else 0
+            async with db.execute('SELECT COUNT(*) FROM ranobe_urls') as c:
+                row = await c.fetchone()
+                metrics["ch_ranobe"] = row[0] if row else 0
+            try:
+                async with db.execute('SELECT COUNT(*) FROM akashic_ranobe') as c:
+                    row = await c.fetchone()
+                    metrics["ch_akashic"] = row[0] if row else 0
+            except Exception:
+                pass
+            try:
+                async with db.execute('SELECT COUNT(*) FROM british_ranobe') as c:
+                    row = await c.fetchone()
+                    metrics["ch_british"] = row[0] if row else 0
+            except Exception:
+                pass
+            try:
+                async with db.execute('SELECT COUNT(*) FROM marriages') as c:
+                    row = await c.fetchone()
+                    metrics["marriages"] = row[0] if row else 0
+            except Exception:
+                pass
+            # Комментарии за сутки (если таблица comments есть)
+            try:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM comments WHERE created_at >= datetime('now', '-1 day')"
+                ) as c:
+                    row = await c.fetchone()
+                    metrics["cmt_24h"] = row[0] if row else 0
+            except Exception:
+                pass
+    except Exception as e:
+        logging.debug(f"_fetch_admin_metrics: {e}")
+    return metrics
+
+
+def _build_admin_menu_kb() -> types.InlineKeyboardMarkup:
+    """Главная клавиатура /admin. Единая точка сборки — меняется 1 раз."""
+    b = InlineKeyboardBuilder()
+    b.row(
+        types.InlineKeyboardButton(text="➕ Добавить главу", callback_data="admin_add_chapter"),
+        types.InlineKeyboardButton(text="🗑 Удалить главу", callback_data="admin_del_chapter"),
+    )
+    b.row(
+        types.InlineKeyboardButton(text="🔄 Синхронизация WebApp", callback_data="admin_sync_webapp"),
+    )
+    b.row(
+        types.InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
+        types.InlineKeyboardButton(text="👑 Админы", callback_data="admin_admins"),
+    )
+    b.row(
+        types.InlineKeyboardButton(text="⚙ Настройки", callback_data="admin_settings"),
+        types.InlineKeyboardButton(text="🤖 ИИ", callback_data="admin_ai_settings"),
+    )
+    b.row(
+        types.InlineKeyboardButton(text="🔔 Тест уведомлений", callback_data="admin_cmd_test_notification"),
+    )
+    return b.as_markup()
+
+
+async def _build_admin_menu_text() -> str:
+    """Текст главного меню с живыми метриками."""
+    m = await _fetch_admin_metrics()
+    ch_total = m["ch_manga"] + m["ch_ranobe"] + m["ch_akashic"] + m["ch_british"]
+    return (
+        "👑 <b>Панель управления</b>\n"
+        f"👥 <b>{m['users_total']}</b> юзеров · "
+        f"📚 <b>{ch_total}</b> глав · "
+        f"🗨 <b>{m['cmt_24h']}</b> комм/сутки\n"
+        f"💍 браков: <b>{m['marriages']}</b> · "
+        f"💰 в обороте: <b>{m['total_balance']}</b>\n\n"
+        "<i>Выберите раздел:</i>"
+    )
+
+
 @dp.message(Command("add_admin"))
 async def cmd_add_admin(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins: return
+    if not await _is_bot_admin(message.from_user.id):
+        return
     try:
         new_admin = int(message.text.split()[1])
         await add_admin(new_admin)
@@ -3697,124 +3833,369 @@ async def cmd_add_admin(message: types.Message):
     except (IndexError, ValueError):
         await message.answer("❌ Формат: /add_admin <id_пользователя>")
 
+
 @dp.message(Command("delete_admin"))
 async def cmd_delete_admin(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins: return
+    if not await _is_bot_admin(message.from_user.id):
+        return
     try:
         del_admin = int(message.text.split()[1])
-        if del_admin == 6210312655:
+        if del_admin == MAIN_ADMIN_ID:
             return await message.answer("❌ Главного администратора удалить нельзя!")
         await remove_admin(del_admin)
         await message.answer(f"✅ Пользователь {del_admin} удален из администраторов.")
     except (IndexError, ValueError):
         await message.answer("❌ Формат: /delete_admin <id_пользователя>")
 
+
 @dp.message(Command("admin"))
 async def cmd_admin(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins: return
-    
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="➕ Добавить Главу", callback_data="admin_add_chapter"),
-        types.InlineKeyboardButton(text="🗑 Удалить Главу", callback_data="admin_del_chapter")
+    if not await _is_bot_admin(message.from_user.id):
+        return
+    await message.answer(
+        await _build_admin_menu_text(),
+        parse_mode="HTML",
+        reply_markup=_build_admin_menu_kb(),
     )
-    builder.row(
-        types.InlineKeyboardButton(text="🔄 Синхронизация WebApp (Github)", callback_data="admin_sync_webapp")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="🤖 Настройки ИИ", callback_data="admin_ai_settings")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="🔔 Тест уведомлений", callback_data="admin_cmd_test_notification")
-    )
-    
-    text = "👑 <b>Панель управления:</b>\nВыберите действие:"
-    await message.answer(text, parse_mode="HTML", reply_markup=builder.as_markup())
+
 
 @dp.callback_query(F.data == "admin_menu")
 async def admin_menu_back(callback: types.CallbackQuery):
-    builder = InlineKeyboardBuilder()
-    builder.row(
-        types.InlineKeyboardButton(text="➕ Добавить Главу", callback_data="admin_add_chapter"),
-        types.InlineKeyboardButton(text="🗑 Удалить Главу", callback_data="admin_del_chapter")
+    if not await _require_admin(callback):
+        return
+    await callback.message.edit_text(
+        await _build_admin_menu_text(),
+        parse_mode="HTML",
+        reply_markup=_build_admin_menu_kb(),
     )
-    builder.row(
-        types.InlineKeyboardButton(text="🔄 Синхронизация WebApp (Github)", callback_data="admin_sync_webapp")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="🤖 Настройки ИИ", callback_data="admin_ai_settings")
-    )
-    builder.row(
-        types.InlineKeyboardButton(text="🔔 Тест уведомлений", callback_data="admin_cmd_test_notification")
-    )
-    await callback.message.edit_text("👑 <b>Панель управления:</b>\nВыберите действие:", parse_mode="HTML", reply_markup=builder.as_markup())
+    await callback.answer()
 
 @dp.callback_query(F.data == "admin_add_chapter")
 async def admin_menu_add_chapter(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="Манга", callback_data="admin_cmd_add_chapter"),
-        types.InlineKeyboardButton(text="Ранобэ", callback_data="admin_cmd_add_ranobe")
+        types.InlineKeyboardButton(text="Ранобэ", callback_data="admin_cmd_add_ranobe"),
     )
     builder.row(
         types.InlineKeyboardButton(text="Хроники Акаши", callback_data="admin_cmd_add_akashic"),
-        types.InlineKeyboardButton(text="Брит. красавица", callback_data="admin_cmd_add_british")
+        types.InlineKeyboardButton(text="Брит. красавица", callback_data="admin_cmd_add_british"),
     )
     builder.row(types.InlineKeyboardButton(text="Арт", callback_data="admin_cmd_add_art"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
     await callback.message.edit_text("➕ <b>Что добавить?</b>", parse_mode="HTML", reply_markup=builder.as_markup())
+    await callback.answer()
+
 
 @dp.callback_query(F.data == "admin_del_chapter")
 async def admin_menu_del_chapter(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="Манга", callback_data="admin_cmd_delete_chapter"),
-        types.InlineKeyboardButton(text="Ранобэ", callback_data="admin_cmd_delete_ranobe")
+        types.InlineKeyboardButton(text="Ранобэ", callback_data="admin_cmd_delete_ranobe"),
     )
     builder.row(
         types.InlineKeyboardButton(text="Хроники Акаши", callback_data="admin_cmd_delete_akashic"),
-        types.InlineKeyboardButton(text="Брит. красавица", callback_data="admin_cmd_delete_british")
+        types.InlineKeyboardButton(text="Брит. красавица", callback_data="admin_cmd_delete_british"),
     )
     builder.row(types.InlineKeyboardButton(text="Арт", callback_data="admin_cmd_delete_art"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
     await callback.message.edit_text("🗑 <b>Что удалить?</b>", parse_mode="HTML", reply_markup=builder.as_markup())
+    await callback.answer()
+
 
 @dp.callback_query(F.data == "admin_ai_settings")
 async def admin_menu_ai_settings(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
     builder = InlineKeyboardBuilder()
     builder.row(
         types.InlineKeyboardButton(text="Вкл/выкл ИИ", callback_data="admin_cmd_toggle_ai"),
-        types.InlineKeyboardButton(text="Режим Али", callback_data="admin_cmd_alya_mode")
+        types.InlineKeyboardButton(text="Режим Али", callback_data="admin_cmd_alya_mode"),
     )
     builder.row(
         types.InlineKeyboardButton(text="ЧС (ИИ)", callback_data="admin_cmd_blacklist_ai"),
-        types.InlineKeyboardButton(text="Удалить из ЧС", callback_data="admin_cmd_unblacklist_ai")
+        types.InlineKeyboardButton(text="Удалить из ЧС", callback_data="admin_cmd_unblacklist_ai"),
     )
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
     await callback.message.edit_text("🤖 <b>Настройки ИИ:</b>", parse_mode="HTML", reply_markup=builder.as_markup())
+    await callback.answer()
+
 
 @dp.callback_query(F.data == "admin_sync_webapp")
 async def admin_menu_sync_webapp(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
     await callback.message.delete()
-    try:
-        msg = callback.message.model_copy(update={"from_user": callback.from_user, "text": "/sync_webapp"})
-    except AttributeError:
-        msg = callback.message.copy(update={"from_user": callback.from_user, "text": "/sync_webapp"})
+    msg = _fake_admin_message(callback, "/sync_webapp")
+    if msg is None:
+        return await callback.answer("⚠️ Не удалось запустить действие.", show_alert=True)
     await cmd_sync_webapp(msg)
     await callback.answer()
 
+
+# ------------------------------------------------------------------
+# Секция: 📊 Статистика
+# ------------------------------------------------------------------
+@dp.callback_query(F.data == "admin_stats")
+async def admin_menu_stats(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    m = await _fetch_admin_metrics()
+    text = (
+        "📊 <b>Статистика бота</b>\n\n"
+        f"👥 Пользователи: <b>{m['users_total']}</b>\n"
+        f"💰 В обороте: <b>{m['total_balance']}</b>\n\n"
+        f"📚 <b>Главы</b>\n"
+        f"├ Манга: <b>{m['ch_manga']}</b>\n"
+        f"├ Ранобэ: <b>{m['ch_ranobe']}</b>\n"
+        f"├ Хроники Акаши: <b>{m['ch_akashic']}</b>\n"
+        f"└ Брит. красавица: <b>{m['ch_british']}</b>\n\n"
+        f"🗨 Комментариев за сутки: <b>{m['cmt_24h']}</b>\n"
+        f"💍 Активных браков: <b>{m['marriages']}</b>"
+    )
+    b = InlineKeyboardBuilder()
+    b.row(types.InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_stats"))
+    b.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=b.as_markup())
+    await callback.answer()
+
+
+# ------------------------------------------------------------------
+# Секция: 👑 Админы
+# ------------------------------------------------------------------
+async def _build_admins_list_kb(admins_list: list[int]) -> types.InlineKeyboardMarkup:
+    """Клавиатура с кнопками удаления + add + back."""
+    b = InlineKeyboardBuilder()
+    for uid in admins_list:
+        # Главного админа не даём удалить
+        if uid == MAIN_ADMIN_ID:
+            continue
+        b.row(types.InlineKeyboardButton(
+            text=f"➖ Удалить {uid}",
+            callback_data=f"admin_rm:{uid}",
+        ))
+    b.row(
+        types.InlineKeyboardButton(text="➕ Добавить", callback_data="admin_add_new"),
+        types.InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_admins"),
+    )
+    b.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"))
+    return b.as_markup()
+
+
+async def _render_admins_section(callback: types.CallbackQuery):
+    admins_list = sorted(await get_admins())
+    lines = ["👑 <b>Администраторы</b>\n"]
+    for idx, uid in enumerate(admins_list, 1):
+        profile = None
+        try:
+            async with aiosqlite.connect('manga.db') as db:
+                async with db.execute(
+                    'SELECT username, first_name FROM user_profiles WHERE user_id = ?', (uid,)
+                ) as c:
+                    profile = await c.fetchone()
+        except Exception:
+            pass
+        if profile:
+            uname, fname = profile
+            display = escape_html_text(fname or uname or f"user#{uid}")
+            at = f" (@{escape_html_text(uname)})" if uname else ""
+        else:
+            display, at = f"user#{uid}", ""
+        star = " ⭐ главный" if uid == MAIN_ADMIN_ID else ""
+        lines.append(f"{idx}. <code>{uid}</code> — <b>{display}</b>{at}{star}")
+    text = "\n".join(lines)
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=await _build_admins_list_kb(admins_list),
+    )
+
+
+@dp.callback_query(F.data == "admin_admins")
+async def admin_menu_admins(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    await _render_admins_section(callback)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("admin_rm:"))
+async def admin_menu_admins_remove(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    try:
+        uid = int(callback.data.split(":", 1)[1])
+    except (ValueError, IndexError):
+        return await callback.answer("Некорректный id.", show_alert=True)
+    if uid == MAIN_ADMIN_ID:
+        return await callback.answer("Главного админа удалить нельзя.", show_alert=True)
+    try:
+        await remove_admin(uid)
+    except Exception as e:
+        logging.warning(f"admin_menu_admins_remove: {e}")
+        return await callback.answer(f"Ошибка: {type(e).__name__}", show_alert=True)
+    await callback.answer(f"✅ Удалён: {uid}")
+    await _render_admins_section(callback)
+
+
+@dp.callback_query(F.data == "admin_add_new")
+async def admin_menu_admins_add_prompt(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await state.set_state(AdminManage.waiting_for_new_admin_id)
+    await callback.message.edit_text(
+        "➕ <b>Добавление админа</b>\n\nОтправьте числовой <code>user_id</code> нового админа "
+        "одним сообщением в этот чат.\n\n<i>Для отмены — /cancel</i>",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@dp.message(StateFilter(AdminManage.waiting_for_new_admin_id))
+async def admin_manage_new_id(message: types.Message, state: FSMContext):
+    if not await _is_bot_admin(message.from_user.id):
+        return await state.clear()
+    text = (message.text or "").strip()
+    if not text.lstrip("-").isdigit():
+        return await message.answer("❌ Нужно число (user_id). Попробуйте ещё раз или /cancel.")
+    new_admin = int(text)
+    try:
+        await add_admin(new_admin)
+    except Exception as e:
+        await state.clear()
+        return await message.answer(f"❌ Ошибка: {type(e).__name__}")
+    await state.clear()
+    await message.answer(
+        f"✅ Админ добавлен: <code>{new_admin}</code>",
+        parse_mode="HTML",
+        reply_markup=_build_admin_menu_kb(),
+    )
+
+
+# ------------------------------------------------------------------
+# Секция: ⚙ Системные настройки
+# ------------------------------------------------------------------
+async def _build_settings_text_and_kb() -> tuple[str, types.InlineKeyboardMarkup]:
+    # Читаем актуальные значения тогглов из settings таблицы.
+    sync_locked = False
+    cleanup_on = False
+    alya_mode = "normal"
+    try:
+        v = await get_setting("sync_locked")
+        sync_locked = str(v or "0") == "1"
+    except Exception:
+        pass
+    try:
+        v = await get_setting("cleanup_service")
+        cleanup_on = str(v or "0") == "1"
+    except Exception:
+        pass
+    try:
+        v = await get_setting("alya_mode")
+        if v:
+            alya_mode = str(v)
+    except Exception:
+        pass
+
+    text = (
+        "⚙ <b>Системные настройки</b>\n\n"
+        f"🔒 Sync WebApp: <b>{'🔴 ЗАБЛОКИРОВАНА' if sync_locked else '🟢 активна'}</b>\n"
+        f"🧹 Cleanup service-сообщений: <b>{'🟢 ВКЛ' if cleanup_on else '🔴 ВЫКЛ'}</b>\n"
+        f"🧠 Режим Али: <b>{alya_mode}</b>\n"
+    )
+    b = InlineKeyboardBuilder()
+    b.row(
+        types.InlineKeyboardButton(
+            text=("🔓 Разблок. sync" if sync_locked else "🔒 Заблок. sync"),
+            callback_data="admin_toggle_sync",
+        ),
+    )
+    b.row(
+        types.InlineKeyboardButton(
+            text=("🧹 Cleanup: ВЫКЛ" if cleanup_on else "🧹 Cleanup: ВКЛ"),
+            callback_data="admin_toggle_cleanup",
+        ),
+    )
+    b.row(
+        types.InlineKeyboardButton(text="🧠 Сменить режим Али", callback_data="admin_cmd_alya_mode"),
+    )
+    b.row(
+        types.InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_settings"),
+        types.InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_menu"),
+    )
+    return text, b.as_markup()
+
+
+@dp.callback_query(F.data == "admin_settings")
+async def admin_menu_settings(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    text, kb = await _build_settings_text_and_kb()
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_toggle_sync")
+async def admin_toggle_sync(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    try:
+        cur = await get_setting("sync_locked")
+        new_val = "0" if str(cur or "0") == "1" else "1"
+        await set_setting("sync_locked", new_val)
+    except Exception as e:
+        return await callback.answer(f"Ошибка: {type(e).__name__}", show_alert=True)
+    text, kb = await _build_settings_text_and_kb()
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer("✅ Sync toggled")
+
+
+@dp.callback_query(F.data == "admin_toggle_cleanup")
+async def admin_toggle_cleanup(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    try:
+        cur = await get_setting("cleanup_service")
+        new_val = "0" if str(cur or "0") == "1" else "1"
+        await set_setting("cleanup_service", new_val)
+    except Exception as e:
+        return await callback.answer(f"Ошибка: {type(e).__name__}", show_alert=True)
+    text, kb = await _build_settings_text_and_kb()
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await callback.answer("✅ Cleanup toggled")
+
+
+# ------------------------------------------------------------------
+# Фабрика fake-Message для роутинга admin_cmd_* → обработчики команд
+# Безопасная замена старого model_copy hack: строим новый Message заново
+# и переключаем from_user на реального админа.
+# ------------------------------------------------------------------
+def _fake_admin_message(callback: types.CallbackQuery, text: str) -> types.Message | None:
+    msg = callback.message
+    if not isinstance(msg, types.Message):
+        return None
+    try:
+        # aiogram 3.x pydantic v2
+        return msg.model_copy(update={"from_user": callback.from_user, "text": text})
+    except Exception:
+        try:
+            # pydantic v1 fallback
+            return msg.copy(update={"from_user": callback.from_user, "text": text})
+        except Exception as e:
+            logging.warning(f"_fake_admin_message: build failed: {e}")
+            return None
+
+
 @dp.callback_query(F.data.startswith("admin_cmd_"))
 async def admin_menu_commands(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.delete()
+    if not await _require_admin(callback):
+        return
     cmd = callback.data.replace("admin_cmd_", "")
-    
-    try:
-        msg = callback.message.model_copy(update={"from_user": callback.from_user, "text": f"/{cmd}"})
-    except AttributeError:
-        msg = callback.message.copy(update={"from_user": callback.from_user, "text": f"/{cmd}"})
-        
     commands = {
         "add_chapter": cmd_add_chapter,
         "add_ranobe": cmd_add_ranobe,
@@ -3830,19 +4211,32 @@ async def admin_menu_commands(callback: types.CallbackQuery, state: FSMContext):
         "alya_mode": cmd_alya_mode,
         "blacklist_ai": cmd_blacklist_ai,
         "unblacklist_ai": cmd_unblacklist_ai,
-        "test_notification": cmd_test_notification
+        "test_notification": cmd_test_notification,
     }
     stateful_commands = {
         "add_chapter", "add_ranobe", "add_akashic", "add_british", "add_art",
         "delete_chapter", "delete_ranobe", "delete_akashic", "delete_british",
     }
-    
-    if cmd in commands:
+    if cmd not in commands:
+        return await callback.answer("Неизвестная команда.", show_alert=True)
+
+    msg = _fake_admin_message(callback, f"/{cmd}")
+    if msg is None:
+        return await callback.answer("⚠️ Не удалось запустить действие.", show_alert=True)
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    try:
         if cmd in stateful_commands:
             await commands[cmd](msg, state)
         else:
             await commands[cmd](msg)
+    except Exception as e:
+        logging.exception(f"admin_menu_commands: cmd={cmd} failed", exc_info=e)
+        return await callback.answer(f"❌ {type(e).__name__}", show_alert=True)
     await callback.answer()
+
 
 import json
 import os
