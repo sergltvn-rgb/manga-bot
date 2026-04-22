@@ -167,28 +167,33 @@
                         <div class="comment-tab" id="tab-sort-new" onclick="sortComments('new')">По дате</div>
                     </div>
                     
-                    <div class="comment-form" id="comment-form">
-                        <!-- Mode buttons removed for inline preview -->
-                        
-                        <div id="comment-write-area">
-                            <div id="comment-toolbar" class="comment-toolbar">
-                                <button type="button" onclick="insertFormatting('[b]', '[/b]')" title="Жирный"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
-                                <button type="button" onclick="insertFormatting('[i]', '[/i]')" title="Курсив"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
-                                <button type="button" onclick="insertFormatting('[s]', '[/s]')" title="Зачеркнутый"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><path d="M16 6a5 5 0 0 0-8 0"/><path d="M8 18a5 5 0 0 0 8 0"/></svg></button>
-                                <button type="button" onclick="insertFormatting('[quote]', '[/quote]')" title="Цитата"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-1-2.25-2.25-2.25S5.5 3.75 5.5 5V8c0 1.25 1 2.25 2.25 2.25H10v3c0 1.25-1 2.25-2.25 2.25-1.5 0-2.75 1-2.75 2.5s1.25 2.5 2.75 2.5h.25z"/></svg></button>
-                                <button type="button" onclick="insertFormatting('||', '||')" title="Спойлер"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg></button>
+                    <div class="comment-form tg-style" id="comment-form">
+                        <div id="reply-indicator" class="reply-indicator" style="display:none;">
+                            <div class="reply-indicator-body">
+                                <div class="reply-indicator-label">Ответ</div>
+                                <div class="reply-indicator-name" id="reply-to-name"></div>
                             </div>
-                            <div id="reply-indicator" class="reply-indicator" style="display:none;">
-                                <span>Ответ: <strong id="reply-to-name"></strong></span>
-                                <button type="button" class="cancel-reply-btn" onclick="cancelReply()">
-                                    <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                </button>
-                            </div>
-                            <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="3" oninput="updateCommentPreview()"></textarea>
+                            <button type="button" class="cancel-reply-btn" onclick="cancelReply()" aria-label="Отменить ответ">
+                                <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
                         </div>
-                        
+                        <div id="comment-toolbar" class="comment-toolbar hidden" aria-hidden="true">
+                            <button type="button" onclick="insertFormatting('[b]', '[/b]')" title="Жирный"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
+                            <button type="button" onclick="insertFormatting('[i]', '[/i]')" title="Курсив"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+                            <button type="button" onclick="insertFormatting('[s]', '[/s]')" title="Зачеркнутый"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><path d="M16 6a5 5 0 0 0-8 0"/><path d="M8 18a5 5 0 0 0 8 0"/></svg></button>
+                            <button type="button" onclick="insertFormatting('[quote]', '[/quote]')" title="Цитата"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-1-2.25-2.25-2.25S5.5 3.75 5.5 5V8c0 1.25 1 2.25 2.25 2.25H10v3c0 1.25-1 2.25-2.25 2.25-1.5 0-2.75 1-2.75 2.5s1.25 2.5 2.75 2.5h.25z"/></svg></button>
+                            <button type="button" onclick="insertFormatting('||', '||')" title="Спойлер"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg></button>
+                        </div>
+                        <div class="comment-input-row">
+                            <button type="button" class="comment-format-toggle" id="comment-format-toggle" onclick="toggleCommentToolbar()" title="Форматирование" aria-label="Показать панель форматирования">
+                                <span aria-hidden="true">Aa</span>
+                            </button>
+                            <textarea id="comment-input" class="comment-input-inline" placeholder="Написать комментарий…" maxlength="500" rows="1" oninput="updateCommentPreview(); autoGrowCommentInput(this)"></textarea>
+                            <button type="button" class="comment-send-btn" onclick="postComment()" aria-label="Отправить">
+                                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
+                        </div>
                         <div id="comment-preview-area" class="comment-preview-area hidden"></div>
-                        <button type="button" class="comment-submit-btn" onclick="postComment()">Отправить</button>
                         <div id="comment-send-status" class="comment-send-status hidden" aria-live="polite"></div>
                     </div>
 

@@ -4599,184 +4599,299 @@ input[type=range]:active::-webkit-slider-thumb {
     background: var(--chip-bg);
 }
 
+/* Refresh v5: плоские табы-underline */
 .comment-tabs {
     display: inline-flex;
-    gap: 4px;
+    gap: 18px;
     margin: 0 0 var(--space-3);
-    padding: 4px;
-    border: 1px solid var(--surface-border);
-    border-radius: var(--radius-pill);
-    background: var(--surface-2);
+    padding: 0;
+    border: none;
+    background: transparent;
+    border-bottom: 1px solid var(--surface-border);
+    width: 100%;
 }
 
 .comment-tab {
-    border-radius: var(--radius-pill);
-    min-height: 34px;
-    padding: 0 14px;
+    position: relative;
+    padding: 10px 0 10px;
     display: inline-flex;
     align-items: center;
-    font-size: 12px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     color: var(--text-secondary);
     cursor: pointer;
-    transition: background var(--ui-transition-fast), color var(--ui-transition-fast), transform 0.1s;
+    transition: color 0.18s ease;
     -webkit-tap-highlight-color: transparent;
+    background: transparent;
+    border: none;
+    letter-spacing: 0.1px;
 }
+
+.comment-tab::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    background: var(--accent);
+    border-radius: 2px 2px 0 0;
+    transform: scaleX(0);
+    transform-origin: center;
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .comment-tab:active {
-    transform: scale(0.96);
+    transform: scale(0.97);
 }
 
 .comment-tab.active {
-    background: var(--accent-gradient);
-    color: #fff;
-    box-shadow: 0 3px 10px rgba(var(--accent-rgb), 0.3);
+    color: var(--accent);
+    font-weight: 700;
 }
 
+.comment-tab.active::after {
+    transform: scaleX(1);
+}
+
+/* Refresh v5: Telegram-compact form. */
 .comment-form {
-    background: var(--surface-1);
-    border: 1px solid var(--surface-border);
-    border-radius: var(--radius-lg);
-    padding: var(--space-3);
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0;
     margin-bottom: var(--space-4);
     scroll-margin-bottom: 45vh;
-    transition: border-color var(--ui-transition-fast), box-shadow var(--ui-transition-fast);
+    transition: none;
 }
 
-.comment-form:focus-within {
-    border-color: color-mix(in srgb, var(--accent) 50%, var(--surface-border));
-    box-shadow: var(--shadow-focus);
+.comment-form .comment-input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 22px;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    transition: border-color 0.18s, box-shadow 0.18s;
+}
+.comment-form:focus-within .comment-input-row {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--surface-border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.comment-format-toggle {
+    min-width: 34px;
+    min-height: 34px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+    transition: background 0.18s, color 0.18s, transform 0.15s;
+}
+.comment-format-toggle:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+}
+.comment-format-toggle.is-active {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+}
+.comment-format-toggle:active {
+    transform: scale(0.92);
+}
+
+.comment-input-inline {
+    flex: 1;
+    min-width: 0;
+    min-height: 34px;
+    max-height: 120px;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.4;
+    padding: 7px 4px;
+    overflow-y: auto;
+}
+.comment-input-inline::placeholder {
+    color: color-mix(in srgb, var(--text-secondary) 75%, transparent);
+}
+
+.comment-send-btn {
+    min-width: 34px;
+    min-height: 34px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: var(--accent-gradient);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.35);
+    flex-shrink: 0;
+    transition: transform 0.15s, box-shadow 0.18s, opacity 0.18s;
+}
+.comment-send-btn:hover:not(:disabled) {
+    box-shadow: 0 3px 12px rgba(var(--accent-rgb), 0.48);
+}
+.comment-send-btn:active:not(:disabled) {
+    transform: scale(0.92);
+}
+.comment-send-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .comment-toolbar {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    padding: 0 0 8px;
-    margin-bottom: 10px;
-    border-bottom: 1px solid var(--divider-light);
+    gap: 4px;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+    border-radius: 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    animation: toolbarFadeIn 0.2s ease;
+}
+.comment-toolbar.hidden {
+    display: none;
+}
+@keyframes toolbarFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .comment-toolbar button {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: 32px;
+    min-height: 32px;
     border-radius: 8px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid transparent;
+    border: none;
     background: transparent;
     color: var(--text-secondary);
-    transition: transform var(--ui-transition-fast), background var(--ui-transition-fast), border-color var(--ui-transition-fast), color var(--ui-transition-fast);
+    cursor: pointer;
+    transition: color 0.18s, background 0.18s, transform 0.15s;
 }
-
 .comment-toolbar button:hover {
     color: var(--accent);
-    border-color: color-mix(in srgb, var(--accent) 28%, transparent);
     background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
-
 .comment-toolbar button:active {
-    transform: scale(0.95);
+    transform: scale(0.92);
 }
 
+/* Reply-indicator — Telegram-style accent-vertical-bar */
 .reply-indicator {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    min-height: 36px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     padding: 7px 10px;
     border-radius: 10px;
-    border: 1px solid var(--divider);
-    background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+    border: none;
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
     font-size: 12px;
     color: var(--text-secondary);
 }
-
-.reply-indicator strong {
+.reply-indicator-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 1px;
+    flex: 1;
+}
+.reply-indicator-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.reply-indicator-name {
+    font-size: 12.5px;
+    font-weight: 600;
     color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .cancel-reply-btn {
-    min-width: 30px;
-    min-height: 30px;
+    min-width: 28px;
+    min-height: 28px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
     border: none;
-    border-radius: 8px;
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    transition: background 0.18s;
+    flex-shrink: 0;
 }
-
+.cancel-reply-btn:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+}
 .cancel-reply-btn:active {
-    transform: scale(0.94);
+    transform: scale(0.9);
 }
 
-.comment-input {
-    width: 100%;
-    min-height: 92px;
-    max-height: 34vh;
-    resize: vertical;
-    box-sizing: border-box;
-    background: var(--surface-2);
-    border: 1px solid var(--surface-border);
-    border-radius: var(--radius-md);
-    color: var(--text);
-    font-size: 14px;
-    line-height: 1.5;
-    padding: 11px 14px;
-    outline: none;
-    transition: border-color var(--ui-transition-fast), box-shadow var(--ui-transition-fast);
-}
-
-.comment-input::placeholder {
-    color: color-mix(in srgb, var(--text-secondary) 85%, transparent);
-}
-
-.comment-input:focus {
-    border-color: color-mix(in srgb, var(--accent) 52%, var(--surface-border));
-    box-shadow: var(--shadow-focus);
-}
-
+/* Preview — компактный */
 .comment-preview-area {
-    margin-top: 10px;
-    padding: 11px 14px;
-    border-radius: var(--radius-md);
+    margin-top: 8px;
+    padding: 10px 14px;
+    border-radius: 12px;
     border: 1px dashed var(--surface-border-strong);
-    background: var(--surface-2);
+    background: color-mix(in srgb, var(--surface-2) 85%, transparent);
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: var(--text-main);
 }
 
+/* Deprecated legacy full-width submit btn — оставлен для модалок жалоб */
 .comment-submit-btn {
     margin-top: var(--space-3);
-    min-height: 44px;
-    width: 100%;
+    min-height: 38px;
+    padding: 0 16px;
     border: none;
     border-radius: var(--radius-pill);
     background: var(--accent-gradient);
     color: #fff;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 700;
     cursor: pointer;
     letter-spacing: 0.3px;
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.35);
-    transition: transform var(--ui-transition-fast), filter var(--ui-transition-fast), opacity var(--ui-transition-fast);
+    box-shadow: 0 3px 12px rgba(var(--accent-rgb), 0.3);
+    transition: transform 0.15s, filter 0.15s, opacity 0.15s;
 }
-
-.comment-submit-btn:hover:not(:disabled) {
-    filter: brightness(1.05);
-}
-
-.comment-submit-btn:active:not(:disabled) {
-    transform: scale(0.98);
-}
-
-.comment-submit-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
+.comment-submit-btn:hover:not(:disabled) { filter: brightness(1.05); }
+.comment-submit-btn:active:not(:disabled) { transform: scale(0.98); }
+.comment-submit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .comment-send-status {
     margin-top: 10px;
@@ -4833,36 +4948,43 @@ input[type=range]:active::-webkit-slider-thumb {
     font-size: 13px;
 }
 
+/* Refresh v5: Telegram-style bubbles */
 .comment-item {
-    border: 1px solid var(--card-border);
-    border-radius: 12px;
-    background: var(--card-bg);
-    padding: 10px 12px;
     display: flex;
-    flex-direction: column;
-    gap: 6px;
-    transition: border-color var(--ui-transition-fast), background var(--ui-transition-fast);
+    gap: 8px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    transition: opacity var(--ui-transition-fast);
 }
 
 .comment-item.pending-send {
-    opacity: 0.82;
+    opacity: 0.72;
 }
 
-.comment-item.pending-error {
-    border-color: rgba(220, 38, 38, 0.45);
-    background: color-mix(in srgb, rgba(220, 38, 38, 0.09) 70%, var(--card-bg));
+.comment-item.pending-error .comment-bubble {
+    border: 1px solid rgba(220, 38, 38, 0.45);
+    background: color-mix(in srgb, rgba(220, 38, 38, 0.09) 70%, var(--surface-2));
 }
 
-.comment-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
+/* Свои коментарии: avatar справа, bubble выровнен по правому краю, accent-tint */
+.comment-item.is-own {
+    flex-direction: row-reverse;
+}
+.comment-item.is-own .comment-bubble-wrap {
+    align-items: flex-end;
+}
+.comment-item.is-own .comment-bubble {
+    background: color-mix(in srgb, var(--accent) 14%, var(--surface-2));
+    border-radius: 18px 18px 4px 18px;
+}
+.comment-item.is-own .comment-actions {
+    justify-content: flex-end;
 }
 
 .comment-avatar {
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     flex-shrink: 0;
     object-fit: cover;
@@ -4873,11 +4995,33 @@ input[type=range]:active::-webkit-slider-thumb {
     justify-content: center;
     font-size: 12px;
     font-weight: 700;
+    align-self: flex-start;
+    margin-top: 2px;
 }
 
-.comment-content {
+.comment-bubble-wrap {
     min-width: 0;
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.comment-bubble {
+    max-width: 100%;
+    padding: 8px 12px;
+    background: var(--surface-2);
+    border-radius: 4px 18px 18px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: background 0.2s ease;
+}
+
+.comment-item.comment-flash .comment-bubble {
+    background: color-mix(in srgb, var(--accent) 22%, var(--surface-2));
+    transition: background 0.6s ease;
 }
 
 .comment-meta {
@@ -4885,130 +5029,138 @@ input[type=range]:active::-webkit-slider-thumb {
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
+    min-height: 14px;
 }
 
 .comment-author {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 700;
     color: var(--text-main);
+    letter-spacing: 0.1px;
+}
+
+.comment-item.is-own .comment-author {
+    color: var(--accent);
 }
 
 .comment-date {
     font-size: 10px;
     color: var(--text-secondary);
-    opacity: 0.78;
+    opacity: 0.7;
+    margin-left: auto;
+    white-space: nowrap;
 }
 .comment-edited-badge {
-    margin-left: 4px;
     font-size: 10px;
     font-style: italic;
     color: var(--text-secondary);
-    opacity: 0.65;
+    opacity: 0.6;
+    margin-left: 2px;
 }
 
 .comment-text {
-    margin-top: 2px;
-    color: var(--reader-text);
-    font-size: 13.5px;
-    line-height: 1.5;
+    margin-top: 0;
+    color: var(--text-main);
+    font-size: 14px;
+    line-height: 1.45;
     white-space: pre-wrap;
     word-break: break-word;
 }
 
-.comment-main-actions,
+/* Refresh v5: inline reply-preview (цитата родительского) */
+.comment-reply-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px 9px;
+    margin-bottom: 4px;
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    border-radius: 4px 8px 8px 4px;
+    cursor: pointer;
+    transition: background 0.18s ease;
+    max-width: 100%;
+}
+.comment-reply-preview:hover {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.reply-preview-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.1px;
+}
+.reply-preview-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
 .comment-actions {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 2px;
-}
-
-.comment-reactions {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    gap: 2px;
     flex-wrap: wrap;
+    padding-left: 2px;
 }
 
+/* Refresh v5: flat Telegram actions в одну линию */
 .c-action-btn {
-    min-height: 32px;
-    padding: 0 8px;
+    min-height: 24px;
+    padding: 3px 6px;
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
     background: transparent;
     color: var(--text-secondary);
     font-size: 11px;
-    font-weight: 700;
+    font-weight: 600;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    transition: color var(--ui-transition-fast), background var(--ui-transition-fast), transform var(--ui-transition-fast);
+    gap: 4px;
+    opacity: 0.82;
+    transition: color 0.18s, background 0.18s, opacity 0.18s, transform 0.15s;
 }
-
 .c-action-btn:hover {
-    color: var(--text-main);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    opacity: 1;
 }
-
 .c-action-btn:active {
-    transform: scale(0.95);
+    transform: scale(0.94);
 }
-
+.c-action-btn svg {
+    flex-shrink: 0;
+    opacity: 0.9;
+}
 .c-action-btn.c-delete:hover {
     color: #dc2626;
     background: rgba(220, 38, 38, 0.1);
 }
-
-.c-action-btn.c-retry {
-    color: var(--accent);
+.c-action-btn.c-like.active {
+    color: #dc2626;
+    opacity: 1;
 }
-
-.c-action-btn.c-discard {
-    color: var(--text-secondary);
+.c-action-btn.c-like.active svg {
+    opacity: 1;
 }
-
-.c-reaction-btn {
-    min-height: 30px;
-    border: 1px solid var(--divider);
-    border-radius: 999px;
-    background: var(--input-bg);
-    color: var(--text-secondary);
-    font-size: 11px;
-    font-weight: 700;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 0 9px;
-    cursor: pointer;
-    transition: transform var(--ui-transition-fast), border-color var(--ui-transition-fast), color var(--ui-transition-fast), background var(--ui-transition-fast);
-}
-
-.c-reaction-btn:hover {
-    border-color: color-mix(in srgb, var(--accent) 45%, var(--divider));
-    color: var(--text-main);
-}
-
-.c-reaction-btn:active {
-    transform: scale(0.96);
-}
-
-.c-reaction-btn.pending {
+.c-action-btn.c-like.pending {
     opacity: 0.56;
     pointer-events: none;
 }
-
-.c-reaction-btn.active.c-like {
-    color: #16a34a;
-    border-color: rgba(22, 163, 74, 0.45);
-    background: rgba(22, 163, 74, 0.12);
+.c-action-btn.c-retry {
+    color: var(--accent);
+    opacity: 1;
 }
-
-.c-reaction-btn.active.c-dislike {
-    color: #dc2626;
-    border-color: rgba(220, 38, 38, 0.42);
-    background: rgba(220, 38, 38, 0.11);
+.c-action-btn.c-discard {
+    color: var(--text-secondary);
+}
+.c-action-btn.c-reply span {
+    font-size: 11px;
 }
 
 .comment-state-badge {
@@ -5029,24 +5181,26 @@ input[type=range]:active::-webkit-slider-thumb {
     color: #dc2626;
 }
 
+/* Refresh v5: thread-линия — тонкая вертикальная, без dash */
 .comment-children {
-    margin-left: 12px;
+    margin-left: 20px;
     margin-top: 8px;
-    padding-left: 12px;
-    border-left: 1px dashed var(--divider);
+    padding-left: 14px;
+    border-left: 2px solid color-mix(in srgb, var(--accent) 18%, var(--surface-border));
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    position: relative;
 }
 
 .comment-reply .comment-avatar {
-    width: 24px;
-    height: 24px;
+    width: 28px;
+    height: 28px;
     font-size: 11px;
 }
 
 .comment-reply .comment-text {
-    font-size: 13px;
+    font-size: 13.5px;
 }
 
 .empty-state {

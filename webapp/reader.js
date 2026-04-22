@@ -2929,15 +2929,39 @@ function findCommentInCache(commentId) {
 
 function setReply(id, name) {
     replyingToId = id;
-    document.getElementById('reply-indicator').style.display = 'flex';
-    document.getElementById('reply-to-name').textContent = name;
-    document.getElementById('comment-input').focus();
+    const indicator = document.getElementById('reply-indicator');
+    if (indicator) indicator.style.display = 'flex';
+    const nameEl = document.getElementById('reply-to-name');
+    if (nameEl) nameEl.textContent = name;
+    const input = document.getElementById('comment-input');
+    if (input) input.focus();
 }
 
 function cancelReply() {
     replyingToId = null;
-    document.getElementById('reply-indicator').style.display = 'none';
-    document.getElementById('reply-to-name').textContent = '';
+    const indicator = document.getElementById('reply-indicator');
+    if (indicator) indicator.style.display = 'none';
+    const nameEl = document.getElementById('reply-to-name');
+    if (nameEl) nameEl.textContent = '';
+}
+
+// Refresh v5: toggle toolbar forматирования (B/I/S/quote/spoiler)
+function toggleCommentToolbar() {
+    const toolbar = document.getElementById('comment-toolbar');
+    const btn = document.getElementById('comment-format-toggle');
+    if (!toolbar) return;
+    const isHidden = toolbar.classList.toggle('hidden');
+    toolbar.setAttribute('aria-hidden', isHidden ? 'true' : 'false');
+    if (btn) btn.classList.toggle('is-active', !isHidden);
+}
+
+// Refresh v5: auto-grow textarea для Telegram-стиля (1 → 5 строк макс)
+function autoGrowCommentInput(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    const maxHeight = 120; // ~5 строк
+    const newHeight = Math.min(el.scrollHeight, maxHeight);
+    el.style.height = newHeight + 'px';
 }
 
 async function loadComments() {
@@ -3049,33 +3073,46 @@ function renderComments(comments) {
     function renderNode(c, isChild = false) {
         const initial = (c.user_name || 'А')[0].toUpperCase();
         const date = formatDate(c.created_at);
-        // Edited indicator: если updated_at задан И отличается от created_at (> 1s) — считаем отредактированным.
         const editedTs = c.updated_at ? parseDate(c.updated_at) : 0;
         const createdTs = c._ts || parseDate(c.created_at);
         const isEdited = editedTs && (editedTs - createdTs > 1000);
         const editedBadge = isEdited
-            ? `<span class="comment-edited-badge" title="Отредактировано ${formatDate(c.updated_at)}">(ред.)</span>`
+            ? `<span class="comment-edited-badge" title="Отредактировано ${formatDate(c.updated_at)}">ред.</span>`
             : '';
         const isOwn = String(c.user_id) === userId;
-        const viewerIsAdmin = isAdminMode; 
+        const viewerIsAdmin = isAdminMode;
         const color = getAvatarColor(String(c.user_id));
-        
-        // Роль автора (бейджик)
         const role = getUserRole(String(c.user_id));
         const roleBadge = role ? `<span class="comment-role-badge ${role.css}">${role.text}</span>` : '';
 
         const isPendingComment = c._optimisticState === 'sending' || c._optimisticState === 'error';
+        const ownClass = isOwn ? 'is-own' : '';
         const commentStateClass = c._optimisticState === 'sending'
             ? 'pending-send'
             : (c._optimisticState === 'error' ? 'pending-error' : '');
         const stateBadge = c._optimisticState === 'sending'
-            ? `<span class="comment-state-badge sending">Отправка...</span>`
+            ? `<span class="comment-state-badge sending">Отправка…</span>`
             : (c._optimisticState === 'error' ? `<span class="comment-state-badge error">Не отправлено</span>` : '');
 
-        const deleteBtn = (isOwn || viewerIsAdmin) ? `<button class="c-action-btn c-delete" onclick="deleteComment(${c.id})">Удалить</button>` : '';
-        const editBtn = isOwn ? `<button class="c-action-btn" onclick="editComment(${c.id})">Ред.</button>` : '';
-        const replyBtn = `<button class="c-action-btn" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')">Ответить</button>`;
-        const reportBtn = !isOwn ? `<button class="c-action-btn" onclick="reportComment(${c.id})">Пожаловаться</button>` : '';
+        // Refresh v5: inline reply-preview (если это ответ) — цитата автора + отрывок
+        let replyPreviewHtml = '';
+        if (c.parent_id) {
+            const parent = commentMap[c.parent_id];
+            if (parent) {
+                const snippet = String(parent.text || '').replace(/\s+/g, ' ').slice(0, 80);
+                const ellipsis = (parent.text || '').length > 80 ? '…' : '';
+                replyPreviewHtml = `
+                    <div class="comment-reply-preview" onclick="(function(){const el=document.getElementById('comment-${parent.id}');if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.classList.add('comment-flash');setTimeout(()=>el.classList.remove('comment-flash'),1200);}})()">
+                        <div class="reply-preview-name">${escapeHtml(parent.user_name || '')}</div>
+                        <div class="reply-preview-text">${escapeHtml(snippet)}${ellipsis}</div>
+                    </div>`;
+            }
+        }
+
+        const deleteBtn = (isOwn || viewerIsAdmin) ? `<button class="c-action-btn c-delete" onclick="deleteComment(${c.id})" title="Удалить"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : '';
+        const editBtn = isOwn ? `<button class="c-action-btn" onclick="editComment(${c.id})" title="Редактировать"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : '';
+        const replyBtn = `<button class="c-action-btn c-reply" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Ответить</span></button>`;
+        const reportBtn = !isOwn ? `<button class="c-action-btn" onclick="reportComment(${c.id})" title="Пожаловаться"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22V3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : '';
         const retryBtn = c._optimisticState === 'error'
             ? `<button class="c-action-btn c-retry" onclick="retryPendingComment('${escapeHtml(String(c.id))}')">Повтор</button>`
             : '';
@@ -3083,51 +3120,47 @@ function renderComments(comments) {
             ? `<button class="c-action-btn c-discard" onclick="discardPendingComment('${escapeHtml(String(c.id))}')">Убрать</button>`
             : '';
 
-        // Реакции
         const likes = c.likes || 0;
-        const userReaction = c.user_reaction; 
+        const userReaction = c.user_reaction;
         const likeActive = userReaction === 'like' ? 'active' : '';
         const reactionPending = !!c._reactionPending;
+        const likeBtn = isPendingComment ? '' : `<button class="c-action-btn c-like ${likeActive} ${reactionPending ? 'pending' : ''}" ${reactionPending ? 'disabled' : ''} onclick="reactToComment(${c.id}, 'like')" title="Нравится">
+            <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="${likeActive ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>${likes || ''}</span>
+        </button>`;
 
-        // Avatar
         const avatarUrl = API_URL && c.user_id ? `${API_URL}/api/avatar?user_id=${c.user_id}` : null;
-        const avatarHtml = avatarUrl 
+        const avatarHtml = avatarUrl
             ? `<img src="${avatarUrl}" class="comment-avatar" alt="${initial}" style="background:${color}" onerror="this.onerror=null;this.outerHTML='<div class=&quot;comment-avatar&quot; style=&quot;background:${color}&quot;>${initial}</div>';">`
             : `<div class="comment-avatar" style="background:${color}">${initial}</div>`;
 
         let html = `
-        <div class="comment-item ${isChild ? 'comment-reply' : ''} ${commentStateClass}" id="comment-${c.id}">
-            ${isChild ? '<div class="comment-branch"></div><div class="comment-branch-curve"></div>' : ''}
-            <div class="comment-content">
-                <div class="comment-header">
-                    ${avatarHtml}
-                    <div class="comment-author">${escapeHtml(c.user_name)}${roleBadge}${stateBadge}</div>
-                    <div class="comment-date" style="margin-left:auto;">${date}${editedBadge}</div>
+        <div class="comment-item ${isChild ? 'comment-reply' : ''} ${ownClass} ${commentStateClass}" id="comment-${c.id}">
+            ${avatarHtml}
+            <div class="comment-bubble-wrap">
+                <div class="comment-bubble">
+                    <div class="comment-meta">
+                        <span class="comment-author">${escapeHtml(c.user_name)}</span>${roleBadge}${stateBadge}
+                        <span class="comment-date">${date}${editedBadge ? ' · ' + editedBadge : ''}</span>
+                    </div>
+                    ${replyPreviewHtml}
+                    <div class="comment-text" id="comment-text-${c.id}">${applyMarkup(c.text)}</div>
                 </div>
-                <div class="comment-text" id="comment-text-${c.id}">${applyMarkup(c.text)}</div>
                 <div class="comment-actions">
-                    <div class="comment-reactions">
-                        ${isPendingComment ? '' : `<button class="c-reaction-btn c-like ${likeActive} ${reactionPending ? 'pending' : ''}" ${reactionPending ? 'disabled' : ''} onclick="reactToComment(${c.id}, 'like')" title="Нравится">
-                            <svg class="icon-xs" viewBox="0 0 24 24"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                            <span>${likes}</span>
-                        </button>`}
-                    </div>
-                    <div class="comment-main-actions">
-                        ${isPendingComment ? '' : replyBtn}
-                        ${isPendingComment ? '' : editBtn}
-                        ${isPendingComment ? '' : deleteBtn}
-                        ${isPendingComment ? '' : reportBtn}
-                        ${retryBtn}
-                        ${discardBtn}
-                    </div>
+                    ${likeBtn}
+                    ${isPendingComment ? '' : replyBtn}
+                    ${isPendingComment ? '' : editBtn}
+                    ${isPendingComment ? '' : deleteBtn}
+                    ${isPendingComment ? '' : reportBtn}
+                    ${retryBtn}
+                    ${discardBtn}
                 </div>
-        `;
+            </div>
+        </div>`;
 
         if (c.children && c.children.length > 0) {
             html += `<div class="comment-children">` + c.children.map(child => renderNode(child, true)).join('') + `</div>`;
         }
-
-        html += `</div></div>`;
         return html;
     }
 

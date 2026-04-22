@@ -617,7 +617,7 @@ test.describe("Reader E2E smoke", () => {
 
     const commentText = "playwright comment smoke";
     await page.fill("#comment-input", commentText);
-    await page.click("#comment-form .comment-submit-btn");
+    await page.click("#comment-form .comment-send-btn");
     await expect(page.locator("#comments-list .comment-text").first()).toContainText("playwright comment smoke");
     await expect.poll(() => state.calls.commentsPost).toBeGreaterThan(0);
 
