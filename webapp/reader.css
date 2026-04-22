@@ -953,16 +953,96 @@ div.r4-poster-placeholder.series-poster-img {
 /* === НИЖНЯЯ НАВИГАЦИЯ (Refresh v4) === */
 .reader-bottom-bar {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-2) var(--space-4);
+    flex-direction: column;
+    align-items: stretch;
+    padding: 6px var(--space-4) var(--space-2);
     background: color-mix(in srgb, var(--surface-1) 88%, transparent);
     backdrop-filter: blur(18px) saturate(180%);
     -webkit-backdrop-filter: blur(18px) saturate(180%);
     border-top: 1px solid var(--surface-border);
     z-index: 20;
     transition: transform 0.3s ease, background 0.3s;
+    gap: 4px;
+}
+
+/* Refresh v4: верхняя строка bottom-bar — interactive scrubber */
+.reader-scrubber-row {
+    padding: 4px 0 0;
+    display: flex;
+    align-items: center;
+}
+.reader-scrubber {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 18px;
+    background: transparent;
+    cursor: pointer;
+    touch-action: none;
+    --scrubber-progress: 0%;
+}
+/* WebKit track/thumb */
+.reader-scrubber::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(to right,
+        #8b5cf6 0%,
+        #ec4899 var(--scrubber-progress),
+        var(--surface-border-strong) var(--scrubber-progress),
+        var(--surface-border-strong) 100%);
+    box-shadow: inset 0 0 0 1px var(--surface-border);
+}
+.reader-scrubber::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    margin-top: -5px;
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.55),
+                0 4px 14px rgba(var(--accent-rgb), 0.45);
+    transition: transform var(--ui-transition-fast), box-shadow 0.2s;
+}
+.reader-scrubber:active::-webkit-slider-thumb {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.6),
+                0 6px 18px rgba(var(--accent-rgb), 0.55);
+}
+.reader-scrubber:focus { outline: none; }
+.reader-scrubber:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.45),
+                var(--shadow-focus);
+}
+/* Firefox */
+.reader-scrubber::-moz-range-track {
+    height: 6px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-border-strong);
+    box-shadow: inset 0 0 0 1px var(--surface-border);
+}
+.reader-scrubber::-moz-range-progress {
+    height: 6px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-gradient);
+}
+.reader-scrubber::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    border: none;
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.55),
+                0 4px 14px rgba(var(--accent-rgb), 0.45);
+}
+body.keyboard-open #screen-reader .reader-scrubber-row { display: none; }
+
+.reader-bottom-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: var(--space-2);
+    padding: 2px 0;
 }
 
 .nav-btn {
@@ -972,28 +1052,32 @@ div.r4-poster-placeholder.series-poster-img {
     border-radius: var(--radius-pill);
     color: var(--text);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    transition: transform 0.15s, opacity 0.2s, background 0.2s;
+    transition: transform 0.15s, opacity 0.2s, background 0.2s, border-color 0.2s;
     display: inline-flex;
     align-items: center;
     gap: 4px;
     min-height: 38px;
     -webkit-tap-highlight-color: transparent;
 }
-.nav-btn:hover { background: var(--surface-3); }
-.nav-btn:active { transform: scale(0.95); }
+.nav-btn:hover:not(:disabled) {
+    background: var(--surface-3);
+    border-color: var(--surface-border-strong);
+}
+.nav-btn:active:not(:disabled) { transform: scale(0.95); }
 .nav-btn:disabled {
-    opacity: 0.35;
+    opacity: 0.4;
     pointer-events: none;
     background: transparent;
+    cursor: not-allowed;
 }
 
-/* Центральный индикатор главы — pill с градиентной полоской прогресса */
+/* Центральный индикатор главы — pill с tabular-nums */
 .chapter-indicator {
     font-size: 12px;
     color: var(--text-secondary);
-    font-weight: 700;
+    font-weight: 800;
     padding: 6px 14px;
     background: var(--surface-2);
     border: 1px solid var(--surface-border);
@@ -1719,33 +1803,35 @@ input:checked + .slider:before { transform: translateX(20px); }
 .toc-item.toc-h4 { padding-left: 52px; font-size: 12px; color: var(--text-secondary); }
 
 /* === AUTOSCROLL FAB === */
+/* Refresh v4: autoscroll FAB — accent-gradient с glow + pulse в active */
 .autoscroll-fab {
     position: fixed;
     bottom: 70px;
     right: 16px;
     width: 48px; height: 48px;
     border-radius: 50%;
-    background: var(--accent);
+    background: var(--accent-gradient);
     color: #fff;
     border: none;
-    font-size: 18px;
+    font-size: 16px;
+    line-height: 1;
     cursor: pointer;
     z-index: 50;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.4);
-    transition: transform 0.2s, box-shadow 0.2s, opacity 0.3s;
+    box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.42);
+    transition: transform 0.2s, box-shadow 0.2s, opacity 0.3s, filter 0.2s;
     -webkit-tap-highlight-color: transparent;
 }
-.autoscroll-fab:active { transform: scale(0.9); }
+.autoscroll-fab:hover { filter: brightness(1.05); box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.5); }
+.autoscroll-fab:active { transform: scale(0.92); }
 .autoscroll-fab.scrolling {
-    background: linear-gradient(135deg, var(--accent), #feb47b);
-    animation: autoscroll-pulse 1.5s ease-in-out infinite;
+    animation: autoscroll-pulse 1.6s ease-in-out infinite;
 }
 @keyframes autoscroll-pulse {
-    0%, 100% { box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.4); }
-    50% { box-shadow: 0 4px 24px rgba(var(--accent-rgb), 0.6); }
+    0%, 100% { box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.42); }
+    50% { box-shadow: 0 8px 32px rgba(var(--accent-rgb), 0.65); }
 }
 
 /* === EDIT URL MODAL & BULK UPLOAD MODAL (Admin) === */
@@ -2948,32 +3034,10 @@ input:checked + .slider:before { transform: translateX(20px); }
    ★ ФАЗА 4: Morphing FAB Button (пункт 10)
    ========================================================================== */
 
-.autoscroll-fab {
-    position: fixed;
-    bottom: 80px;
-    left: 16px;
-    width: 48px; height: 48px;
-    border-radius: 50%;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 4px 15px rgba(var(--accent-rgb), 0.35);
-    z-index: 60;
-    transition: transform 0.2s, opacity 0.3s;
-    font-size: 18px;
-}
-
-.autoscroll-fab.hidden {
-    display: none;
-}
-
-.autoscroll-fab:active {
-    transform: scale(0.9);
-}
+/* Refresh v4: override — autoscroll-fab в фазе-4 (second declaration kept
+   минимальным, чтобы не перебивать gradient+pulse из блока AUTOSCROLL FAB) */
+.autoscroll-fab { left: auto; right: 16px; z-index: 60; }
+.autoscroll-fab.hidden { display: none; }
 
 .fab-container {
     position: fixed;
@@ -3933,38 +3997,42 @@ input[type=range]:active::-webkit-slider-thumb {
     transition: transform var(--ui-transition-main), color var(--ui-transition-fast), fill var(--ui-transition-fast);
 }
 
+/* Refresh v4: reactions bar под surface-токены */
 .reaction-bar {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin: 0 0 18px;
-    padding: 12px;
-    border-radius: var(--ui-radius-lg);
-    background: color-mix(in srgb, var(--card-bg) 82%, transparent);
-    border: 1px solid var(--card-border);
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3);
+    border-radius: var(--radius-lg);
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
 }
 
 .reaction-item {
     min-height: var(--ui-hit-target);
     min-width: var(--ui-hit-target);
-    border-radius: 999px;
-    border: 1px solid var(--divider);
-    background: var(--bg-secondary);
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--surface-border);
+    background: var(--surface-2);
     color: var(--text-secondary);
-    padding: 0 12px;
+    padding: 0 14px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
     font-size: 13px;
     font-weight: 700;
+    font-variant-numeric: tabular-nums;
     cursor: pointer;
     user-select: none;
-    transition: transform var(--ui-transition-fast), background var(--ui-transition-fast), border-color var(--ui-transition-fast), color var(--ui-transition-fast);
+    transition: transform var(--ui-transition-fast), background var(--ui-transition-fast), border-color var(--ui-transition-fast), color var(--ui-transition-fast), box-shadow 0.2s;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .reaction-item:hover:not(.pending) {
-    border-color: color-mix(in srgb, var(--accent) 40%, var(--divider));
-    color: var(--text-main);
+    border-color: var(--surface-border-strong);
+    background: var(--surface-3);
+    color: var(--text);
     transform: translateY(-1px);
 }
 
@@ -3973,9 +4041,10 @@ input[type=range]:active::-webkit-slider-thumb {
 }
 
 .reaction-item.active {
-    background: color-mix(in srgb, var(--accent) 14%, var(--bg-secondary));
-    border-color: color-mix(in srgb, var(--accent) 46%, var(--divider));
+    background: var(--accent-gradient-soft);
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--surface-border));
     color: var(--accent);
+    box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.18);
 }
 
 .reaction-item.pending {

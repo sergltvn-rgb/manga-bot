@@ -210,21 +210,27 @@
                 </div>
             </div>
             <div class="reader-bottom-bar" id="reader-bottom-bar">
-                <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">
-                <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Пред.
-            </button>
-            <span class="chapter-indicator" id="chapter-indicator">1 / 10</span>
-            <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">
-                След.
-                <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:4px;"><path d="M5 12h14M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
+                <!-- Refresh v4: Interactive chapter scrubber -->
+                <div class="reader-scrubber-row" id="reader-scrubber-row" aria-hidden="false">
+                    <input type="range" class="reader-scrubber" id="reader-scrubber" min="0" max="1000" value="0" step="1" aria-label="Прогресс главы">
+                </div>
+                <div class="reader-bottom-actions">
+                    <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">
+                        <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Пред.
+                    </button>
+                    <span class="chapter-indicator" id="chapter-indicator">1 / 10</span>
+                    <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">
+                        След.
+                        <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:4px;"><path d="M5 12h14M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </div>
         </div>
 
         <!-- ★ Morphing FAB (пункт 10) -->
         <div class="fab-container" id="fab-container">
             <!-- Autoscroll Play/Pause FAB -->
-            <button id="autoscroll-fab" class="autoscroll-fab hidden" onclick="toggleAutoscroll()">▶</button>
+            <button id="autoscroll-fab" class="autoscroll-fab hidden" onclick="toggleAutoscroll()" aria-label="Запустить автоскролл"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M6 4.5v15L20 12z"/></svg></button>
 
             <div class="fab-menu hidden" id="fab-menu">
                 <button class="fab-menu-item" data-action="toc" onclick="fabAction('toc')">

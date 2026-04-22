@@ -4220,12 +4220,17 @@ function toggleAutoscroll() {
     }
 }
 
+// Refresh v4: SVG icons для autoscroll fab
+const AUTOSCROLL_PLAY_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M6 4.5v15L20 12z"/></svg>';
+const AUTOSCROLL_PAUSE_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+
 function startAutoscroll() {
     autoscrollActive = true;
     const fab = document.getElementById('autoscroll-fab');
     if (fab) {
         fab.classList.add('scrolling');
-        fab.textContent = '⏸';
+        fab.innerHTML = AUTOSCROLL_PAUSE_SVG;
+        fab.setAttribute('aria-label', 'Пауза автоскролла');
     }
     const el = document.getElementById('reader-content');
     if (!el) return;
@@ -4256,7 +4261,8 @@ function stopAutoscroll() {
     const fab = document.getElementById('autoscroll-fab');
     if (fab) {
         fab.classList.remove('scrolling');
-        fab.textContent = '▶';
+        fab.innerHTML = AUTOSCROLL_PLAY_SVG;
+        fab.setAttribute('aria-label', 'Запустить автоскролл');
     }
 }
 
@@ -5505,16 +5511,26 @@ function initReaderScrollListeners() {
     const progressBar = document.getElementById('reading-progress-bar');
     if (!content || !screen || !progressBar) return;
 
+    const scrubber = document.getElementById('reader-scrubber');
+    let scrubberSeeking = false;
+
     let lastScrollTop = 0;
     const threshold = 15;
 
     content.addEventListener('scroll', () => {
         const scrollTop = content.scrollTop;
         const scrollHeight = content.scrollHeight - content.clientHeight;
-        
+
         // 1. Прогресс-бар
         const progress = (scrollTop / Math.max(1, scrollHeight)) * 100;
         progressBar.style.width = `${progress}%`;
+
+        // Refresh v4: синхронизируем scrubber (если пользователь сейчас не тянет)
+        if (scrubber && !scrubberSeeking) {
+            const pct = Math.max(0, Math.min(100, progress));
+            scrubber.value = String(Math.round(pct * 10));
+            scrubber.style.setProperty('--scrubber-progress', pct.toFixed(2) + '%');
+        }
 
         // 2. Immersive Scroll (Скрытие UI при скролле вниз)
         if (Math.abs(scrollTop - lastScrollTop) > threshold) {
@@ -5538,6 +5554,26 @@ function initReaderScrollListeners() {
             prefetchNextChapter();
         }
     }, { passive: true });
+
+    // Refresh v4: scrubber → seek content
+    if (scrubber) {
+        const seekToScrubber = () => {
+            const ratio = Math.max(0, Math.min(1, Number(scrubber.value) / 1000));
+            const scrollHeight = content.scrollHeight - content.clientHeight;
+            content.scrollTop = ratio * scrollHeight;
+            scrubber.style.setProperty('--scrubber-progress', (ratio * 100).toFixed(2) + '%');
+        };
+        scrubber.addEventListener('input', () => {
+            scrubberSeeking = true;
+            seekToScrubber();
+        }, { passive: true });
+        const endSeek = () => {
+            scrubberSeeking = false;
+        };
+        scrubber.addEventListener('change', endSeek, { passive: true });
+        scrubber.addEventListener('pointerup', endSeek, { passive: true });
+        scrubber.addEventListener('blur', endSeek);
+    }
 }
 
 // Optimistic chapter reactions with rollback on network/server errors.
