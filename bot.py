@@ -1521,13 +1521,12 @@ async def cmd_daily(message: types.Message):
         await db.commit()
         new_balance = balance + reward
 
-    streak_text = f"\n🔥 Стрик: <b>{streak}</b> дн." if streak > 1 else ""
+    streak_line = f"\n🔥 Стрик: <b>{streak}</b> дн." if streak > 1 else ""
+    template = random.choice(DAILY_REWARD_TEMPLATES)
+    text = template.format(reward=reward, balance=new_balance, streak_line=streak_line)
     await reply_group_ephemeral(
         message,
-        f"🎁 <b>Ежедневная награда!</b>\n\n"
-        f"Вы получили <b>{reward}</b> монет!\n"
-        f"Ваш баланс: <b>{new_balance}</b> монет.{streak_text}\n\n"
-        f"<i>Приходите завтра, чтобы увеличить награду!</i>",
+        text,
         ttl=TTL_GROUP_PANEL,
         parse_mode="HTML",
     )
@@ -1536,30 +1535,75 @@ LOOTBOX_PRICE = 300
 LOOTBOX_BADGES = ["💎 Алмаз", "🔥 Огонь", "🌟 Звезда", "🍀 Клевер", "🧿 Амулет"]
 LOOTBOX_TITLES = ["Бог Рандома", "Счастливчик", "Охотник за Сокровищами", "Легенда Чатбота"]
 
+# ------------------------------------------------------------------
+# Пулы вариативных текстов. Выбираются через random.choice(), чтобы
+# бот не повторял одну и ту же формулировку на каждом чихе.
+# Плейсхолдеры: {name}, {lvl}, {reward}, {coins}, {title}, {badge},
+# {balance}, {streak_line}.
+# ------------------------------------------------------------------
+LEVEL_UP_TEMPLATES = (
+    "🎉 <b>{name}</b> → ур. <b>{lvl}</b>! +{reward}💰",
+    "🚀 <b>{name}</b> пробил уровень <b>{lvl}</b>! +{reward}💰",
+    "⚡ Level up! <b>{name}</b> теперь на ур. <b>{lvl}</b>. +{reward}💰",
+    "🔥 <b>{name}</b> взял ур. <b>{lvl}</b> 🏆 +{reward}💰",
+    "✨ <b>{name}</b>, ты на ур. <b>{lvl}</b>! 🎊 +{reward}💰",
+)
+
+DAILY_REWARD_TEMPLATES = (
+    "🎁 <b>Ежедневная награда!</b>\n\nВы получили <b>{reward}</b> монет!\nВаш баланс: <b>{balance}</b> монет.{streak_line}",
+    "🌞 <b>Ежедневный дроп:</b> <b>{reward}</b> 💰\nНа счету: <b>{balance}</b> монет.{streak_line}",
+    "💎 <b>Награда дня — {reward}</b> 💰\nБаланс: <b>{balance}</b>.{streak_line}",
+    "🎊 <b>Чек-ин засчитан!</b>\n+<b>{reward}</b> 💰 · Баланс: <b>{balance}</b>.{streak_line}",
+)
+
+LOOTBOX_EMPTY_TEMPLATES = (
+    "📦 <b>Лутбокс оказался пустым...</b> 😢\nПопробуйте в следующий раз!",
+    "📦 <b>Пусто...</b> 😿\nУдача отдыхает, попробуй ещё разок!",
+    "📦 <b>Ничего...</b> 🫥\nКажется, духи рандома сегодня не в настроении.",
+)
+
+LOOTBOX_COIN_TEMPLATES = (
+    "📦 <b>Лутбокс!</b>\n\nВы нашли мешочек с монетами: <b>{coins}</b> монет! 💰",
+    "📦 <b>Звон монет!</b>\nИз коробки выпало <b>{coins}</b> 💰",
+    "📦 <b>Удача!</b> +<b>{coins}</b> монет 💰",
+)
+
+LOOTBOX_BADGE_TEMPLATES = (
+    "📦 <b>Лутбокс!</b>\n\nВы получили редкий значок: <b>{badge}</b>! 🏅",
+    "📦 <b>Редкий дроп!</b> Значок: <b>{badge}</b> 🏅",
+    "📦 <b>Коллекция +1:</b> <b>{badge}</b> 🎖",
+)
+
+LOOTBOX_TITLE_TEMPLATES = (
+    "📦 <b>Лутбокс!</b>\n\nЭПИЧЕСКИЙ ВЫИГРЫШ! Вы получили уникальный титул: <b>{title}</b>! 👑",
+    "📦 <b>ЛЕГЕНДАРКА!</b> 👑\nТвой новый титул: <b>{title}</b>",
+    "📦 <b>ДЖЕКПОТ!</b> 🎆\nУникальный титул: <b>{title}</b> 👑",
+)
+
 
 async def roll_lootbox_reward(user_id: int) -> str:
     """Roll lootbox reward with unified probabilities: 45/35/15/5."""
     roll = random.random()
     if roll < 0.45:
-        return "📦 <b>Лутбокс оказался пустым...</b> 😢\nПопробуйте в следующий раз!"
+        return random.choice(LOOTBOX_EMPTY_TEMPLATES)
 
     if roll < 0.80:
         coins = random.randint(300, 700)
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (coins, user_id))
             await db.commit()
-        return f"📦 <b>Лутбокс!</b>\n\nВы нашли мешочек с монетами: <b>{coins}</b> монет! 💰"
+        return random.choice(LOOTBOX_COIN_TEMPLATES).format(coins=coins)
 
     if roll < 0.95:
         badge = random.choice(LOOTBOX_BADGES)
         await add_to_inventory(user_id, "badge", badge)
-        return f"📦 <b>Лутбокс!</b>\n\nВы получили редкий значок: <b>{badge}</b>! 🏅"
+        return random.choice(LOOTBOX_BADGE_TEMPLATES).format(badge=badge)
 
     title = random.choice(LOOTBOX_TITLES)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('UPDATE users_stats SET custom_title = ? WHERE user_id = ?', (title, user_id))
         await db.commit()
-    return f"📦 <b>Лутбокс!</b>\n\nЭПИЧЕСКИЙ ВЫИГРЫШ! Вы получили уникальный титул: <b>{title}</b>! 👑"
+    return random.choice(LOOTBOX_TITLE_TEMPLATES).format(title=title)
 
 
 async def purchase_and_roll_lootbox(user_id: int) -> tuple[bool, str]:
@@ -5769,8 +5813,10 @@ class StatsMiddleware(BaseMiddleware):
                                                 new_balance = (await b_cursor.fetchone())[0]
                                             user_name = escape_html_text(event.from_user.first_name)
                                             # Компактный level-up: 1 строка + autodelete через 4 мин в группе.
+                                            # Вариативность через LEVEL_UP_TEMPLATES — меньше повторений.
+                                            template = random.choice(LEVEL_UP_TEMPLATES)
                                             lvl_msg = await event.answer(
-                                                f"🎉 <b>{user_name}</b> → ур. <b>{target_level}</b>! +{reward}💰",
+                                                template.format(name=user_name, lvl=target_level, reward=reward),
                                                 parse_mode="HTML",
                                             )
                                             schedule_delete_once(lvl_msg, TTL_LEVELUP)
