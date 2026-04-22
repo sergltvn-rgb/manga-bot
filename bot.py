@@ -138,6 +138,7 @@ dp = Dispatcher()
 # повторного импорта bot.py).
 from services.shared_state import ART_CACHE  # noqa: E402,F401
 from services.telegram_helpers import escape_html_text, format_user_tag, get_back_button  # noqa: E402,F401
+from services.admin_helpers import MAIN_ADMIN_ID, _fake_admin_message, _is_bot_admin, _require_admin  # noqa: E402,F401
 
 # Импорт ради side-effect: декораторы @art_router.message/callback_query регистрируют
 # handler'ы на art_router. Сам dp.include_router(art_router) вызывается в main() —
@@ -4050,35 +4051,8 @@ async def handle_grid_art_number_input(message: types.Message, state: FSMContext
 # старому сообщению или переслаке.
 # ==============================================================================
 
-MAIN_ADMIN_ID = 6210312655  # Главного админа нельзя удалить
-
-
-async def _is_bot_admin(user_id: int) -> bool:
-    """True если user_id в списке админов бота."""
-    try:
-        admins = await get_admins()
-        is_admin = user_id in admins
-        logging.debug(f"_is_bot_admin: uid={user_id} is_admin={is_admin} admins={admins}")
-        return is_admin
-    except Exception as e:
-        logging.warning(f"_is_bot_admin: get_admins failed: {e}")
-        return False
-
-
-async def _require_admin(event: Union[types.Message, types.CallbackQuery]) -> bool:
-    """Единая проверка прав админа.
-    Для callback — отвечает через answer(alert=False) и возвращает False.
-    Для message — молча возвращает False (не спамим в чат).
-    """
-    uid = event.from_user.id if event.from_user else 0
-    if await _is_bot_admin(uid):
-        return True
-    if isinstance(event, types.CallbackQuery):
-        try:
-            await event.answer("🚫 Нет прав.", show_alert=False)
-        except Exception:
-            pass
-    return False
+# MAIN_ADMIN_ID, _is_bot_admin, _require_admin → вынесены в services/admin_helpers.py
+# (доступны через re-export на top-level этого файла).
 
 
 async def _fetch_admin_metrics() -> dict:
@@ -4538,25 +4512,8 @@ async def admin_toggle_cleanup(callback: types.CallbackQuery):
     await callback.answer("✅ Cleanup toggled")
 
 
-# ------------------------------------------------------------------
-# Фабрика fake-Message для роутинга admin_cmd_* → обработчики команд
-# Безопасная замена старого model_copy hack: строим новый Message заново
-# и переключаем from_user на реального админа.
-# ------------------------------------------------------------------
-def _fake_admin_message(callback: types.CallbackQuery, text: str) -> types.Message | None:
-    msg = callback.message
-    if not isinstance(msg, types.Message):
-        return None
-    try:
-        # aiogram 3.x pydantic v2
-        return msg.model_copy(update={"from_user": callback.from_user, "text": text})
-    except Exception:
-        try:
-            # pydantic v1 fallback
-            return msg.copy(update={"from_user": callback.from_user, "text": text})
-        except Exception as e:
-            logging.warning(f"_fake_admin_message: build failed: {e}")
-            return None
+# _fake_admin_message → вынесен в services/admin_helpers.py
+# (доступен через re-export на top-level этого файла).
 
 
 @dp.callback_query(F.data.startswith("admin_cmd_"))
