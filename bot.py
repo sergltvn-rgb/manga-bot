@@ -624,155 +624,9 @@ async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str
     return await ask_ai(prompt, system_prompt, history, provider="groq")
 
 
-# --- СИСТЕМА TELEGRAPH (АВТО-КОНВЕРТАЦИЯ ТЕКСТА) ---
-async def get_telegraph_token():
-    token = await get_setting("telegraph_token")
-    if token:
-        return token
-
-    url = "https://api.telegra.ph/createAccount?short_name=AlyaBot&author_name=AlyaBot"
-    try:
-        session = await get_http_session()
-        async with session.get(url) as resp:
-            data = await resp.json()
-            if data.get("ok"):
-                token = data["result"]["access_token"]
-                await set_setting("telegraph_token", token)
-                return token
-    except Exception as e:
-        logging.error(f"Telegraph Token Error: {e}")
-    return None
-
-
-async def upload_to_telegraph(title, html_content):
-    token = await get_telegraph_token()
-    if not token:
-        return None
-
-    # Рекурсивный парсер HTML в Telegraph Nodes
-    def html_to_nodes(html_text):
-        from html.parser import HTMLParser
-
-        allowed_tags = {
-            "a",
-            "aside",
-            "b",
-            "blockquote",
-            "br",
-            "code",
-            "em",
-            "figcaption",
-            "figure",
-            "h3",
-            "h4",
-            "hr",
-            "i",
-            "img",
-            "li",
-            "ol",
-            "p",
-            "pre",
-            "s",
-            "strong",
-            "u",
-            "ul",
-        }
-        drop_content_tags = {"script", "style", "iframe", "object", "embed"}
-
-        class TelegraParser(HTMLParser):
-            def __init__(self):
-                super().__init__()
-                self.nodes = []
-                self.stack = []
-                self.drop_depth = 0
-
-            def _nearest_parent(self):
-                for item in reversed(self.stack):
-                    if isinstance(item, dict):
-                        return item
-                return None
-
-            def handle_starttag(self, tag, attrs):
-                tag = str(tag or "").lower()
-                if tag in drop_content_tags:
-                    self.drop_depth += 1
-                    self.stack.append(None)
-                    return
-                if tag not in allowed_tags:
-                    self.stack.append(None)
-                    return
-
-                node = {"tag": tag, "children": []}
-                attr_dict = {k: v for k, v in attrs}
-                if tag == "a" and "href" in attr_dict:
-                    href = _normalize_external_url(attr_dict["href"], max_len=2048)
-                    if href:
-                        node["attrs"] = {"href": href}
-                elif tag == "img" and "src" in attr_dict:
-                    src = _normalize_external_url(attr_dict["src"], max_len=2048)
-                    if src:
-                        node["attrs"] = {"src": src}
-
-                parent = self._nearest_parent()
-                if parent is not None:
-                    parent["children"].append(node)
-                else:
-                    self.nodes.append(node)
-
-                if tag not in {"br", "img", "hr"}:
-                    self.stack.append(node)
-                else:
-                    self.stack.append(None)
-
-            def handle_endtag(self, tag):
-                tag = str(tag or "").lower()
-                if self.stack:
-                    self.stack.pop()
-                if tag in drop_content_tags and self.drop_depth > 0:
-                    self.drop_depth -= 1
-
-            def handle_data(self, data):
-                if self.drop_depth > 0:
-                    return
-                if not data.strip() and not self.stack:
-                    return
-                parent = self._nearest_parent()
-                if parent is not None:
-                    parent["children"].append(data)
-                else:
-                    self.nodes.append(data)
-
-        parser = TelegraParser()
-        parser.feed(html_text)
-
-        block_tags = {"p", "h3", "h4", "ol", "ul", "blockquote", "aside", "figure", "img", "pre", "hr"}
-        wrapped_nodes = []
-        for n in parser.nodes:
-            if isinstance(n, str):
-                if n.strip():
-                    wrapped_nodes.append({"tag": "p", "children": [n]})
-            elif isinstance(n, dict) and n.get("tag") not in block_tags:
-                wrapped_nodes.append({"tag": "p", "children": [n]})
-            else:
-                wrapped_nodes.append(n)
-        return wrapped_nodes
-
-    nodes = html_to_nodes(html_content)
-    if not nodes:
-        nodes = [{"tag": "p", "children": ["(Пустая глава)"]}]
-
-    payload = {"access_token": token, "title": title, "author_name": "AlyaBot", "content": json.dumps(nodes), "return_content": "false"}
-    try:
-        session = await get_http_session()
-        async with session.post("https://api.telegra.ph/createPage", data=payload) as resp:
-            data = await resp.json()
-            if data.get("ok"):
-                return data["result"]["url"]
-            else:
-                logging.error(f"Telegraph API Error: {data}")
-    except Exception as e:
-        logging.error(f"Telegraph Upload Error: {e}")
-    return None
+# --- СИСТЕМА TELEGRAPH ---
+# Вынесена в services/telegraph.py (Фаза 3 шаг 5).
+from services.telegraph import get_telegraph_token, upload_to_telegraph  # noqa: E402,F401
 
 
 # --- Команда /model удалена по запросу ---
@@ -6475,8 +6329,6 @@ from services.webapp_cors import (
     _resolve_allowed_origin,
 )
 
-API_MAX_BODY_BYTES = int(os.getenv("API_MAX_BODY_BYTES", "262144"))
-
 MAX_CHAPTER_KEY_LENGTH = 160
 MAX_COMMENT_TEXT_LENGTH = 500
 MAX_REPORT_REASON_LENGTH = 300
@@ -6503,6 +6355,13 @@ from services.validators import (  # noqa: E402
     _is_valid_series_id,
     _normalize_external_url,
     _safe_json_dumps,
+)
+
+# WebApp middleware вынесен в services/webapp_middleware.py (Фаза 3 шаг 4).
+from services.webapp_middleware import (  # noqa: E402
+    API_MAX_BODY_BYTES,
+    api_security_middleware,
+    apply_webapp_response_headers,
 )
 
 
@@ -6546,101 +6405,6 @@ except Exception:
     SERVER_READER_TELEMETRY_SAMPLE_RATE = 0.2
 SERVER_READER_TELEMETRY_SAMPLE_RATE = max(0.0, min(1.0, SERVER_READER_TELEMETRY_SAMPLE_RATE))
 SERVER_READER_TELEMETRY_EVENT = "server_api_reader_ms"
-
-_STATIC_LONG_CACHE_EXTENSIONS = (
-    ".css",
-    ".js",
-    ".mjs",
-    ".map",
-    ".woff",
-    ".woff2",
-    ".ttf",
-    ".otf",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".svg",
-    ".ico",
-)
-
-
-def _webapp_cache_control_for_request(request: aiohttp.web.Request) -> str:
-    path = request.path.lower()
-    # HTML/app shell and frequently changing metadata must revalidate.
-    if path.endswith(("/reader.html", "/index.html", "/manifest.json", "/sw.js", "/chapters_data.json")):
-        return "no-cache"
-    # Versioned assets (?v=12) can be cached aggressively.
-    if "v" in request.rel_url.query:
-        return "public, max-age=31536000, immutable"
-    if path.endswith(_STATIC_LONG_CACHE_EXTENSIONS):
-        return "public, max-age=86400"
-    return "public, max-age=3600"
-
-
-def _response_is_compressible(response: aiohttp.web.StreamResponse) -> bool:
-    content_type = str(response.headers.get("Content-Type", "")).lower()
-    if not content_type:
-        return False
-    if content_type.startswith("image/") and "svg" not in content_type:
-        return False
-    return (
-        content_type.startswith("text/")
-        or "json" in content_type
-        or "javascript" in content_type
-        or "xml" in content_type
-        or "svg" in content_type
-    )
-
-
-async def apply_webapp_response_headers(request: aiohttp.web.Request, response: aiohttp.web.StreamResponse) -> None:
-    if request.path.startswith("/webapp/"):
-        response.headers.setdefault("Cache-Control", _webapp_cache_control_for_request(request))
-    if request.path.startswith(("/webapp/", "/api/")):
-        response.headers["Vary"] = _merge_vary_header(response.headers.get("Vary", ""), "Accept-Encoding")
-        if "Content-Encoding" not in response.headers and _response_is_compressible(response):
-            try:
-                response.enable_compression()
-            except Exception as e:
-                logging.debug(f"apply_webapp_response_headers: enable_compression failed: {e}")
-    if request.path.startswith("/api/"):
-        cors_headers = _build_cors_headers(request)
-        response.headers["Access-Control-Allow-Methods"] = CORS_BASE_HEADERS["Access-Control-Allow-Methods"]
-        response.headers["Access-Control-Allow-Headers"] = CORS_BASE_HEADERS["Access-Control-Allow-Headers"]
-        response.headers["Access-Control-Expose-Headers"] = CORS_BASE_HEADERS["Access-Control-Expose-Headers"]
-        if "Access-Control-Allow-Origin" in cors_headers:
-            response.headers["Access-Control-Allow-Origin"] = cors_headers["Access-Control-Allow-Origin"]
-        elif "Access-Control-Allow-Origin" in response.headers:
-            del response.headers["Access-Control-Allow-Origin"]
-        response.headers["Vary"] = _merge_vary_header(response.headers.get("Vary", ""), "Origin")
-
-
-@aiohttp.web.middleware
-async def api_security_middleware(request: aiohttp.web.Request, handler):
-    if request.path.startswith("/api/"):
-        origin = request.headers.get("Origin", "").strip()
-        if origin and not _resolve_allowed_origin(request):
-            return aiohttp.web.json_response(
-                {"error": "origin_not_allowed"},
-                status=403,
-                headers=_build_cors_headers(request),
-            )
-        content_length = request.content_length
-        if content_length is not None and content_length > API_MAX_BODY_BYTES:
-            return aiohttp.web.json_response(
-                {"error": "payload_too_large"},
-                status=413,
-                headers=_build_cors_headers(request),
-            )
-    try:
-        return await handler(request)
-    except aiohttp.web.HTTPRequestEntityTooLarge:
-        return aiohttp.web.json_response(
-            {"error": "payload_too_large"},
-            status=413,
-            headers=_build_cors_headers(request),
-        )
 
 
 def _clip_telemetry_text(value: object, max_len: int) -> str:
