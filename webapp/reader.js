@@ -3049,6 +3049,13 @@ function renderComments(comments) {
     function renderNode(c, isChild = false) {
         const initial = (c.user_name || 'А')[0].toUpperCase();
         const date = formatDate(c.created_at);
+        // Edited indicator: если updated_at задан И отличается от created_at (> 1s) — считаем отредактированным.
+        const editedTs = c.updated_at ? parseDate(c.updated_at) : 0;
+        const createdTs = c._ts || parseDate(c.created_at);
+        const isEdited = editedTs && (editedTs - createdTs > 1000);
+        const editedBadge = isEdited
+            ? `<span class="comment-edited-badge" title="Отредактировано ${formatDate(c.updated_at)}">(ред.)</span>`
+            : '';
         const isOwn = String(c.user_id) === userId;
         const viewerIsAdmin = isAdminMode; 
         const color = getAvatarColor(String(c.user_id));
@@ -3095,7 +3102,7 @@ function renderComments(comments) {
                 <div class="comment-header">
                     ${avatarHtml}
                     <div class="comment-author">${escapeHtml(c.user_name)}${roleBadge}${stateBadge}</div>
-                    <div class="comment-date" style="margin-left:auto;">${date}</div>
+                    <div class="comment-date" style="margin-left:auto;">${date}${editedBadge}</div>
                 </div>
                 <div class="comment-text" id="comment-text-${c.id}">${applyMarkup(c.text)}</div>
                 <div class="comment-actions">
@@ -3265,11 +3272,15 @@ function cancelEdit(id) {
 }
 
 async function saveCommentEdit(id) {
-    const newText = document.getElementById(`edit-input-${id}`).value.trim();
+    const input = document.getElementById(`edit-input-${id}`);
+    if (!input) return;
+    const newText = input.value.trim();
     if (!newText) {
         showToast('Комментарий не может быть пустым');
         return;
     }
+    const btns = document.querySelectorAll(`#comment-text-${id} .edit-actions button`);
+    btns.forEach(b => { b.disabled = true; });
 
     try {
         const resp = await apiFetch(`${API_URL}/api/comments/${id}`, {
@@ -3277,15 +3288,35 @@ async function saveCommentEdit(id) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text: newText })
         });
-        const data = await resp.json();
-        if (data.ok) {
-            await loadComments();
-            showToast('Комментарий изменён');
-        } else {
-            showToast('Ошибка: ' + (data.error || 'не удалось'));
+        let data = {};
+        try { data = await resp.json(); } catch (_) { data = {}; }
+        if (!resp.ok || !data.ok) {
+            const msg = data.error || `HTTP ${resp.status}`;
+            if (resp.status === 403) {
+                showToast('Редактировать можно только свои комментарии');
+            } else if (resp.status === 404) {
+                showToast('Комментарий не найден');
+            } else {
+                showToast('Не удалось сохранить: ' + msg);
+            }
+            return;
         }
+
+        // Optimistic local update — без полного reload. Пользователь видит изменение сразу.
+        const serverComment = data.comment || {};
+        const cached = allCommentsCache.find(c => String(c.id) === String(id));
+        if (cached) {
+            cached.text = serverComment.text || newText;
+            cached.updated_at = serverComment.updated_at || new Date().toISOString();
+        }
+        activeCommentEditId = null;
+        renderComments(allCommentsCache);
+        showToast('Комментарий изменён', 'success');
+        haptic('success');
     } catch (e) {
         showToast('Ошибка сети.');
+    } finally {
+        btns.forEach(b => { b.disabled = false; });
     }
 }
 

@@ -4776,6 +4776,13 @@ input[type=range]:active::-webkit-slider-thumb {
     color: var(--text-secondary);
     opacity: 0.78;
 }
+.comment-edited-badge {
+    margin-left: 4px;
+    font-size: 10px;
+    font-style: italic;
+    color: var(--text-secondary);
+    opacity: 0.65;
+}
 
 .comment-text {
     margin-top: 2px;

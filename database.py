@@ -110,6 +110,12 @@ async def init_db():
         except sqlite3.OperationalError:
             pass # Колонка уже существует
 
+        # Миграция: добавление updated_at для поддержки редактирования комментариев
+        try:
+            await db.execute('ALTER TABLE chapter_comments ADD COLUMN updated_at TEXT DEFAULT NULL')
+        except sqlite3.OperationalError:
+            pass # Колонка уже существует
+
         # Таблица прогресса чтения (WebApp)
         await db.execute('''CREATE TABLE IF NOT EXISTS user_bookmarks (
             user_id TEXT NOT NULL,

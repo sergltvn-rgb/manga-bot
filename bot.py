@@ -4591,6 +4591,7 @@ MAX_API_ERROR_TEXT = 250
 
 RATE_LIMIT_RULES = {
     "comments_post": {"limit": 8, "window": 60},
+    "comments_update": {"limit": 20, "window": 60},
     "comments_react": {"limit": 30, "window": 60},
     "reactions_post": {"limit": 30, "window": 60},
     "comments_report": {"limit": 6, "window": 300},
@@ -5849,7 +5850,8 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
                     c.id, c.user_id, c.user_name, c.text, c.created_at, c.parent_id,
                     COUNT(CASE WHEN r.type = 'like' THEN 1 END) as likes,
                     COUNT(CASE WHEN r.type = 'dislike' THEN 1 END) as dislikes,
-                    MAX(CASE WHEN r.user_id = ? THEN r.type ELSE NULL END) as user_reaction
+                    MAX(CASE WHEN r.user_id = ? THEN r.type ELSE NULL END) as user_reaction,
+                    c.updated_at
                 FROM chapter_comments c
                 LEFT JOIN comment_reactions r ON c.id = r.comment_id
                 WHERE c.chapter_key = ?
@@ -5869,7 +5871,8 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
                 "parent_id": r[5],
                 "likes": r[6],
                 "dislikes": r[7],
-                "user_reaction": r[8]
+                "user_reaction": r[8],
+                "updated_at": r[9]
             } for r in rows
         ]
         return aiohttp.web.json_response({"comments": comments}, headers=CORS_HEADERS)
@@ -5980,6 +5983,68 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_comments_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Редактировать свой комментарий. PUT /api/comments/{id}"""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "comments_update", user_id=user_id)
+        if limited:
+            return limited
+
+        try:
+            comment_id = int(request.match_info.get('id', '0'))
+        except (TypeError, ValueError):
+            return aiohttp.web.json_response({"error": "invalid comment id"}, status=400, headers=CORS_HEADERS)
+        if comment_id <= 0:
+            return aiohttp.web.json_response({"error": "invalid comment id"}, status=400, headers=CORS_HEADERS)
+
+        data = await request.json()
+        new_text = str(data.get('text', '')).strip()
+        if not new_text:
+            return aiohttp.web.json_response({"error": "text required"}, status=400, headers=CORS_HEADERS)
+        if len(new_text) > MAX_COMMENT_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "too long"}, status=400, headers=CORS_HEADERS)
+
+        async with aiosqlite.connect('manga.db') as db:
+            # Проверяем владельца (редактировать может только автор — админ удаляет, но не редактирует от имени)
+            async with db.execute('SELECT user_id FROM chapter_comments WHERE id = ?', (comment_id,)) as c:
+                row = await c.fetchone()
+            if not row:
+                return aiohttp.web.json_response({"error": "not found"}, status=404, headers=CORS_HEADERS)
+            if str(row[0]) != str(user_id):
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+            await db.execute(
+                "UPDATE chapter_comments SET text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_text, comment_id)
+            )
+            await db.commit()
+
+            # Возвращаем свежие данные чтобы клиент мог сразу применить
+            async with db.execute(
+                'SELECT id, text, updated_at FROM chapter_comments WHERE id = ?',
+                (comment_id,)
+            ) as c:
+                updated_row = await c.fetchone()
+
+        if not updated_row:
+            return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+
+        return aiohttp.web.json_response({
+            "ok": True,
+            "comment": {
+                "id": updated_row[0],
+                "text": updated_row[1],
+                "updated_at": updated_row[2],
+            }
+        }, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.exception("handle_comments_update failed")
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 # --- Репорты об опечатках ---
 
@@ -6467,6 +6532,9 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_options("/api/comments/react", handle_cors_preflight)
     app.router.add_options("/api/comments", handle_cors_preflight)
     app.router.add_route("DELETE", "/api/comments", handle_comments_delete)
+    # Edit own comment: PUT /api/comments/{id}
+    app.router.add_route("PUT", "/api/comments/{id}", handle_comments_update)
+    app.router.add_options("/api/comments/{id}", handle_cors_preflight)
     app.router.add_post("/api/comments/report", handle_comments_report)
     app.router.add_options("/api/comments/report", handle_cors_preflight)
 
