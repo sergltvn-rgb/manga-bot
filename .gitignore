@@ -47,3 +47,15 @@ artifacts/
 *.rar
 *.zip
 *.log
+
+# Temporary/debug scripts (cleanup 2026-04)
+tmp_*.py
+find_*.py
+changes.diff
+*.patch
+empty*.txt
+old_bot.py
+
+# Webapp debug (cleanup 2026-04)
+webapp/run_test*.js
+webapp/chapters.log
