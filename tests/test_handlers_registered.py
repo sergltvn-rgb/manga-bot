@@ -46,6 +46,12 @@ def _iter_message_handlers(bot_module):
         stack.append(art_router)
     except ImportError:
         pass
+    try:
+        from services.admin_telegram import admin_router
+
+        stack.append(admin_router)
+    except ImportError:
+        pass
     while stack:
         router = stack.pop()
         for h in router.message.handlers:
