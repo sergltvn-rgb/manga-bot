@@ -182,10 +182,12 @@ async def global_error_handler(event: types.ErrorEvent) -> bool:
     exc = event.exception
     update = event.update
 
-    # Шум: сообщение не найдено/уже удалено, бот забанен, BadRequest на edit.
-    from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
-    if isinstance(exc, (TelegramBadRequest, TelegramForbiddenError)):
-        logging.debug(f"global_error_handler: suppressed Telegram API error: {exc}")
+    # Все Telegram API ошибки (BadRequest, Forbidden, NotFound, RetryAfter,
+    # Migrate, Conflict, Unauthorized, ServerError) — рутинная часть протокола,
+    # их не нужно показывать пользователю как "что-то пошло не так".
+    from aiogram.exceptions import TelegramAPIError
+    if isinstance(exc, TelegramAPIError):
+        logging.debug(f"global_error_handler: suppressed Telegram API error: {type(exc).__name__}: {exc}")
         return True
 
     logging.exception("Unhandled handler error", exc_info=exc)

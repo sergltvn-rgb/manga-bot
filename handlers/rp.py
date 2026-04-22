@@ -196,7 +196,10 @@ async def rp_hide_gif_callback(callback: types.CallbackQuery):
         return await callback.answer("Только автор команды или админ может скрыть GIF.", show_alert=True)
 
     msg = callback.message
-    if not msg or not msg.animation:
+    # InaccessibleMessage (сообщение старше 48ч) не имеет полей animation/caption.
+    if not isinstance(msg, types.Message):
+        return await callback.answer("Сообщение слишком старое, скрыть не получится.", show_alert=True)
+    if not getattr(msg, "animation", None):
         return await callback.answer("Здесь нет GIF для скрытия.", show_alert=True)
     if msg.animation.has_spoiler:
         return await callback.answer("GIF уже скрыта 🙈")
