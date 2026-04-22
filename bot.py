@@ -98,11 +98,84 @@ dp = Dispatcher()
 
 
 # ============================================================================
+# ANTI-DOUBLE-TAP MIDDLEWARE для callback_query
+# ----------------------------------------------------------------------------
+# Защищает от случайных двойных нажатий на inline-кнопки: если тот же
+# (user_id, callback_data) приходит повторно в течение N секунд —
+# отвечаем пустым callback.answer() и не пускаем в handler.
+#
+# Также реализует общий rate-limit для callback-кнопок: не более
+# 5 callback/сек от одного пользователя (анти-спам).
+# ============================================================================
+from aiogram import BaseMiddleware
+from collections import deque, defaultdict
+from typing import Any, Awaitable, Callable, Dict as _Dict
+
+_CB_DEDUP_WINDOW_SEC = 2.0           # окно для дедупликации одинаковых тапов
+_CB_RATE_WINDOW_SEC = 1.0            # окно для общего rate-limit callback
+_CB_RATE_MAX_IN_WINDOW = 5           # макс. callbacks в окне
+
+
+class CallbackAntiSpamMiddleware(BaseMiddleware):
+    def __init__(self) -> None:
+        # (user_id, data) → timestamp последнего такого же тапа
+        self._last_tap: _Dict[tuple[int, str], float] = {}
+        # user_id → deque[timestamps] для rate-limit
+        self._recent: _Dict[int, deque[float]] = defaultdict(deque)
+
+    async def __call__(
+        self,
+        handler: Callable[[types.CallbackQuery, _Dict[str, Any]], Awaitable[Any]],
+        event: types.CallbackQuery,
+        data: _Dict[str, Any],
+    ) -> Any:
+        user = event.from_user
+        if user is None:
+            return await handler(event, data)
+
+        now = time.time()
+        key = (user.id, event.data or "")
+
+        # 1) Дедупликация одинаковых тапов в коротком окне (double-click)
+        prev = self._last_tap.get(key)
+        if prev is not None and (now - prev) < _CB_DEDUP_WINDOW_SEC:
+            try:
+                await event.answer()
+            except Exception:
+                pass
+            return  # тихо игнорируем
+        self._last_tap[key] = now
+
+        # 2) Общий callback rate-limit
+        q = self._recent[user.id]
+        cutoff = now - _CB_RATE_WINDOW_SEC
+        while q and q[0] < cutoff:
+            q.popleft()
+        if len(q) >= _CB_RATE_MAX_IN_WINDOW:
+            try:
+                await event.answer("⏳ Слишком быстро, подожди секунду.", show_alert=False)
+            except Exception:
+                pass
+            return
+        q.append(now)
+
+        # 3) Периодическая очистка _last_tap от старых записей (не чаще раза в минуту)
+        if len(self._last_tap) > 2048:
+            stale = [k for k, ts in self._last_tap.items() if (now - ts) > 60]
+            for k in stale:
+                self._last_tap.pop(k, None)
+
+        return await handler(event, data)
+
+
+dp.callback_query.middleware(CallbackAntiSpamMiddleware())
+
+
+# ============================================================================
 # ГЛОБАЛЬНЫЙ ERROR HANDLER
 # ----------------------------------------------------------------------------
-# Логирует все необработанные исключения из хэндлеров.
-# Пользователю показывает дружелюбное сообщение (ephemeral в группе).
-# Telegram-ошибки (BadRequest/Forbidden при delete/edit) глушатся отдельно.
+# Логирует все необработанные исключения. Telegram-API ошибки (BadRequest/
+# Forbidden при delete/edit) глушатся, пользователю — дружелюбное сообщение.
 # ============================================================================
 @dp.errors()
 async def global_error_handler(event: types.ErrorEvent) -> bool:
