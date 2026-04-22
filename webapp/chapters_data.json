@@ -113,20 +113,20 @@
           "custom_name": "Том 12",
           "chapters": [
             {
+              "chapter": "Иллюстрации",
+              "custom_name": "Глава Иллюстрации",
+              "url": "https://teletype.in/@slitvin/vKhB93T3d2G",
+              "urls": [
+                "https://teletype.in/@slitvin/vKhB93T3d2G"
+              ]
+            },
+            {
               "chapter": "1",
               "custom_name": "Пролог",
               "url": "",
               "urls": [
                 "https://teletype.in/@slitvin/dNvV2wgl1mH",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-prolog-04-10"
-              ]
-            },
-            {
-              "chapter": "Иллюстрации",
-              "custom_name": "Глава Иллюстрации",
-              "url": "https://teletype.in/@slitvin/vKhB93T3d2G",
-              "urls": [
-                "https://teletype.in/@slitvin/vKhB93T3d2G"
               ]
             },
             {
