@@ -9,6 +9,7 @@
 Тест импортирует `bot` как модуль (без запуска polling), собирает
 зарегистрированные хендлеры и валидирует инварианты.
 """
+
 from __future__ import annotations
 
 import re
@@ -22,17 +23,29 @@ def bot_module():
     т. е. сразу же регистрирует хендлеры в Dispatcher'е.
     """
     import bot  # noqa: F401 — импорт ради side-effects регистрации
+
     return bot
 
 
 def _iter_message_handlers(bot_module):
     """Возвращает `(filters, callback)` для всех message-хендлеров
-    из встроенного router-а Dispatcher'а + всех подключённых роутеров."""
+    из встроенного router-а Dispatcher'а + всех подключённых роутеров.
+
+    Доп. подключает известные module-level роутеры, которые attach'атся к
+    Dispatcher только в `main()` (и потому недоступны при чистом импорте bot).
+    """
     dp = bot_module.dp
-    # В aiogram 3 `Dispatcher` сам является роутером; подключённые
-    # роутеры лежат в `.sub_routers` (или просто имеют свой message.handlers).
     seen = []
     stack = [dp]
+    # В aiogram 3 `Dispatcher` сам является роутером; подключённые
+    # роутеры лежат в `.sub_routers` (или просто имеют свой message.handlers).
+    # Дополнительно добавляем router'ы, которые attached только в main().
+    try:
+        from services.admin_art_fsm import art_router
+
+        stack.append(art_router)
+    except ImportError:
+        pass
     while stack:
         router = stack.pop()
         for h in router.message.handlers:
@@ -70,18 +83,45 @@ def _extract_command_strings(handler) -> list[str]:
 # намеренно — тоже удаляется отсюда. Так тест служит живым списком.
 EXPECTED_COMMANDS = {
     # Пользовательские
-    "start", "cancel", "feed", "pet", "suggest_art", "arts_list",
+    "start",
+    "cancel",
+    "feed",
+    "pet",
+    "suggest_art",
+    "arts_list",
     # Админ-панель (эти должны работать после shadowing-фикса `_is_bot_admin`)
-    "admin", "add_admin", "delete_admin",
+    "admin",
+    "add_admin",
+    "delete_admin",
     # Админ-контент
-    "add_chapter", "delete_chapter", "add_ranobe", "delete_ranobe",
-    "add_akashic", "delete_akashic", "add_british", "delete_british",
-    "add_art", "delete_art",
+    "add_chapter",
+    "delete_chapter",
+    "add_ranobe",
+    "delete_ranobe",
+    "add_akashic",
+    "delete_akashic",
+    "add_british",
+    "delete_british",
+    "add_art",
+    "delete_art",
     # Админ-ссылки и тогглы
-    "set_commands_link", "delete_commands_link", "sync_webapp", "toggle_sync",
-    "alya_mode", "toggle_ai", "blacklist_ai", "unblacklist_ai", "blacklist_view",
+    "set_commands_link",
+    "delete_commands_link",
+    "sync_webapp",
+    "toggle_sync",
+    "alya_mode",
+    "toggle_ai",
+    "blacklist_ai",
+    "unblacklist_ai",
+    "blacklist_view",
     # Модерация
-    "ban", "unban", "mute", "unmute", "kick", "clean", "cleanup_service",
+    "ban",
+    "unban",
+    "mute",
+    "unmute",
+    "kick",
+    "clean",
+    "cleanup_service",
     # Служебные
     "finish",
 }
@@ -144,6 +184,7 @@ def test_admin_handler_is_the_right_function(bot_module):
     `(message, state)`, а не `(chat_id)`. Если кто-то добавит вторую
     функцию с тем же именем и сигнатурой (chat_id), тест завалится."""
     from inspect import signature
+
     cmd_admin = getattr(bot_module, "cmd_admin", None)
     assert cmd_admin is not None, "cmd_admin function must exist in bot module"
     params = list(signature(cmd_admin).parameters)
@@ -155,6 +196,4 @@ def test_admin_handler_is_the_right_function(bot_module):
     is_bot_admin = getattr(bot_module, "_is_bot_admin", None)
     assert is_bot_admin is not None
     admin_params = list(signature(is_bot_admin).parameters)
-    assert admin_params == ["user_id"], (
-        f"_is_bot_admin must accept exactly `user_id`, got {admin_params}"
-    )
+    assert admin_params == ["user_id"], f"_is_bot_admin must accept exactly `user_id`, got {admin_params}"

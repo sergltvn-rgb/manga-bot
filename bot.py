@@ -133,11 +133,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Admin + user art-upload/suggest handlers (Фаза 3 шаг 20). Подключено на top-level
-# чтобы test_handlers_registered мог видеть команды при импорте bot.py.
+# Импорт ради side-effect: декораторы @art_router.message/callback_query регистрируют
+# handler'ы на art_router. Сам dp.include_router(art_router) вызывается в main() —
+# иначе при re-import bot.py (через `from bot import X` внутри handler'а Python
+# импортирует bot.py заново как модуль `bot` вместо `__main__`) top-level
+# include_router падает с RuntimeError: "Router is already attached".
 from services.admin_art_fsm import art_router, cmd_add_art  # noqa: E402,F401
-
-dp.include_router(art_router)
 
 
 # ============================================================================
@@ -6782,7 +6783,10 @@ async def cmd_kick(message: types.Message):
 
 async def main():
     dp.include_router(rp_router)
-    # art_router подключён на top-level (см. блок рядом с импортом services/admin_art_fsm).
+    # art_router регистрируется через декораторы при импорте services/admin_art_fsm
+    # (см. комментарий сразу после `dp = Dispatcher()`). Attach к dp — только здесь,
+    # ОДИН раз за жизнь процесса.
+    dp.include_router(art_router)
     await init_db()
 
     dp.message.outer_middleware(StatsMiddleware())
