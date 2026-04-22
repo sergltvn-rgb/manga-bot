@@ -982,3 +982,33 @@ class TestValidatorsExtendedLimits:
         assert MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH == 18000
         assert MAX_BULK_URLS_PER_REQUEST == 200
         assert MAX_RENAME_OBJECT_ID_LENGTH == 200
+
+
+# --- services.ai_chat_api + services.typo_api + services.comments_api.handle_comments_report ---
+
+
+class TestAiChatApi:
+    def test_imports(self):
+        import inspect
+
+        from services.ai_chat_api import handle_ai_chat
+
+        assert inspect.iscoroutinefunction(handle_ai_chat)
+
+
+class TestTypoApi:
+    def test_imports(self):
+        import inspect
+
+        from services.typo_api import handle_typo_post
+
+        assert inspect.iscoroutinefunction(handle_typo_post)
+
+
+class TestCommentsReport:
+    def test_import(self):
+        import inspect
+
+        from services.comments_api import handle_comments_report
+
+        assert inspect.iscoroutinefunction(handle_comments_report)

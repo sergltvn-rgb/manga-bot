@@ -19,6 +19,7 @@ Lazy-импорт `DB_PATH` и `get_admins` из bot.py.
 
 from __future__ import annotations
 
+import html
 import logging
 
 import aiohttp.web
@@ -27,7 +28,12 @@ import aiosqlite
 from services.admin_audit import _api_error_response
 from services.auth import get_auth_user
 from services.rate_limit import _enforce_rate_limit
-from services.validators import MAX_CHAPTER_KEY_LENGTH, MAX_COMMENT_TEXT_LENGTH
+from services.validators import (
+    MAX_CHAPTER_KEY_LENGTH,
+    MAX_COMMENT_REPORT_TEXT_LENGTH,
+    MAX_COMMENT_TEXT_LENGTH,
+    MAX_REPORT_REASON_LENGTH,
+)
 from services.webapp_cors import CORS_HEADERS
 
 
@@ -259,4 +265,57 @@ async def handle_comments_update(request: aiohttp.web.Request) -> aiohttp.web.Re
         )
     except Exception as e:  # noqa: BLE001
         logging.exception("handle_comments_update failed")
+        return _api_error_response(e, context=request.path)
+
+
+async def handle_comments_report(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """POST `/api/comments/report` — жалоба на комментарий.
+
+    Не пишет в БД — только уведомляет админов в Telegram с причиной и текстом
+    репортуемого комментария. Защита от спама — через rate-limit.
+    """
+    from bot import bot, get_admins
+
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "comments_report", user_id=user_id)
+        if limited:
+            return limited
+        user_name = user.get("first_name", "Аноним")
+
+        data = await request.json()
+        comment_id = data.get("comment_id")
+        reason = str(data.get("reason", "")).strip()
+        comment_text = str(data.get("comment_text", "")).strip()
+        try:
+            comment_id_int = int(comment_id)
+        except Exception:  # noqa: BLE001
+            return aiohttp.web.json_response({"error": "invalid comment_id"}, status=400, headers=CORS_HEADERS)
+
+        if comment_id_int <= 0 or not reason:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if len(reason) > MAX_REPORT_REASON_LENGTH:
+            return aiohttp.web.json_response({"error": "reason too long"}, status=400, headers=CORS_HEADERS)
+        if len(comment_text) > MAX_COMMENT_REPORT_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "comment_text too long"}, status=400, headers=CORS_HEADERS)
+
+        admins = await get_admins()
+        report_text = (
+            f"🚫 <b>Жалоба на комментарий!</b>\n"
+            f"От: {html.escape(user_name)} (ID: <code>{user_id}</code>)\n"
+            f"ID комментария: <code>{comment_id_int}</code>\n"
+            f"Причина: {html.escape(reason)}\n\n"
+            f"<b>Текст комментария:</b>\n<i>{html.escape(comment_text)}</i>"
+        )
+        for admin_id in admins:
+            try:
+                await bot.send_message(admin_id, report_text, parse_mode="HTML")
+            except Exception as e:  # noqa: BLE001 — aiogram-ошибка не должна фейлить HTTP-ответ.
+                logging.debug(f"comments_report: failed to notify admin {admin_id}: {e}")
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except Exception as e:  # noqa: BLE001
         return _api_error_response(e, context=request.path)
