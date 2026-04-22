@@ -1505,17 +1505,23 @@ async def cmd_daily(message: types.Message):
         )
         if cursor.rowcount == 0:
             await db.rollback()
-            return await message.answer("🎁 Вы уже получили свою награду сегодня! Приходите завтра. ✨")
+            return await reply_group_ephemeral(
+                message,
+                "🎁 Вы уже получили свою награду сегодня! Приходите завтра. ✨",
+                ttl=TTL_GROUP_PANEL,
+            )
         await db.commit()
         new_balance = balance + reward
 
     streak_text = f"\n🔥 Стрик: <b>{streak}</b> дн." if streak > 1 else ""
-    await message.answer(
+    await reply_group_ephemeral(
+        message,
         f"🎁 <b>Ежедневная награда!</b>\n\n"
         f"Вы получили <b>{reward}</b> монет!\n"
         f"Ваш баланс: <b>{new_balance}</b> монет.{streak_text}\n\n"
         f"<i>Приходите завтра, чтобы увеличить награду!</i>",
-        parse_mode="HTML"
+        ttl=TTL_GROUP_PANEL,
+        parse_mode="HTML",
     )
 
 LOOTBOX_PRICE = 300
@@ -1690,8 +1696,13 @@ async def get_profile_content(chat_type: str, chat_id: int, user: types.User):
 async def cmd_profile(message: types.Message):
     if await check_action_cooldown(message, "profile"): return
     text, markup = await get_profile_content(message.chat.type, message.chat.id, message.from_user)
-    msg = await message.answer(text, parse_mode="HTML", reply_markup=markup)
-    # Удаление отключено для сохранения интерактивных кнопок
+    # В группах — autodelete через TTL_GROUP_PANEL (2 мин), в ЛС — навсегда.
+    await reply_group_ephemeral(
+        message, text,
+        ttl=TTL_GROUP_PANEL,
+        parse_mode="HTML",
+        reply_markup=markup,
+    )
 
 
 @dp.message(F.text & F.text.regexp(REGEX_REF))
@@ -2025,9 +2036,12 @@ async def callback_roast_profile(callback: types.CallbackQuery):
         )
 
     await wait_msg.delete()
-    await callback.message.answer(
+    # В группах — autodelete через TTL_GROUP_PANEL (2 мин), в ЛС — навсегда.
+    await reply_group_ephemeral(
+        callback.message,
         f"📋 <b>Мнение Али о {escape_html_text(name)}:</b>\n{escape_html_text(response)}",
-        parse_mode="HTML"
+        ttl=TTL_GROUP_PANEL,
+        parse_mode="HTML",
     )
 
 @dp.message(F.text & F.text.regexp(REGEX_STATS))
@@ -2068,9 +2082,8 @@ async def cmd_stats(message: types.Message):
     top_rp_text = await format_top(top_rp, "РП")
     
     text = f"📊 <b>Статистика чата:</b>\n\n🗣 <b>Топ болтунов:</b>\n{top_msg_text}\n\n🎭 <b>Самые любвеобильные:</b>\n{top_rp_text}"
-    msg = await message.answer(text, parse_mode="HTML")
-    if message.chat.type in ["group", "supergroup"]:
-        schedule_delete_once(msg, 30)
+    # В группах — autodelete через TTL_GROUP_PANEL (2 мин).
+    await reply_group_ephemeral(message, text, ttl=TTL_GROUP_PANEL, parse_mode="HTML")
 
 # РП команды теперь в handlers/rp.py
 
@@ -2539,9 +2552,12 @@ async def bottle_spin(callback: types.CallbackQuery):
 async def cmd_shop(message: types.Message):
     if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
     if await check_action_cooldown(message, "shop"): return
-    
-    await message.answer(
+
+    # В группах — autodelete через TTL_GROUP_PANEL (2 мин). В ЛС команда недоступна.
+    await reply_group_ephemeral(
+        message,
         await get_shop_text(message.from_user.id, page=0),
+        ttl=TTL_GROUP_PANEL,
         parse_mode="HTML",
         reply_markup=build_shop_keyboard(page=0),
     )
