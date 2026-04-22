@@ -474,11 +474,14 @@ from utils import (
     set_cooldown,
     spawn_bg,
     reply_and_forget,
+    reply_group_ephemeral,
     cb_warn,
     TTL_ERROR,
     TTL_GAME,
     TTL_HEAVY_GAME,
     TTL_MENU,
+    TTL_GROUP_PANEL,
+    TTL_LEVELUP,
     parse_duration,
     humanize_duration,
     is_moderator,
@@ -5287,16 +5290,23 @@ class StatsMiddleware(BaseMiddleware):
                 if random.random() < 0.02: # 2% шанс на сообщение
                     reward = random.randint(50, 200)
                     ACTIVE_DROPS[chat_id] = reward
-                    
+
                     kb = InlineKeyboardBuilder()
                     kb.button(text="🎁 Забрать монеты!", callback_data="claim_drop")
-                    
-                    await event.answer(
+
+                    drop_msg = await event.answer(
                         "💰 <b>ОЙ! В ЧАТЕ УПАЛ МЕШОК МОНЕТ!</b>\n"
                         "Успей нажать на кнопку первым, чтобы забрать награду!",
                         parse_mode="HTML",
                         reply_markup=kb.as_markup()
                     )
+                    # Если за 60 сек никто не клейманул — удаляем сообщение и снимаем flag.
+                    schedule_delete_once(drop_msg, 60)
+                    async def _expire_drop(cid: int):
+                        await asyncio.sleep(60)
+                        if ACTIVE_DROPS.get(cid) is not None:
+                            ACTIVE_DROPS.pop(cid, None)
+                    spawn_bg(_expire_drop(chat_id), name="chat_drop_expire")
             # ----------------------------------
             
             try:
@@ -5330,11 +5340,12 @@ class StatsMiddleware(BaseMiddleware):
                                             async with db.execute('SELECT balance FROM users_stats WHERE user_id = ?', (user_id,)) as b_cursor:
                                                 new_balance = (await b_cursor.fetchone())[0]
                                             user_name = escape_html_text(event.from_user.first_name)
-                                            await event.answer(
-                                                f"🎉 <b>Поздравляем!</b> {user_name} достигает <b>{target_level} уровня</b>!\n"
-                                                f"💰 Награда: {reward} монет\n💳 Текущий баланс: {new_balance}",
-                                                parse_mode="HTML"
+                                            # Компактный level-up: 1 строка + autodelete через 4 мин в группе.
+                                            lvl_msg = await event.answer(
+                                                f"🎉 <b>{user_name}</b> → ур. <b>{target_level}</b>! +{reward}💰",
+                                                parse_mode="HTML",
                                             )
+                                            schedule_delete_once(lvl_msg, TTL_LEVELUP)
                                 # -----------------------
                             else:
                                 await db.execute('UPDATE users_stats SET messages_count = messages_count + 1 WHERE user_id = ?', (user_id,))
