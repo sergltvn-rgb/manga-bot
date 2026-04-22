@@ -32,6 +32,14 @@ self.addEventListener('message', (event) => {
             for (const rawUrl of data.urls) {
                 const url = String(rawUrl || '').trim();
                 if (!/^https?:\/\//i.test(url)) continue;
+                // Skip cross-origin hosts without CORS — they only spam console.
+                // Allow only same-origin + явно доверенный api.telegra.ph.
+                try {
+                    const u = new URL(url);
+                    const isSameOrigin = u.origin === self.location.origin;
+                    const isTelegraphApi = u.hostname === 'api.telegra.ph';
+                    if (!isSameOrigin && !isTelegraphApi) continue;
+                } catch (e) { continue; }
                 try {
                     const response = await fetch(url, { cache: 'no-store' });
                     if (response && response.ok) {

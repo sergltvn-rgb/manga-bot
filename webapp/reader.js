@@ -901,6 +901,9 @@ function toServiceWorkerCacheUrl(rawUrl) {
     if (telegraphMatch) {
         return `https://api.telegra.ph/getPage/${telegraphMatch[1]}?return_content=true`;
     }
+    // Не ставим в prefetch cross-origin URL'ы без CORS (teletype.in и т.п.) — они и так
+    // грузятся через <iframe>, а SW fetch только засоряет консоль CORS-ошибками.
+    if (/^https?:\/\/teletype\.in\//i.test(src)) return '';
     return src;
 }
 
