@@ -146,8 +146,8 @@ class CallbackAntiSpamMiddleware(BaseMiddleware):
         if prev is not None and (now - prev) < _CB_DEDUP_WINDOW_SEC:
             try:
                 await event.answer()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"callback_antispam: dedup answer failed: {e}")
             return  # тихо игнорируем
         self._last_tap[key] = now
 
@@ -159,8 +159,8 @@ class CallbackAntiSpamMiddleware(BaseMiddleware):
         if len(q) >= _CB_RATE_MAX_IN_WINDOW:
             try:
                 await event.answer("⏳ Слишком быстро, подожди секунду.", show_alert=False)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"callback_antispam: rate-limit answer failed: {e}")
             return
         q.append(now)
 
@@ -2796,6 +2796,10 @@ async def shop_buy_title_cb(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(ShopBuyTitle.waiting_for_title)
 async def shop_process_title(message: types.Message, state: FSMContext):
+    # Guard: не даём команде (/admin, /start и т. п.) стать новым титулом.
+    if (message.text or "").startswith("/"):
+        await state.clear()
+        return
     data = await state.get_data()
     chat_id = data.get("chat_id")
     page = int(data.get("shop_page", 0) or 0)
@@ -3779,10 +3783,10 @@ async def _is_bot_admin(user_id: int) -> bool:
     try:
         admins = await get_admins()
         is_admin = user_id in admins
-        logging.info(f"_is_bot_admin: uid={user_id} is_admin={is_admin} admins={admins}")
+        logging.debug(f"_is_bot_admin: uid={user_id} is_admin={is_admin} admins={admins}")
         return is_admin
     except Exception as e:
-        logging.info(f"_is_bot_admin: get_admins failed: {e}")
+        logging.warning(f"_is_bot_admin: get_admins failed: {e}")
         return False
 
 
@@ -3850,8 +3854,8 @@ async def _fetch_admin_metrics() -> dict:
                 ) as c:
                     row = await c.fetchone()
                     metrics["cmt_24h"] = row[0] if row else 0
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"_fetch_admin_metrics: cmt_24h skipped: {e}")
     except Exception as e:
         logging.debug(f"_fetch_admin_metrics: {e}")
     return metrics
@@ -3923,22 +3927,19 @@ async def cmd_delete_admin(message: types.Message):
 
 @dp.message(Command("admin"), StateFilter("*"))
 async def cmd_admin(message: types.Message, state: FSMContext):
-    logging.info(f"cmd_admin: enter uid={message.from_user.id} chat={message.chat.type}")
+    # StateFilter("*") + state.clear() — /admin всегда выбивает юзера из
+    # любого FSM-диалога (иначе повисший state перехватит команду раньше).
+    await state.clear()
+    if not await _is_bot_admin(message.from_user.id):
+        return
     try:
-        await state.clear()
-        logging.info("cmd_admin: step1 state cleared")
-        admin_ok = await _is_bot_admin(message.from_user.id)
-        logging.info(f"cmd_admin: step2 admin_ok={admin_ok}")
-        if not admin_ok:
-            return
-        text = await _build_admin_menu_text()
-        logging.info(f"cmd_admin: step3 menu text len={len(text)}")
-        kb = _build_admin_menu_kb()
-        logging.info("cmd_admin: step4 kb built, sending answer")
-        await message.answer(text, parse_mode="HTML", reply_markup=kb)
-        logging.info("cmd_admin: step5 answer sent")
+        await message.answer(
+            await _build_admin_menu_text(),
+            parse_mode="HTML",
+            reply_markup=_build_admin_menu_kb(),
+        )
     except Exception as e:
-        logging.exception(f"cmd_admin: failed: {e}")
+        logging.exception(f"cmd_admin: answer failed: {e}")
 
 
 @dp.callback_query(F.data == "admin_menu")
@@ -4080,8 +4081,8 @@ async def _render_admins_section(callback: types.CallbackQuery):
                     'SELECT username, first_name FROM user_profiles WHERE user_id = ?', (uid,)
                 ) as c:
                     profile = await c.fetchone()
-        except Exception:
-            pass
+        except Exception as e:
+            logging.debug(f"_render_admins_section: profile lookup failed for uid={uid}: {e}")
         if profile:
             uname, fname = profile
             display = escape_html_text(fname or uname or f"user#{uid}")
@@ -4143,6 +4144,10 @@ async def admin_manage_new_id(message: types.Message, state: FSMContext):
     if not await _is_bot_admin(message.from_user.id):
         return await state.clear()
     text = (message.text or "").strip()
+    # Guard: команда вроде /admin не должна считаться "новым id" — чистим state и даём команде пройти к Command-handler'у на следующем апдейте.
+    if text.startswith("/"):
+        await state.clear()
+        return
     if not text.lstrip("-").isdigit():
         return await message.answer("❌ Нужно число (user_id). Попробуйте ещё раз или /cancel.")
     new_admin = int(text)
@@ -4170,19 +4175,19 @@ async def _build_settings_text_and_kb() -> tuple[str, types.InlineKeyboardMarkup
     try:
         v = await get_setting("sync_locked")
         sync_locked = str(v or "0") == "1"
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"_build_settings_text_and_kb: sync_locked read failed: {e}")
     try:
         v = await get_setting("cleanup_service")
         cleanup_on = str(v or "0") == "1"
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"_build_settings_text_and_kb: cleanup_service read failed: {e}")
     try:
         v = await get_setting("alya_mode")
         if v:
             alya_mode = str(v)
-    except Exception:
-        pass
+    except Exception as e:
+        logging.debug(f"_build_settings_text_and_kb: alya_mode read failed: {e}")
 
     text = (
         "⚙ <b>Системные настройки</b>\n\n"
@@ -6125,8 +6130,8 @@ async def apply_webapp_response_headers(request: aiohttp.web.Request, response: 
         if "Content-Encoding" not in response.headers and _response_is_compressible(response):
             try:
                 response.enable_compression()
-            except Exception:
-                pass
+            except Exception as e:
+                logging.debug(f"apply_webapp_response_headers: enable_compression failed: {e}")
     if request.path.startswith("/api/"):
         cors_headers = _build_cors_headers(request)
         response.headers["Access-Control-Allow-Methods"] = CORS_BASE_HEADERS["Access-Control-Allow-Methods"]
@@ -8189,8 +8194,8 @@ async def _guard_mod_command(message: types.Message) -> tuple[int, int, str] | N
         if await is_moderator(bot, chat_id, target_id):
             await temp_reply(message, "🛡 Нельзя модерировать админа.", delay=TTL_ERROR)
             return None
-    except Exception:
-        pass
+    except Exception as e:
+        logging.warning(f"_guard_mod_command: is_moderator check failed for target={target_id} chat={chat_id}: {e}")
 
     # Не трогаем самого бота.
     try:
