@@ -190,23 +190,42 @@ async def global_error_handler(event: types.ErrorEvent) -> bool:
         logging.debug(f"global_error_handler: suppressed Telegram API error: {type(exc).__name__}: {exc}")
         return True
 
-    logging.exception("Unhandled handler error", exc_info=exc)
-
-    # Пытаемся уведомить пользователя дружелюбно, без подробностей стека.
+    # Для реальных Python-ошибок: залогировать с максимальным контекстом.
+    chat_id = None
+    user_id = None
+    source_text = None
     try:
-        msg_like = None
         if update.message is not None:
-            msg_like = update.message
+            chat_id = update.message.chat.id if update.message.chat else None
+            user_id = update.message.from_user.id if update.message.from_user else None
+            source_text = (update.message.text or update.message.caption or "")[:120]
         elif update.callback_query is not None:
-            # alert без изменения чата
-            await update.callback_query.answer(
-                "⚠️ Что-то пошло не так. Попробуй ещё раз.",
-                show_alert=False,
-            )
+            chat_id = update.callback_query.message.chat.id if update.callback_query.message and update.callback_query.message.chat else None
+            user_id = update.callback_query.from_user.id if update.callback_query.from_user else None
+            source_text = update.callback_query.data
+    except Exception:
+        pass
+    logging.exception(
+        "Unhandled handler error: type=%s chat=%s user=%s src=%r",
+        type(exc).__name__, chat_id, user_id, source_text,
+        exc_info=exc,
+    )
+
+    # Уведомляем пользователя:
+    # - в группе/супергруппе — через ephemeral, чтобы не засорять чат;
+    # - в callback — через silent answer (без текста, т.к. alert раздражает).
+    try:
+        if update.callback_query is not None:
+            # silent ack — просто закрываем loading spinner в клиенте
+            await update.callback_query.answer()
             return True
-        if msg_like is not None:
-            reply = await msg_like.answer("⚠️ Что-то пошло не так. Я уже записал это в логи.")
-            schedule_delete_once(reply, 10)
+        if update.message is not None:
+            is_group = update.message.chat.type in ("group", "supergroup")
+            # В группах вообще ничего не пишем: иначе попап "⚠️ ..." виден всем.
+            # В ЛС — короткая эфемерка.
+            if not is_group:
+                reply = await update.message.answer("⚠️ Что-то сломалось. Я уже записал это в логи.")
+                schedule_delete_once(reply, 10)
     except Exception as notify_err:
         logging.debug(f"global_error_handler: notify failed: {notify_err}")
     return True
