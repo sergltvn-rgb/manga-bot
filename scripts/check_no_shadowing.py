@@ -15,6 +15,7 @@ __pycache__ / webapp/node_modules).
     0 — всё чисто
     1 — найдены дубли (выводит путь и имена)
 """
+
 from __future__ import annotations
 
 import ast
@@ -27,6 +28,8 @@ EXCLUDED_DIRS = {
     ".git",
     ".venv",
     "venv",
+    "botenv",  # на prod-сервере venv называется именно так
+    "env",
     "__pycache__",
     "node_modules",
     "scratch",  # экспериментальные скрипты не чекаем
@@ -34,12 +37,18 @@ EXCLUDED_DIRS = {
     "deploy",
     "dist",
     "build",
+    "site-packages",  # на всякий случай, если venv лежит глубже
 }
+
+
+def _is_virtualenv(path: Path) -> bool:
+    """Детектит virtualenv по `pyvenv.cfg` — надёжнее чем whitelist имён."""
+    return (path / "pyvenv.cfg").is_file()
 
 
 def iter_py_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS and not d.startswith(".")]
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS and not d.startswith(".") and not _is_virtualenv(Path(dirpath) / d)]
         for f in filenames:
             if f.endswith(".py"):
                 yield Path(dirpath) / f

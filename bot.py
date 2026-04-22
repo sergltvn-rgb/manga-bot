@@ -6091,70 +6091,8 @@ async def handle_telemetry_post(request: aiohttp.web.Request) -> aiohttp.web.Res
         return aiohttp.web.json_response({"error": "internal"}, status=500, headers=CORS_HEADERS)
 
 
-async def handle_chapter_content(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    series_id = str(request.query.get("series_id", "")).strip()
-    volume = str(request.query.get("volume", "")).strip()
-    chapter = str(request.query.get("chapter", "")).strip()
-
-    if not _is_valid_series_id(series_id):
-        return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
-    if not volume or len(volume) > 32 or not re.fullmatch(r"[A-Za-z0-9._-]+", volume):
-        return aiohttp.web.json_response({"error": "invalid volume"}, status=400, headers=CORS_HEADERS)
-    if not _is_valid_chapter_token(chapter):
-        return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
-
-    try:
-        payload, cache_hit, status_code = await get_cached_chapter_content(series_id, volume, chapter, force_refresh=False)
-        if payload is None:
-            return aiohttp.web.json_response({"error": "not found"}, status=status_code, headers=CORS_HEADERS)
-
-        headers = dict(CORS_HEADERS)
-        headers["Cache-Control"] = "no-cache"
-        payload_with_cache = dict(payload)
-        payload_with_cache["cache_status"] = "hit" if cache_hit else "miss"
-        return aiohttp.web.json_response(payload_with_cache, status=status_code, headers=headers)
-    except Exception as e:
-        logging.error("Chapter content API Error for %s/%s/%s: %s", series_id, volume, chapter, e)
-        return aiohttp.web.json_response({"error": "internal"}, status=500, headers=CORS_HEADERS)
-
-
-async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    """Возвращает данные для читалки. Единственный источник истины — build_reader_data(),
-    который корректно применяет custom_names из БД ко всем элементам."""
-    started_at = time.perf_counter()
-    status_code = 500
-    cache_hit = False
-    try:
-        result, etag, cache_hit = await get_cached_reader_data(force_refresh=False)
-        headers = dict(CORS_HEADERS)
-        headers.update(
-            {
-                "ETag": etag,
-                "Cache-Control": "no-cache",
-                "Vary": "If-None-Match",
-            }
-        )
-        if_none_match = request.headers.get("If-None-Match", "")
-        if _if_none_match_matches(if_none_match, etag):
-            status_code = 304
-            return aiohttp.web.Response(status=304, headers=headers)
-        status_code = 200
-        return aiohttp.web.json_response(result, headers=headers)
-    except Exception as e:
-        logging.error(f"Reader API Error: {e}")
-        status_code = 500
-        logging.exception("API error in %s", request.path, exc_info=e)
-        return aiohttp.web.json_response({"error": "Internal error", "code": 500, "series": []}, status=500, headers=CORS_HEADERS)
-    finally:
-        duration_ms = (time.perf_counter() - started_at) * 1000.0
-        spawn_bg(
-            _record_server_reader_metric(
-                request,
-                duration_ms=duration_ms,
-                status_code=status_code,
-                cache_hit=cache_hit,
-            )
-        )
+# Reader API handlers вынесены в services/reader_api.py (Фаза 3 шаг 10).
+from services.reader_api import handle_chapter_content, handle_reader_data  # noqa: E402,F401
 
 
 async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:

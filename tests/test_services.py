@@ -678,3 +678,67 @@ class TestHtmlRendering:
         assert 'src="https://cdn.x/y.jpg"' in result
         assert "<noscript>" not in result
         assert 'loading="lazy"' in result
+
+
+# --- services.reader_api ---
+
+
+class TestReaderApi:
+    def test_imports(self):
+        import inspect
+
+        from services.reader_api import handle_chapter_content, handle_reader_data
+
+        assert inspect.iscoroutinefunction(handle_chapter_content)
+        assert inspect.iscoroutinefunction(handle_reader_data)
+
+    def test_chapter_content_rejects_invalid_series_id(self):
+        import asyncio
+        import json
+
+        from aiohttp.test_utils import make_mocked_request
+
+        from services.reader_api import handle_chapter_content
+
+        # Плохой series_id → 400.
+        req = make_mocked_request("GET", "/api/chapter-content?series_id=evil&volume=1&chapter=1")
+        resp = asyncio.run(handle_chapter_content(req))
+        assert resp.status == 400
+        body = json.loads(resp.body.decode())
+        assert body["error"] == "invalid series_id"
+
+    def test_chapter_content_rejects_invalid_volume(self):
+        import asyncio
+        import json
+
+        from aiohttp.test_utils import make_mocked_request
+
+        from services.reader_api import handle_chapter_content
+
+        # Валидный series_id, но volume с запрещёнными символами.
+        req = make_mocked_request(
+            "GET",
+            "/api/chapter-content?series_id=manga_ru&volume=bad%20vol&chapter=1",
+        )
+        resp = asyncio.run(handle_chapter_content(req))
+        assert resp.status == 400
+        body = json.loads(resp.body.decode())
+        assert body["error"] == "invalid volume"
+
+    def test_chapter_content_rejects_invalid_chapter(self):
+        import asyncio
+        import json
+
+        from aiohttp.test_utils import make_mocked_request
+
+        from services.reader_api import handle_chapter_content
+
+        # Валидные series_id и volume, но chapter с HTML-инъекцией.
+        req = make_mocked_request(
+            "GET",
+            "/api/chapter-content?series_id=manga_ru&volume=1&chapter=%3Cscript%3E",
+        )
+        resp = asyncio.run(handle_chapter_content(req))
+        assert resp.status == 400
+        body = json.loads(resp.body.decode())
+        assert body["error"] == "invalid chapter"
