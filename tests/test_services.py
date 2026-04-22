@@ -520,3 +520,161 @@ class TestHtmlUtils:
         with_image = "<img src='x.jpg'/><p>hi</p>"
         text_only = "<p>" + "x " * 50 + "</p>"
         assert _score_html_fragment(with_image) > _score_html_fragment(text_only)
+
+
+# --- services.html_rendering ---
+
+
+class TestHtmlRendering:
+    def test_imports(self):
+        from services.html_rendering import (
+            _SafeHtmlFragmentParser,
+            _extract_img_attrs_from_tag,
+            _extract_teletype_article_fragment,
+            _normalize_teletype_article_fragment,
+            _render_telegraph_nodes_server,
+            _sanitize_html_fragment,
+        )
+
+        assert callable(_render_telegraph_nodes_server)
+        assert callable(_sanitize_html_fragment)
+        assert callable(_extract_teletype_article_fragment)
+        assert callable(_extract_img_attrs_from_tag)
+        assert callable(_normalize_teletype_article_fragment)
+        assert _SafeHtmlFragmentParser is not None
+
+    def test_render_telegraph_nodes_basic(self):
+        from services.html_rendering import _render_telegraph_nodes_server
+
+        # Пустые входы.
+        assert _render_telegraph_nodes_server([]) == ""
+        assert _render_telegraph_nodes_server(None) == ""  # type: ignore[arg-type]
+        # Простой параграф.
+        nodes = [{"tag": "p", "children": ["Hello"]}]
+        assert _render_telegraph_nodes_server(nodes) == "<p>Hello</p>"
+
+    def test_render_telegraph_nodes_link_href_whitelist(self):
+        from services.html_rendering import _render_telegraph_nodes_server
+
+        # Нормальный http href — остаётся.
+        nodes = [{"tag": "a", "attrs": {"href": "https://example.com"}, "children": ["Link"]}]
+        result = _render_telegraph_nodes_server(nodes)
+        assert 'href="https://example.com"' in result
+        assert ">Link</a>" in result
+        # javascript:// — href отбрасывается.
+        nodes_bad = [{"tag": "a", "attrs": {"href": "javascript:alert(1)"}, "children": ["X"]}]
+        result_bad = _render_telegraph_nodes_server(nodes_bad)
+        assert "javascript" not in result_bad
+
+    def test_render_telegraph_nodes_img_relative_becomes_absolute(self):
+        from services.html_rendering import _render_telegraph_nodes_server
+
+        # Относительный /file/xxx.jpg → https://telegra.ph/file/xxx.jpg
+        nodes = [{"tag": "img", "attrs": {"src": "/file/abc.jpg"}}]
+        result = _render_telegraph_nodes_server(nodes)
+        assert 'src="https://telegra.ph/file/abc.jpg"' in result
+        assert 'loading="lazy"' in result
+
+    def test_render_telegraph_nodes_img_without_src_dropped(self):
+        from services.html_rendering import _render_telegraph_nodes_server
+
+        nodes = [{"tag": "img", "attrs": {}}]
+        assert _render_telegraph_nodes_server(nodes) == ""
+
+    def test_render_telegraph_nodes_escapes_text(self):
+        from services.html_rendering import _render_telegraph_nodes_server
+
+        # Текст с < и > — должен быть escape'нут.
+        nodes = [{"tag": "p", "children": ["<script>alert(1)</script>"]}]
+        result = _render_telegraph_nodes_server(nodes)
+        assert "&lt;script&gt;" in result
+        assert "<script>" not in result.replace("&lt;script&gt;", "")
+
+    def test_sanitize_html_fragment_drops_scripts(self):
+        from services.html_rendering import _sanitize_html_fragment
+
+        fragment = "<p>Safe</p><script>alert(1)</script><style>body{}</style>"
+        result = _sanitize_html_fragment(fragment)
+        assert "Safe" in result
+        assert "alert" not in result
+        assert "<style>" not in result
+
+    def test_sanitize_html_fragment_whitelist_attrs(self):
+        from services.html_rendering import _sanitize_html_fragment
+
+        # onclick выкидывается, href остаётся (если нормализуется).
+        fragment = '<a href="https://ok.com" onclick="bad()">click</a>'
+        result = _sanitize_html_fragment(fragment)
+        assert "onclick" not in result
+        assert 'href="https://ok.com"' in result
+
+    def test_sanitize_html_fragment_collapses_br(self):
+        from services.html_rendering import _sanitize_html_fragment
+
+        # 3+ <br> подряд → <br><br>
+        fragment = "a<br><br><br><br><br>b"
+        result = _sanitize_html_fragment(fragment)
+        # Должно остаться только два <br>.
+        assert result.count("<br>") == 2
+
+    def test_extract_teletype_article_prefers_itemprop(self):
+        from services.html_rendering import _extract_teletype_article_fragment
+
+        html_src = """
+        <html>
+          <article><p>wrong</p></article>
+          <article itemprop="articleBody"><p>right</p></article>
+        </html>
+        """
+        fragment = _extract_teletype_article_fragment(html_src)
+        assert "right" in fragment
+        assert "wrong" not in fragment
+
+    def test_extract_teletype_article_fallback(self):
+        from services.html_rendering import _extract_teletype_article_fragment
+
+        html_src = "<html><article><p>body</p></article></html>"
+        fragment = _extract_teletype_article_fragment(html_src)
+        assert "<p>body</p>" in fragment
+
+    def test_extract_teletype_article_empty(self):
+        from services.html_rendering import _extract_teletype_article_fragment
+
+        assert _extract_teletype_article_fragment("") == ""
+        assert _extract_teletype_article_fragment("<html>no article</html>") == ""
+
+    def test_extract_img_attrs_from_tag(self):
+        from services.html_rendering import _extract_img_attrs_from_tag
+
+        src, alt = _extract_img_attrs_from_tag(
+            '<img src="https://cdn.example.com/x.jpg" alt="cover">',
+            source_url="https://example.com",
+        )
+        assert src == "https://cdn.example.com/x.jpg"
+        assert alt == "cover"
+
+    def test_extract_img_attrs_relative(self):
+        from services.html_rendering import _extract_img_attrs_from_tag
+
+        # Относительный src резолвится относительно source_url.
+        src, _ = _extract_img_attrs_from_tag(
+            '<img src="/path/x.jpg">',
+            source_url="https://example.com/article",
+        )
+        assert src == "https://example.com/path/x.jpg"
+
+    def test_extract_img_attrs_no_src_returns_empty(self):
+        from services.html_rendering import _extract_img_attrs_from_tag
+
+        assert _extract_img_attrs_from_tag("<img alt='x'>") == ("", "")
+        assert _extract_img_attrs_from_tag("") == ("", "")
+
+    def test_normalize_teletype_unwraps_noscript_img(self):
+        from services.html_rendering import _normalize_teletype_article_fragment
+
+        # <noscript><img></noscript> → <img>
+        fragment = '<p>text</p><noscript><img src="https://cdn.x/y.jpg"></noscript>'
+        result = _normalize_teletype_article_fragment(fragment, source_url="https://x.com")
+        assert 'src="https://cdn.x/y.jpg"' in result
+        assert "<noscript>" not in result
+        assert 'loading="lazy"' in result
