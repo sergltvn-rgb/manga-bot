@@ -6484,128 +6484,26 @@ MAX_COMMENT_REPORT_TEXT_LENGTH = 2000
 MAX_TYPO_SELECTED_TEXT_LENGTH = 600
 MAX_TYPO_CONTEXT_TEXT_LENGTH = 2600
 MAX_TYPO_COMMENT_LENGTH = 800
-MAX_SERIES_ID_LENGTH = 64
-MAX_CHAPTER_ID_LENGTH = 32
 MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH = 18000
 MAX_BULK_URLS_PER_REQUEST = 200
 MAX_RENAME_OBJECT_ID_LENGTH = 200
 MAX_RENAME_CACHE_SIZE = 5000
-MAX_AUDIT_PAYLOAD_LENGTH = 4000
 MAX_API_ERROR_TEXT = 250
 
-RATE_LIMIT_RULES = {
-    "comments_post": {"limit": 8, "window": 60},
-    "comments_update": {"limit": 20, "window": 60},
-    "comments_react": {"limit": 30, "window": 60},
-    "reactions_post": {"limit": 30, "window": 60},
-    "comments_report": {"limit": 6, "window": 300},
-    "typo_report": {"limit": 8, "window": 300},
-    "admin_rename_delete": {"limit": 30, "window": 60},
-    "admin_chapter_edit": {"limit": 30, "window": 60},
-    "admin_chapter_bulk": {"limit": 12, "window": 60},
-    "admin_chapter_add": {"limit": 30, "window": 60},
-    "admin_chapter_delete": {"limit": 20, "window": 60},
-    "admin_series_update": {"limit": 20, "window": 60},
-    "admin_sort": {"limit": 20, "window": 60},
-    "admin_rename_request": {"limit": 40, "window": 60},
-}
-_rate_limit_buckets: dict[str, list[float]] = {}
-_rate_limit_lock = asyncio.Lock()
+# Rate-limiter вынесен в services/rate_limit.py (Фаза 3 шаг 2).
+from services.rate_limit import _enforce_rate_limit  # noqa: E402
 
-
-def _normalize_external_url(raw_url: str, max_len: int = 2048) -> str | None:
-    candidate = str(raw_url or "").strip()
-    if not candidate or len(candidate) > max_len:
-        return None
-    if any(ord(ch) < 32 for ch in candidate):
-        return None
-    try:
-        parsed = urlsplit(candidate)
-    except Exception:
-        return None
-    scheme = parsed.scheme.lower()
-    if scheme not in {"http", "https"}:
-        return None
-    if not parsed.netloc:
-        return None
-    if parsed.username or parsed.password:
-        return None
-    normalized = urlunsplit((scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
-    return normalized if len(normalized) <= max_len else None
-
-
-def _clean_urls(url_text: str) -> list:
-    links: list[str] = []
-    for raw in re.findall(r'(https?://[^\s<"\'>]+)', str(url_text or "")):
-        normalized = _normalize_external_url(raw)
-        if normalized and normalized not in links:
-            links.append(normalized)
-    return links
-
-
-def _safe_json_dumps(value: object, max_len: int = MAX_AUDIT_PAYLOAD_LENGTH) -> str:
-    try:
-        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-    except Exception:
-        encoded = str(value)
-    return encoded[:max_len] if len(encoded) > max_len else encoded
-
-
-def _is_valid_series_id(series_id: str) -> bool:
-    sid = str(series_id or "").strip()
-    if not sid or len(sid) > MAX_SERIES_ID_LENGTH:
-        return False
-    if sid in {"akashic_records", "british_belle"}:
-        return True
-    if sid.startswith("manga_") or sid.startswith("ranobe_"):
-        return bool(re.fullmatch(r"[A-Za-z0-9_]{1,48}", sid.split("_", 1)[1] if "_" in sid else ""))
-    return False
-
-
-def _is_valid_chapter_token(chapter: object) -> bool:
-    token = str(chapter or "").strip()
-    if not token or len(token) > MAX_CHAPTER_ID_LENGTH:
-        return False
-    # Разрешаем любые печатные символы (включая кириллицу и пробелы),
-    # кроме управляющих и DEL (0x7F), а также HTML/JS-опасных (< > & " ' ` \).
-    # SQL не ломается, так как запросы параметризованы. Сам chapter используется
-    # как идентификатор строк в БД и в URL (client-side encoded).
-    return bool(re.fullmatch(r"[^\x00-\x1f\x7f<>&\"'`\\]+", token))
-
-
-def _rate_limit_identity(request: aiohttp.web.Request, user_id: str = "") -> str:
-    if user_id:
-        return f"user:{user_id}"
-    xff = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if xff:
-        return f"ip:{xff}"
-    if request.remote:
-        return f"ip:{request.remote}"
-    return "ip:unknown"
-
-
-async def _enforce_rate_limit(request: aiohttp.web.Request, scope: str, user_id: str = "") -> aiohttp.web.Response | None:
-    rule = RATE_LIMIT_RULES.get(scope)
-    if not rule:
-        return None
-    now = time.time()
-    window = int(rule["window"])
-    limit = int(rule["limit"])
-    key = f"{scope}:{_rate_limit_identity(request, user_id)}"
-    async with _rate_limit_lock:
-        events = [ts for ts in _rate_limit_buckets.get(key, []) if now - ts < window]
-        if len(events) >= limit:
-            retry_after = max(1, int(window - (now - events[0])))
-            headers = _build_cors_headers(request)
-            headers["Retry-After"] = str(retry_after)
-            return aiohttp.web.json_response(
-                {"error": "rate_limit_exceeded", "retry_after": retry_after},
-                status=429,
-                headers=headers,
-            )
-        events.append(now)
-        _rate_limit_buckets[key] = events
-    return None
+# Валидаторы и константы лимитов вынесены в services/validators.py (Фаза 3 шаг 3).
+from services.validators import (  # noqa: E402
+    MAX_AUDIT_PAYLOAD_LENGTH,
+    MAX_CHAPTER_ID_LENGTH,
+    MAX_SERIES_ID_LENGTH,
+    _clean_urls,
+    _is_valid_chapter_token,
+    _is_valid_series_id,
+    _normalize_external_url,
+    _safe_json_dumps,
+)
 
 
 async def _audit_admin_action(
