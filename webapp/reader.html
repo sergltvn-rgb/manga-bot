@@ -196,13 +196,17 @@
                 </div>
             </div>
 
-            <!-- ★ Pull-to-next-chapter indicator -->
-            <div id="pull-next-indicator" class="pull-next-indicator" style="display:none;">
-                <div class="pull-next-content">
-                    <svg class="icon pull-next-arrow" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    <span id="pull-next-text">Тяните для следующей главы</span>
-                </div>
+        </div>
+        <!-- Refresh v5: Pull-to-next overlay (absolute поверх .reader-content, не участвует в scroll) -->
+        <div id="pull-next-indicator" class="pull-next-indicator" aria-hidden="true">
+            <div class="pull-next-ring-wrap">
+                <svg class="pull-next-ring" viewBox="0 0 44 44" aria-hidden="true">
+                    <circle class="ring-bg" cx="22" cy="22" r="19"/>
+                    <circle class="ring-fg" cx="22" cy="22" r="19" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/>
+                </svg>
+                <svg class="pull-next-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
+            <div class="pull-next-label" id="pull-next-text">Следующая глава</div>
         </div>
         <!-- ★ Floating Admin FAB (Phase 4) -->
             <div id="admin-fab-container" class="admin-fab-container" style="display:none;">

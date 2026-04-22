@@ -5753,87 +5753,157 @@ function initGestures() {
         isSwipeActive = false;
     }, { passive: true });
 
-    // Pull-to-next logic at bottom (Hybrid Touch/Mouse version for maximum compatibility)
+    // Refresh v5: круговой pull-to-next + crossfade overlay
+    // Индикатор лежит в #screen-reader (не в scroll-контенте), поэтому работает как overlay.
+    const pullNextText = document.getElementById('pull-next-text');
+    const pullNextRingFg = pullNext.querySelector('.ring-fg');
+    const pullStartThreshold = 12;  // px пока скролл «идёт натурально»
+    const pullTriggerDistance = 90; // px — порог срабатывания
     let pullTouchStartY = 0;
     let pullDistance = 0;
-    const pullNextText = document.getElementById('pull-next-text');
-    const pullNextArrow = pullNext.querySelector('.pull-next-arrow');
+    let pullTriggered = false;
 
-    const onStart = (e) => {
+    const setPullProgress = (progress) => {
+        // progress 0..1 → stroke-dashoffset 100..0 (pathLength=100)
+        if (pullNextRingFg) {
+            const clamped = Math.max(0, Math.min(1, progress));
+            pullNextRingFg.setAttribute('stroke-dashoffset', String((1 - clamped) * 100));
+        }
+    };
+
+    const showPullIndicator = () => {
+        pullNext.classList.add('is-visible');
+        pullNext.setAttribute('aria-hidden', 'false');
+    };
+    const hidePullIndicator = () => {
+        pullNext.classList.remove('is-visible', 'triggered', 'loading');
+        pullNext.setAttribute('aria-hidden', 'true');
+        setPullProgress(0);
+        if (pullNextText) pullNextText.textContent = 'Следующая глава';
+    };
+
+    const atBottom = () => {
         const scrollTop = content.scrollTop;
         const scrollHeight = content.scrollHeight;
         const clientHeight = content.clientHeight;
-        
-        // Для мыши (ПК) начинаем жест только если мы УЖЕ внизу страницы, 
-        // чтобы не ломать выделение текста и клики в середине контента.
-        if (!e.touches && (scrollTop + clientHeight < scrollHeight - 50)) {
+        return Math.ceil(scrollTop + clientHeight) >= scrollHeight - 1;
+    };
+
+    const onStart = (e) => {
+        // Начинаем жест только если уже внизу. Это устраняет рывок в середине,
+        // когда скролл встречал prevent-default на 15-м пикселе.
+        if (!atBottom()) {
             pullTouchStartY = 0;
             return;
         }
-
         pullTouchStartY = e.touches ? e.touches[0].clientY : e.clientY;
         pullDistance = 0;
+        pullTriggered = false;
         isGlobalPullingNext = false;
     };
 
     const onMove = (e) => {
         if (currentChapterIdx >= currentChapters.length - 1 || pullTouchStartY === 0) return;
-        
+
         const touchY = e.touches ? e.touches[0].clientY : e.clientY;
-        const scrollTop = content.scrollTop;
-        const scrollHeight = content.scrollHeight;
-        const clientHeight = content.clientHeight;
+        let diff = pullTouchStartY - touchY;
 
-        // Если мы внизу или уже тянем (используем порог 1px для точности на ПК)
-        if (isGlobalPullingNext || (Math.ceil(scrollTop + clientHeight) >= scrollHeight - 1)) {
-            let diff = pullTouchStartY - touchY;
+        if (!atBottom() && !isGlobalPullingNext) return;
 
-            if (diff > 15) { 
-                if (!isGlobalPullingNext) {
-                    isGlobalPullingNext = true;
-                    haptic('light');
-                }
-                // На мобилках принудительно отменяем скролл чтобы жесту ничто не мешало
-                if (e.cancelable && e.touches) e.preventDefault(); 
-                
-                pullDistance = diff;
-                pullNext.style.display = 'flex';
-                pullNext.style.opacity = Math.min(diff / 100, 1);
-
-                if (diff > 80) {
-                    if (pullNextText) pullNextText.textContent = 'Отпустите для следующей главы';
-                    if (pullNextArrow) pullNextArrow.style.transform = 'rotate(180deg)';
-                } else {
-                    if (pullNextText) pullNextText.textContent = 'Тяните для следующей главы';
-                    if (pullNextArrow) pullNextArrow.style.transform = 'rotate(0deg)';
-                }
-            } else if (isGlobalPullingNext && diff < 5) {
-                isGlobalPullingNext = false;
-                pullNext.style.display = 'none';
-                pullDistance = 0;
+        if (diff > pullStartThreshold) {
+            if (!isGlobalPullingNext) {
+                isGlobalPullingNext = true;
+                showPullIndicator();
             }
+            // Блокируем нативный скролл только после того как стартовал жест.
+            if (e.cancelable && e.touches) e.preventDefault();
+
+            pullDistance = diff;
+            const progress = Math.min(1, (diff - pullStartThreshold) / pullTriggerDistance);
+            setPullProgress(progress);
+
+            const shouldTrigger = diff >= (pullTriggerDistance + pullStartThreshold);
+            if (shouldTrigger && !pullTriggered) {
+                pullTriggered = true;
+                pullNext.classList.add('triggered');
+                if (pullNextText) pullNextText.textContent = 'Отпустите →';
+                haptic('medium');
+            } else if (!shouldTrigger && pullTriggered) {
+                pullTriggered = false;
+                pullNext.classList.remove('triggered');
+                if (pullNextText) pullNextText.textContent = 'Следующая глава';
+                haptic('light');
+            }
+        } else if (isGlobalPullingNext && diff < 4) {
+            // Пользователь вернул палец вверх — прячем индикатор.
+            isGlobalPullingNext = false;
+            pullTriggered = false;
+            pullDistance = 0;
+            hidePullIndicator();
         }
     };
 
     const onEnd = () => {
-        if (isGlobalPullingNext && pullDistance > 80) {
+        if (isGlobalPullingNext && pullTriggered) {
+            // Lock индикатор в loading-состоянии + crossfade-переход.
+            pullNext.classList.add('loading');
+            if (pullNextText) pullNextText.textContent = 'Загрузка...';
             haptic('medium');
-            navigateChapter(1);
+            navigateChapterCrossfade(1);
+        } else {
+            hidePullIndicator();
         }
-        pullNext.style.display = 'none';
-        pullDistance = 0;
         isGlobalPullingNext = false;
-        if (pullNextArrow) pullNextArrow.style.transform = 'rotate(0deg)';
+        pullTriggered = false;
+        pullDistance = 0;
+        pullTouchStartY = 0;
     };
 
-    // Используем раздельные слушатели для Touch и Mouse чтобы избежать pointercancel от pan-y
+    // Раздельные слушатели Touch/Mouse чтобы избежать pointercancel от pan-y
     content.addEventListener('touchstart', onStart, { passive: true });
     content.addEventListener('touchmove', onMove, { passive: false });
     content.addEventListener('touchend', onEnd);
+    content.addEventListener('touchcancel', hidePullIndicator);
 
     content.addEventListener('mousedown', onStart);
     document.addEventListener('mousemove', (e) => { if (pullTouchStartY && !e.touches) onMove(e); });
-    document.addEventListener('mouseup', () => { if (pullTouchStartY) { onEnd(); pullTouchStartY = 0; } });
+    document.addEventListener('mouseup', () => { if (pullTouchStartY) onEnd(); });
+}
+
+// Refresh v5: crossfade-переход к следующей главе (вызывается только из pull-gesture,
+// чтобы кнопки Пред/След сохраняли привычный slide-эффект).
+function navigateChapterCrossfade(delta) {
+    saveScrollPosition();
+    const newIdx = currentChapterIdx + delta;
+    if (newIdx < 0 || newIdx >= currentChapters.length) return;
+
+    const content = document.getElementById('reader-content');
+    const pullNext = document.getElementById('pull-next-indicator');
+
+    haptic('medium');
+
+    const applyNext = () => {
+        openChapter(newIdx, true);
+        if (content) content.scrollTop = 0;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (content) content.classList.remove('crossfading');
+                if (pullNext) {
+                    pullNext.classList.remove('is-visible', 'triggered', 'loading');
+                    pullNext.setAttribute('aria-hidden', 'true');
+                    const ringFg = pullNext.querySelector('.ring-fg');
+                    if (ringFg) ringFg.setAttribute('stroke-dashoffset', '100');
+                    const text = document.getElementById('pull-next-text');
+                    if (text) text.textContent = 'Следующая глава';
+                }
+            });
+        });
+    };
+
+    if (!content) { applyNext(); return; }
+
+    content.classList.add('crossfading');
+    setTimeout(applyNext, 220);
 }
 
 function initReaderScrollListeners() {
