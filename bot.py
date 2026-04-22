@@ -707,9 +707,8 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
     if await check_cd_and_warn(message, "ai_chat", COOLDOWN_TIME):
         return
 
-    if message.chat.type in ["group", "supergroup"]:
-        if not await is_ai_enabled(message.chat.id):
-            return
+    if message.chat.type in ["group", "supergroup"] and not await is_ai_enabled(message.chat.id):
+        return
 
     data = await state.get_data()
     char_id = data.get("ai_character", "alya")
@@ -814,17 +813,15 @@ async def process_group_ai_chat(message: types.Message):
         char_id = "masachika"
     elif is_alya:
         char_id = "alya"
-    elif is_reply_to_bot and message.reply_to_message.text:
-        if "Масачика:" in message.reply_to_message.text:
-            char_id = "masachika"
+    elif is_reply_to_bot and message.reply_to_message.text and "Масачика:" in message.reply_to_message.text:
+        char_id = "masachika"
 
     user_id = message.from_user.id
     chat_id = message.chat.id
 
     # Check if AI is disabled in this group
-    if message.chat.type in ["group", "supergroup"]:
-        if not await is_ai_enabled(chat_id):
-            return
+    if message.chat.type in ["group", "supergroup"] and not await is_ai_enabled(chat_id):
+        return
 
     if await is_blacklisted(user_id):
         return
@@ -2240,7 +2237,7 @@ async def cmd_stats(message: types.Message):
             return None
 
     members = await asyncio.gather(*[_safe_member(uid) for uid in all_uids])
-    name_by_uid = dict(zip(all_uids, members))
+    name_by_uid = dict(zip(all_uids, members, strict=False))
 
     def format_top(rows, unit: str) -> str:
         res, rank = [], 1
@@ -5847,23 +5844,17 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
     # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ
     links = _clean_urls(text_input)
 
-    # Если в тексте есть гиперссылки (через <a>), они УЖЕ в text_input
-    # Нам нужно решить: конвертировать в Telegraph или оставить ссылки?
-
     # ЛОГИКА:
-    # 1. Если прислали просто набор ссылок (нет другого текста кроме ссылок и пробелов)
-    #    -> Сохраняем их списком.
-    # 2. Если прислали текст (с ссылками или без)
-    #    -> Конвертируем в ОДНУ страницу Telegraph.
+    # 1. Если в сообщении есть ЛЮБЫЕ готовые ссылки (Teletype, Telegraph, сторонние
+    #    ридеры) — сохраняем их как есть. Сопроводительный текст игнорируем: название
+    #    главы уже задано на прошлом шаге FSM, описание читалке не нужно.
+    # 2. Если ссылок нет, но есть длинный текст — конвертируем в Telegraph.
+    # 3. Короткий текст без ссылок — сохраняем как есть (fallback).
 
-    stripped_text = re.sub(r'https?://[^\s<"\'>]+', '', text_input).strip()
-    is_pure_links = not stripped_text
-
-    if is_pure_links and links:
-        # Просто сохраняем список ссылок через пробел
+    if links:
         link = " ".join(links)
     elif len(text_input) > 20:
-        # Это текст (возможно с гиперссылками) -> в Telegraph
+        # Чистый текст главы без ссылок -> собираем Telegraph-страницу.
         wait_msg = await message.answer("📝 <i>Готовлю страницу Telegraph...</i>", parse_mode="HTML")
         id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
         title = f"{ct['emoji']} {ct['name']} — {id_label}, Глава {chapter}"
@@ -5877,8 +5868,8 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
             await wait_msg.edit_text("⚠️ Не удалось загрузить в Телеграф, сохраняю как есть.")
             link = text_input  # Fallback
     else:
-        # Короткий текст или одна ссылка
-        link = " ".join(links) if links else text_input
+        # Совсем короткий текст без ссылок — сохраняем как есть.
+        link = text_input
 
     async with aiosqlite.connect(DB_PATH) as db:
         # Получаем текущий макс. sort_order для этого тайтла/тома
@@ -6212,28 +6203,27 @@ class StatsMiddleware(BaseMiddleware):
             is_group = event.chat.type in ["group", "supergroup"]
 
             # --- Логика дропов (Chat Drops) ---
-            if is_group and chat_id not in ACTIVE_DROPS:
-                if random.random() < 0.02:  # 2% шанс на сообщение
-                    reward = random.randint(50, 200)
-                    ACTIVE_DROPS[chat_id] = reward
+            if is_group and chat_id not in ACTIVE_DROPS and random.random() < 0.02:  # 2% шанс на сообщение
+                reward = random.randint(50, 200)
+                ACTIVE_DROPS[chat_id] = reward
 
-                    kb = InlineKeyboardBuilder()
-                    kb.button(text="🎁 Забрать монеты!", callback_data="claim_drop")
+                kb = InlineKeyboardBuilder()
+                kb.button(text="🎁 Забрать монеты!", callback_data="claim_drop")
 
-                    drop_msg = await event.answer(
-                        "💰 <b>ОЙ! В ЧАТЕ УПАЛ МЕШОК МОНЕТ!</b>\n" "Успей нажать на кнопку первым, чтобы забрать награду!",
-                        parse_mode="HTML",
-                        reply_markup=kb.as_markup(),
-                    )
-                    # Если за 60 сек никто не клейманул — удаляем сообщение и снимаем flag.
-                    schedule_delete_once(drop_msg, 60)
+                drop_msg = await event.answer(
+                    "💰 <b>ОЙ! В ЧАТЕ УПАЛ МЕШОК МОНЕТ!</b>\n" "Успей нажать на кнопку первым, чтобы забрать награду!",
+                    parse_mode="HTML",
+                    reply_markup=kb.as_markup(),
+                )
+                # Если за 60 сек никто не клейманул — удаляем сообщение и снимаем flag.
+                schedule_delete_once(drop_msg, 60)
 
-                    async def _expire_drop(cid: int):
-                        await asyncio.sleep(60)
-                        if ACTIVE_DROPS.get(cid) is not None:
-                            ACTIVE_DROPS.pop(cid, None)
+                async def _expire_drop(cid: int):
+                    await asyncio.sleep(60)
+                    if ACTIVE_DROPS.get(cid) is not None:
+                        ACTIVE_DROPS.pop(cid, None)
 
-                    spawn_bg(_expire_drop(chat_id), name="chat_drop_expire")
+                spawn_bg(_expire_drop(chat_id), name="chat_drop_expire")
             # ----------------------------------
 
             try:
