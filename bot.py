@@ -38,7 +38,8 @@ from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL, API_HOST
 
 # Основной путь к SQLite-базе. Раньше было 55+ хардкоженных "manga.db" в коде.
 # Если база переедет — правим в одном месте.
-DB_PATH = 'manga.db'
+_DB_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(_DB_DIR, 'manga.db')
 
 # Кэш для коротких ссылок переименования (обход лимита 64 символа в deeplink)
 RENAME_CACHE = {}
@@ -1345,7 +1346,9 @@ def get_ranobe_langs_menu(prefix="ranobelang"):
 
 @dp.message(StateFilter(AdminRename.waiting_for_name))
 async def process_rename_name(message: types.Message, state: FSMContext):
-    new_name = message.text.strip()
+    if message.text and message.text.startswith('/'):
+        await state.clear()
+        return
     data = await state.get_data()
     obj_id = data.get('rename_id')
     
@@ -1442,6 +1445,9 @@ async def process_tech_support_menu(callback: types.CallbackQuery, state: FSMCon
 
 @dp.message(TechSupport.waiting_for_message, F.text)
 async def handle_tech_support_message(message: types.Message, state: FSMContext):
+    if message.text.startswith('/'):
+        await state.clear()
+        return
     await state.clear()
     user = message.from_user
     username = f"@{user.username}" if user.username else user.first_name
@@ -3772,10 +3778,12 @@ async def _is_bot_admin(user_id: int) -> bool:
     """True если user_id в списке админов бота."""
     try:
         admins = await get_admins()
+        is_admin = user_id in admins
+        logging.info(f"_is_bot_admin: uid={user_id} is_admin={is_admin} admins={admins}")
+        return is_admin
     except Exception as e:
-        logging.debug(f"_is_bot_admin: get_admins failed: {e}")
+        logging.info(f"_is_bot_admin: get_admins failed: {e}")
         return False
-    return user_id in admins
 
 
 async def _require_admin(event: Union[types.Message, types.CallbackQuery]) -> bool:
@@ -3913,16 +3921,20 @@ async def cmd_delete_admin(message: types.Message):
     except (IndexError, ValueError):
         await message.answer("❌ Формат: /delete_admin <id_пользователя>")
 
-
-@dp.message(Command("admin"))
-async def cmd_admin(message: types.Message):
+@dp.message(Command("admin"), StateFilter("*"))
+async def cmd_admin(message: types.Message, state: FSMContext):
+    logging.info(f"cmd_admin: enter uid={message.from_user.id} chat={message.chat.type}")
+    await state.clear()
     if not await _is_bot_admin(message.from_user.id):
         return
-    await message.answer(
-        await _build_admin_menu_text(),
-        parse_mode="HTML",
-        reply_markup=_build_admin_menu_kb(),
-    )
+    try:
+        await message.answer(
+            await _build_admin_menu_text(),
+            parse_mode="HTML",
+            reply_markup=_build_admin_menu_kb(),
+        )
+    except Exception as e:
+        logging.exception(f"cmd_admin: answer failed: {e}")
 
 
 @dp.callback_query(F.data == "admin_menu")
