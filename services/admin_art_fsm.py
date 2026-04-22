@@ -1,13 +1,13 @@
 """Admin + user flow для галереи артов (aiogram Router).
 
 Модуль экспортирует `art_router` — его нужно подключить через
-`dp.include_router(art_router)` в main().
+`dp.include_router(art_router)` в `main()` bot.py.
 
 Сценарии:
 
 1. **Админ bulk-загружает арты**: `/add_art` → `ArtUpload.waiting_for_photo`.
    Админ шлёт серию фото, затем `/finish`. Фото собираются в
-   `bot.ART_CACHE[user_id]`, при `/finish` пишутся в таблицу `arts`.
+   `ART_CACHE[user_id]`, при `/finish` пишутся в таблицу `arts`.
 
 2. **Пользователь предлагает арт**: `/suggest_art` или кнопка
    `suggest_art_menu` → `ArtSuggest.waiting_for_photo`. Одно фото.
@@ -18,10 +18,9 @@
    `arts`, удаляет из suggested, уведомляет автора. `artreject_*` просто
    удаляет заявку и уведомляет автора.
 
-Зависимости из bot.py (lazy-import чтобы избежать цикла):
-- `ART_CACHE` — shared state (также использует `cmd_cancel` в bot.py).
-- `bot`, `DB_PATH`, `get_admins`.
-- `check_cd_and_warn`, `format_user_tag`, `get_back_button`.
+Все зависимости импортируются top-level из правильных модулей (НЕ `from bot
+import ...`), чтобы избежать повторного импорта bot.py (ловушка `python bot.py`
+→ sys.modules['__main__'] vs 'bot'). Bot instance берём из `event.bot`.
 
 Вынесено из `bot.py` как шаг Фазы 3 шаг 20 (см.
 `C:/Users/litvi/.windsurf/plans/bot-py-hardening-roadmap-c8a805.md`).
@@ -37,6 +36,11 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from database import DB_PATH, get_admins
+from services.shared_state import ART_CACHE
+from services.telegram_helpers import format_user_tag, get_back_button
+from utils import check_cd_and_warn
 
 
 class ArtUpload(StatesGroup):
@@ -62,8 +66,6 @@ art_router = Router()
 @art_router.message(Command("add_art"))
 async def cmd_add_art(message: types.Message, state: FSMContext):
     """`/add_art` (admin only) — начать bulk-загрузку артов."""
-    from bot import ART_CACHE, get_admins
-
     admins = await get_admins()
     if message.from_user.id not in admins:
         return
@@ -78,16 +80,12 @@ async def cmd_add_art(message: types.Message, state: FSMContext):
 @art_router.message(ArtUpload.waiting_for_photo, F.photo)
 async def process_art_photo(message: types.Message):
     """Сохраняем file_id каждой фото-посылки в ART_CACHE до `/finish`."""
-    from bot import ART_CACHE
-
     ART_CACHE.setdefault(message.from_user.id, {})[message.message_id] = message.photo[-1].file_id
 
 
 @art_router.message(ArtUpload.waiting_for_photo, Command("finish"))
 async def finish_art_upload(message: types.Message, state: FSMContext):
     """`/finish` — сохранить всё из ART_CACHE в `arts`."""
-    from bot import ART_CACHE, DB_PATH
-
     cache = ART_CACHE.pop(message.from_user.id, {})
     if not cache:
         return await message.answer("Пусто! Отмена.")
@@ -105,51 +103,42 @@ async def finish_art_upload(message: types.Message, state: FSMContext):
 # ---------------------------------------------------------------------------
 
 
+_SUGGEST_INTRO = (
+    "🖼 <b>Предложка артов</b>\n\n"
+    "Отправьте <b>одну</b> красивую фотографию (арт), которую хотите предложить в нашу галерею.\n\n"
+    "❗️ <b>Требования:</b>\n"
+    "1. Рисовка качественная и приближена к аниме.\n"
+    "2. Без вотермарок на пол-экрана и лишнего текста.\n"
+    "3. Соответствие тематике Roshidere.\n\n"
+    "<i>Все арты проходят ручную проверку администрацией.</i>"
+)
+
+
 @art_router.message(Command("suggest_art"))
 async def cmd_suggest_art(message: types.Message, state: FSMContext):
     """`/suggest_art` — предложить один арт."""
-    from bot import check_cd_and_warn
-
     if await check_cd_and_warn(message, "suggest_art", 30):
         return
     await state.set_state(ArtSuggest.waiting_for_photo)
-    text = (
-        "🖼 <b>Предложка артов</b>\n\n"
-        "Отправьте <b>одну</b> красивую фотографию (арт), которую хотите предложить в нашу галерею.\n\n"
-        "❗️ <b>Требования:</b>\n"
-        "1. Рисовка качественная и приближена к аниме.\n"
-        "2. Без вотермарок на пол-экрана и лишнего текста.\n"
-        "3. Соответствие тематике Roshidere.\n\n"
-        "<i>Все арты проходят ручную проверку администрацией.</i>"
-    )
-    await message.answer(text, parse_mode="HTML")
+    await message.answer(_SUGGEST_INTRO, parse_mode="HTML")
 
 
 @art_router.callback_query(F.data == "suggest_art_menu")
 async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMContext):
     """Inline-кнопка `suggest_art_menu` — тот же flow что и `/suggest_art`."""
-    from bot import check_cd_and_warn, get_back_button
-
     if await check_cd_and_warn(callback, "suggest_art", 30):
         return
     await state.set_state(ArtSuggest.waiting_for_photo)
-    text = (
-        "🖼 <b>Предложка артов</b>\n\n"
-        "Отправьте <b>одну</b> красивую фотографию (арт), которую хотите предложить в нашу галерею.\n\n"
-        "❗️ <b>Требования:</b>\n"
-        "1. Рисовка качественная и приближена к аниме.\n"
-        "2. Без вотермарок на пол-экрана и лишнего текста.\n"
-        "3. Соответствие тематике Roshidere.\n\n"
-        "<i>Все арты проходят ручную проверку администрацией.</i>"
+    await callback.message.edit_text(
+        _SUGGEST_INTRO,
+        parse_mode="HTML",
+        reply_markup=get_back_button(text="❌ Отмена"),
     )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button(text="❌ Отмена"))
 
 
 @art_router.message(ArtSuggest.waiting_for_photo, F.photo)
 async def process_suggested_art(message: types.Message, state: FSMContext):
     """Получаем одно фото от пользователя → запись в `suggested_arts` + уведомление админам."""
-    from bot import DB_PATH, bot, format_user_tag, get_admins
-
     file_id = message.photo[-1].file_id
     user_id = message.from_user.id
     safe_user_label = format_user_tag(message.from_user.username, message.from_user.first_name, user_id)
@@ -168,6 +157,7 @@ async def process_suggested_art(message: types.Message, state: FSMContext):
     builder.button(text="✅ Принять", callback_data=f"artaccept_{suggest_id}")
     builder.button(text="❌ Отклонить", callback_data=f"artreject_{suggest_id}")
 
+    bot = message.bot
     for admin_id in admins:
         try:
             await bot.send_photo(
@@ -189,8 +179,6 @@ async def process_suggested_art(message: types.Message, state: FSMContext):
 @art_router.callback_query(F.data.startswith("artaccept_"))
 async def process_art_accept(callback: types.CallbackQuery):
     """Админ принимает предложенный арт → переносит в `arts`, уведомляет автора."""
-    from bot import DB_PATH, bot
-
     suggest_id = int(callback.data.split("_")[1])
 
     async with aiosqlite.connect(DB_PATH) as db:
@@ -208,7 +196,7 @@ async def process_art_accept(callback: types.CallbackQuery):
     await callback.message.edit_caption(caption="✅ <b>Арт принят!</b> Добавлен в базу.", parse_mode="HTML", reply_markup=None)
 
     try:
-        await bot.send_message(
+        await callback.bot.send_message(
             chat_id=user_id,
             text="🎉 <b>Поздравляем!</b> Ваш предложенный арт прошел проверку и был добавлен в галерею бота!",
             parse_mode="HTML",
@@ -220,8 +208,6 @@ async def process_art_accept(callback: types.CallbackQuery):
 @art_router.callback_query(F.data.startswith("artreject_"))
 async def process_art_reject(callback: types.CallbackQuery):
     """Админ отклоняет предложенный арт → удаляет, уведомляет автора."""
-    from bot import DB_PATH, bot
-
     suggest_id = int(callback.data.split("_")[1])
 
     async with aiosqlite.connect(DB_PATH) as db:
@@ -238,7 +224,7 @@ async def process_art_reject(callback: types.CallbackQuery):
     await callback.message.edit_caption(caption="❌ <b>Арт отклонен.</b> Заявка удалена.", parse_mode="HTML", reply_markup=None)
 
     try:
-        await bot.send_message(
+        await callback.bot.send_message(
             chat_id=user_id,
             text="😔 <b>К сожалению</b>, ваш предложенный арт был отклонен администрацией (возможно, не подошел по качеству или стилистике).",
             parse_mode="HTML",

@@ -133,6 +133,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Re-export чистых helper'ов из services/ (вынесены из bot.py, чтобы other services/
+# могли их импортировать top-level без триггера `from bot import X` и связанного
+# повторного импорта bot.py).
+from services.shared_state import ART_CACHE  # noqa: E402,F401
+from services.telegram_helpers import escape_html_text, format_user_tag, get_back_button  # noqa: E402,F401
+
 # Импорт ради side-effect: декораторы @art_router.message/callback_query регистрируют
 # handler'ы на art_router. Сам dp.include_router(art_router) вызывается в main() —
 # иначе при re-import bot.py (через `from bot import X` внутри handler'а Python
@@ -328,27 +334,15 @@ def fmt_name(uid, name):
     return f'<b><a href="tg://user?id={uid}">{html.escape(clean_name, quote=False)}</a></b>'
 
 
-def escape_html_text(value) -> str:
-    """Escape user/content text before embedding into HTML parse_mode messages."""
-    return html.escape(str(value), quote=False)
-
-
-def format_user_tag(username: str | None, first_name: str | None, fallback_id: int | str | None = None) -> str:
-    """Return safe user display for HTML messages: @username when available, otherwise escaped first name."""
-    if username:
-        return f"@{escape_html_text(username)}"
-    if first_name:
-        return escape_html_text(first_name)
-    if fallback_id is None:
-        return "Пользователь"
-    return escape_html_text(str(fallback_id))
+# escape_html_text, format_user_tag → вынесены в services/telegram_helpers.py
+# (доступны через re-export на top-level этого файла).
 
 
 LANGUAGES = {"ru": "🇷🇺 Русский", "en": "🇬🇧 English", "jp": "🇯🇵 日本語", "color": "🎨 Цветная манга"}
 RANOBE_LANGUAGES = {"alya": "⚔️ Воительница-Аля", "ru": "🇷🇺 Русский (Ранобэ)"}
 ITEMS_PER_PAGE = 15
 
-ART_CACHE: dict = {}
+# ART_CACHE → вынесен в services/shared_state.py (доступен через re-export).
 MARRIAGE_PROPOSALS: dict = {}
 HAREM_PROPOSALS: dict = {}
 BOT_CMD_MENTION = r"(?:@[A-Za-z0-9_]{3,})?"
@@ -981,8 +975,8 @@ async def process_project_info_menu(callback: types.CallbackQuery):
         )
 
 
-def get_back_button(callback_data="main_menu", text="⬅️ Назад"):
-    return InlineKeyboardBuilder().row(types.InlineKeyboardButton(text=text, callback_data=callback_data)).as_markup()
+# get_back_button → вынесен в services/telegram_helpers.py
+# (доступен через re-export на top-level этого файла).
 
 
 @dp.callback_query(F.data == "empty")
