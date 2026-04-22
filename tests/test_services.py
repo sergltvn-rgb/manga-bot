@@ -868,3 +868,117 @@ class TestTelemetryApi:
         from services.telemetry_api import handle_telemetry_post
 
         assert inspect.iscoroutinefunction(handle_telemetry_post)
+
+
+# --- services.admin_chapter_api ---
+
+
+class TestAdminChapterApi:
+    def test_imports(self):
+        import inspect
+
+        from services.admin_chapter_api import (
+            _get_table_info,
+            handle_chapter_add,
+            handle_chapter_bulk,
+            handle_chapter_delete,
+            handle_chapter_edit,
+            handle_rename_delete,
+            handle_series_update,
+        )
+
+        for h in (
+            handle_chapter_add,
+            handle_chapter_bulk,
+            handle_chapter_delete,
+            handle_chapter_edit,
+            handle_rename_delete,
+            handle_series_update,
+        ):
+            assert inspect.iscoroutinefunction(h)
+        assert callable(_get_table_info)
+
+    def test_get_table_info_akashic(self):
+        from services.admin_chapter_api import _get_table_info
+
+        info = _get_table_info("akashic_records", 1)
+        assert info is not None
+        table, col, where, _ = info
+        assert table == "akashic_ranobe"
+        assert col == "chapter"
+        assert where == "volume = ? AND chapter = ?"
+
+    def test_get_table_info_british(self):
+        from services.admin_chapter_api import _get_table_info
+
+        info = _get_table_info("british_belle", 2)
+        assert info is not None
+        assert info[0] == "british_ranobe"
+
+    def test_get_table_info_manga(self):
+        from services.admin_chapter_api import _get_table_info
+
+        info = _get_table_info("manga_ru", None)
+        assert info is not None
+        table, col, where, params_fn = info
+        assert table == "chapters_urls"
+        assert col == "chapter_number"
+        # params_fn возвращает (chapter, lang)
+        assert params_fn(None, "10") == ("10", "ru")
+
+    def test_get_table_info_ranobe(self):
+        from services.admin_chapter_api import _get_table_info
+
+        info = _get_table_info("ranobe_en", None)
+        assert info is not None
+        assert info[0] == "ranobe_urls"
+
+    def test_get_table_info_unknown_returns_none(self):
+        from services.admin_chapter_api import _get_table_info
+
+        assert _get_table_info("unknown_series", 1) is None
+
+
+# --- services.comments_api ---
+
+
+class TestCommentsApi:
+    def test_imports(self):
+        import inspect
+
+        from services.comments_api import (
+            handle_comment_react_post,
+            handle_comments_delete,
+            handle_comments_get,
+            handle_comments_post,
+            handle_comments_update,
+        )
+
+        for h in (
+            handle_comment_react_post,
+            handle_comments_delete,
+            handle_comments_get,
+            handle_comments_post,
+            handle_comments_update,
+        ):
+            assert inspect.iscoroutinefunction(h)
+
+
+# --- services.validators (новые константы шага 13) ---
+
+
+class TestValidatorsExtendedLimits:
+    def test_new_limits_exported(self):
+        from services.validators import (
+            MAX_BULK_URLS_PER_REQUEST,
+            MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH,
+            MAX_CHAPTER_KEY_LENGTH,
+            MAX_COMMENT_TEXT_LENGTH,
+            MAX_RENAME_OBJECT_ID_LENGTH,
+        )
+
+        assert MAX_CHAPTER_KEY_LENGTH == 160
+        assert MAX_COMMENT_TEXT_LENGTH == 500
+        assert MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH == 18000
+        assert MAX_BULK_URLS_PER_REQUEST == 200
+        assert MAX_RENAME_OBJECT_ID_LENGTH == 200

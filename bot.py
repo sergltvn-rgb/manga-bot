@@ -5811,25 +5811,27 @@ from services.webapp_cors import (
     _resolve_allowed_origin,
 )
 
-MAX_CHAPTER_KEY_LENGTH = 160
-MAX_COMMENT_TEXT_LENGTH = 500
-MAX_REPORT_REASON_LENGTH = 300
-MAX_COMMENT_REPORT_TEXT_LENGTH = 2000
-MAX_TYPO_SELECTED_TEXT_LENGTH = 600
-MAX_TYPO_CONTEXT_TEXT_LENGTH = 2600
-MAX_TYPO_COMMENT_LENGTH = 800
-MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH = 18000
-MAX_BULK_URLS_PER_REQUEST = 200
-MAX_RENAME_OBJECT_ID_LENGTH = 200
+# MAX_RENAME_CACHE_SIZE — не валидация, а размер LRU-кэша.
 MAX_RENAME_CACHE_SIZE = 5000
+
 # Rate-limiter вынесен в services/rate_limit.py (Фаза 3 шаг 2).
 from services.rate_limit import _enforce_rate_limit  # noqa: E402
 
-# Валидаторы и константы лимитов вынесены в services/validators.py (Фаза 3 шаг 3).
+# Валидаторы и константы лимитов вынесены в services/validators.py (Фаза 3 шаги 3 + 13).
 from services.validators import (  # noqa: E402
     MAX_AUDIT_PAYLOAD_LENGTH,
+    MAX_BULK_URLS_PER_REQUEST,
+    MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH,
     MAX_CHAPTER_ID_LENGTH,
+    MAX_CHAPTER_KEY_LENGTH,
+    MAX_COMMENT_REPORT_TEXT_LENGTH,
+    MAX_COMMENT_TEXT_LENGTH,
+    MAX_RENAME_OBJECT_ID_LENGTH,
+    MAX_REPORT_REASON_LENGTH,
     MAX_SERIES_ID_LENGTH,
+    MAX_TYPO_COMMENT_LENGTH,
+    MAX_TYPO_CONTEXT_TEXT_LENGTH,
+    MAX_TYPO_SELECTED_TEXT_LENGTH,
     _clean_urls,
     _is_valid_chapter_token,
     _is_valid_series_id,
@@ -5927,80 +5929,28 @@ from services.telemetry_api import handle_telemetry_post  # noqa: E402,F401
 from services.reader_api import handle_chapter_content, handle_reader_data  # noqa: E402,F401
 
 
-async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    """Сброс кастомного имени элемента обратно в дефолт. Только для AdminMode."""
-    user_id = ""
-    try:
-        user = get_auth_user(request)
-        if not user:
-            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
-        user_id = str(user.get("id", ""))
-        limited = await _enforce_rate_limit(request, "admin_rename_delete", user_id=user_id)
-        if limited:
-            return limited
+# Admin chapter API handlers + _get_table_info вынесены в services/admin_chapter_api.py (Фаза 3 шаг 13).
+from services.admin_chapter_api import (  # noqa: E402,F401
+    _get_table_info,
+    handle_chapter_add,
+    handle_chapter_bulk,
+    handle_chapter_delete,
+    handle_chapter_edit,
+    handle_rename_delete,
+    handle_series_update,
+)
 
-        data = await request.json()
-        obj_id = data.get('obj_id', '').strip()
-        if not obj_id or len(obj_id) > MAX_RENAME_OBJECT_ID_LENGTH:
-            return aiohttp.web.json_response({"error": "missing obj_id"}, status=400, headers=CORS_HEADERS)
-        # Проверяем что запрашивающий — админ
-        admins = await get_admins()
-        try:
-            if int(user_id) not in admins:
-                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
-        except (ValueError, TypeError):
-            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
-
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute('DELETE FROM custom_names WHERE id = ?', (obj_id,))
-            await db.commit()
-        invalidate_reader_cache("custom_name_deleted")
-
-        # Обновляем JSON и синхронизируем с GitHub в фоне
-        result, _, _ = await get_cached_reader_data(force_refresh=True)
-        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        spawn_bg(run_git_sync("reset custom name via webapp"), name="run_git_sync:reset_custom_name")
-        await _audit_admin_action(
-            action="rename_delete",
-            actor_user_id=user_id,
-            target=obj_id,
-            payload={"obj_id": obj_id},
-            result="ok",
-        )
-
-        return aiohttp.web.json_response({"ok": True, "obj_id": obj_id}, headers=CORS_HEADERS)
-    except Exception as e:
-        await _audit_admin_action(
-            action="rename_delete",
-            actor_user_id=user_id,
-            payload={"path": request.path},
-            result="error",
-            error=str(e),
-        )
-        return _api_error_response(e, context=request.path)
+# Comments API handlers вынесены в services/comments_api.py (Фаза 3 шаг 14).
+from services.comments_api import (  # noqa: E402,F401
+    handle_comment_react_post,
+    handle_comments_delete,
+    handle_comments_get,
+    handle_comments_post,
+    handle_comments_update,
+)
 
 
-# --- Маппинг series_id -> таблица/формат для прямого редактирования URL ---
-
-
-def _get_table_info(series_id: str, volume):
-    """Возвращает (table_name, chapter_col, where_clause, params_fn) для серии."""
-    if series_id == 'akashic_records':
-        return ('akashic_ranobe', 'chapter', 'volume = ? AND chapter = ?', lambda v, c: (v, c))
-    elif series_id == 'british_belle':
-        return ('british_ranobe', 'chapter', 'volume = ? AND chapter = ?', lambda v, c: (v, c))
-    elif series_id.startswith('ranobe_'):
-        lang = series_id.replace('ranobe_', '')
-        return ('ranobe_urls', 'chapter_number', 'chapter_number = ? AND lang = ?', lambda v, c: (c, lang))
-    elif series_id.startswith('manga_'):
-        lang = series_id.replace('manga_', '')
-        return ('chapters_urls', 'chapter_number', 'chapter_number = ? AND lang = ?', lambda v, c: (c, lang))
-    return None
-
-
-async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_chapter_edit_duplicate_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """PUT: Обновить URL главы. Только для админов."""
     user_id = ""
     try:
@@ -6109,7 +6059,7 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
         return _api_error_response(e, context=request.path)
 
 
-async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_chapter_bulk_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """POST: Массовое добавление глав с URL. Только для админов."""
     user_id = ""
     try:
@@ -6229,7 +6179,7 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
         return _api_error_response(e, context=request.path)
 
 
-async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_chapter_add_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """POST: Добавить одну главу. Только для админов."""
     user_id = ""
     try:
@@ -6341,7 +6291,7 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
         return _api_error_response(e, context=request.path)
 
 
-async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_chapter_delete_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """DELETE: Удалить главу. Только для админов."""
     user_id = ""
     try:
@@ -6427,7 +6377,7 @@ async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
         return _api_error_response(e, context=request.path)
 
 
-async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_series_update_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """PUT: Обновить мета-данные серии (пока — только обложка). Только для админов."""
     user_id = ""
     try:
@@ -6517,7 +6467,7 @@ from services.likes_api import handle_likes_get, handle_likes_post  # noqa: E402
 # --- Комментарии ---
 
 
-async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_comments_get_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Получить комментарии к главе с лайками/дизлайками и аватарами."""
     chapter_key = request.query.get('chapter_key', '')
     user = get_auth_user(request)
@@ -6562,7 +6512,7 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
         return _api_error_response(e, context=request.path)
 
 
-async def handle_comment_react_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_comment_react_post_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Лайк/дизлайк комментария."""
     try:
         user = get_auth_user(request)
@@ -6593,7 +6543,7 @@ async def handle_comment_react_post(request: aiohttp.web.Request) -> aiohttp.web
         return _api_error_response(e, context=request.path)
 
 
-async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_comments_post_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Добавить комментарий."""
     try:
         user = get_auth_user(request)
@@ -6637,7 +6587,7 @@ async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
         return _api_error_response(e, context=request.path)
 
 
-async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_comments_delete_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Удалить комментарий (только свой или админ)."""
     try:
         user = get_auth_user(request)
@@ -6671,7 +6621,7 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
         return _api_error_response(e, context=request.path)
 
 
-async def handle_comments_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
+async def _DEAD_handle_comments_update_OLD(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Редактировать свой комментарий. PUT /api/comments/{id}"""
     try:
         user = get_auth_user(request)
