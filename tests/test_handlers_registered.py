@@ -58,6 +58,18 @@ def _iter_message_handlers(bot_module):
         stack.append(content_router)
     except ImportError:
         pass
+    try:
+        from services.admin_rename import rename_router
+
+        stack.append(rename_router)
+    except ImportError:
+        pass
+    try:
+        from services.admin_settings import settings_router
+
+        stack.append(settings_router)
+    except ImportError:
+        pass
     while stack:
         router = stack.pop()
         for h in router.message.handlers:

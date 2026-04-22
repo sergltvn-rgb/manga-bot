@@ -196,6 +196,26 @@ from services.admin_content import (  # noqa: E402,F401
     content_router,
 )
 
+# rename_router (B.6): AdminRename FSM + process_rename_name.
+from services.admin_rename import AdminRename, rename_router  # noqa: E402,F401
+
+# settings_router (B.6): все settings commands + admin_menu_commands
+# dispatcher + admin_menu_sync_webapp. Re-export cmd-функций для
+# обратной совместимости (тесты EXPECTED_COMMANDS).
+from services.admin_settings import (  # noqa: E402,F401
+    cmd_alya_mode,
+    cmd_blacklist_ai,
+    cmd_blacklist_view,
+    cmd_delete_commands_link,
+    cmd_set_commands_link,
+    cmd_sync_webapp,
+    cmd_test_notification,
+    cmd_toggle_ai,
+    cmd_toggle_sync,
+    cmd_unblacklist_ai,
+    settings_router,
+)
+
 
 # ============================================================================
 # ANTI-DOUBLE-TAP MIDDLEWARE для callback_query
@@ -515,8 +535,8 @@ class AkashicCallback(CallbackData, prefix="akashic"):
     chapter: str = ""
 
 
-class AdminRename(StatesGroup):
-    waiting_for_name = State()
+# AdminRename FSM → вынесен в services/admin_rename.py
+# (доступен через re-export на top-level этого файла).
 
 
 # AdminManage FSM → вынесен в services/admin_telegram.py
@@ -1342,62 +1362,9 @@ async def process_main_menu(callback: types.CallbackQuery, state: FSMContext):
 # ==============================================================================
 # БЛОК: ADMIN RENAME (РЕДАКТИРОВАНИЕ ТАЙТЛОВ ИЗ WEBAPP)
 # ==============================================================================
-
-
-@dp.message(StateFilter(AdminRename.waiting_for_name))
-async def process_rename_name(message: types.Message, state: FSMContext):
-    if message.text and message.text.startswith('/'):
-        await state.clear()
-        return
-    data = await state.get_data()
-    obj_id = data.get('rename_id')
-
-    if not obj_id:
-        await state.clear()
-        return await message.answer("❌ Ошибка: ID объекта не найден.")
-
-    # Новое название — текст сообщения. Пустое значение отсекаем,
-    # иначе удалим предыдущее кастомное имя (bug fix: раньше переменная
-    # new_name вообще не присваивалась → NameError при любом вводе).
-    new_name = (message.text or "").strip()
-    if not new_name:
-        return await message.answer("❌ Новое название не может быть пустым.")
-
-    try:
-        from database import set_custom_name
-
-        await set_custom_name(obj_id, new_name)
-        invalidate_reader_cache("custom_name_changed")
-        await state.clear()
-        safe_new_name = escape_html_text(new_name)
-
-        msg = await message.answer(
-            f"✅ Успешно! Новое название:\n<b>{safe_new_name}</b>\n\n🔄 <i>Синхронизирую изменения с Github Pages...</i>", parse_mode="HTML"
-        )
-
-        # Синхронизация JSON (json/aiosqlite уже импортированы в топ-левел)
-        result, _, _ = await get_cached_reader_data(force_refresh=True)
-
-        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        success, output = await run_git_sync("sync webapp renamed item")
-        if success:
-            await msg.edit_text(
-                "✅ <b>Готово!</b> Название сохранено.\n\nВы можете открыть читалку и проверить результат.", parse_mode="HTML"
-            )
-        else:
-            await msg.edit_text(
-                f"⚠️ База обновлена локально, но <code>git push</code> не прошел.\n\n"
-                f"<b>Ответ сервера:</b>\n<pre>{escape_html_text(output)}</pre>",
-                parse_mode="HTML",
-            )
-
-    except Exception as e:
-        import traceback
-
-        err_msg = traceback.format_exc()
-        await message.answer(f"❌ <b>Ошибка:</b> {escape_html_text(e)}\n<pre>{escape_html_text(err_msg)}</pre>", parse_mode="HTML")
+# process_rename_name → вынесен в services/admin_rename.py
+# (зарегистрирован на rename_router через декоратор при импорте;
+# dp.include_router(rename_router) — в main()).
 
 
 @dp.callback_query(F.data == "schedule")
@@ -4030,76 +3997,11 @@ async def handle_grid_art_number_input(message: types.Message, state: FSMContext
 # через декораторы при импорте на top-level; dp.include_router в main()).
 
 
-@dp.callback_query(F.data == "admin_sync_webapp")
-async def admin_menu_sync_webapp(callback: types.CallbackQuery):
-    if not await _require_admin(callback):
-        return
-    await callback.message.delete()
-    msg = _fake_admin_message(callback, "/sync_webapp")
-    if msg is None:
-        return await callback.answer("⚠️ Не удалось запустить действие.", show_alert=True)
-    await cmd_sync_webapp(msg)
-    await callback.answer()
-
-
 # admin_menu_stats, admin_menu_admins, admin_menu_admins_remove,
 # admin_menu_admins_add_prompt, admin_manage_new_id, admin_menu_settings,
 # admin_toggle_sync, admin_toggle_cleanup → вынесены в services/admin_telegram.py.
+# admin_menu_sync_webapp, admin_menu_commands → вынесены в services/admin_settings.py.
 # _fake_admin_message → вынесен в services/admin_helpers.py.
-
-
-@dp.callback_query(F.data.startswith("admin_cmd_"))
-async def admin_menu_commands(callback: types.CallbackQuery, state: FSMContext):
-    if not await _require_admin(callback):
-        return
-    cmd = callback.data.replace("admin_cmd_", "")
-    commands = {
-        "add_chapter": cmd_add_chapter,
-        "add_ranobe": cmd_add_ranobe,
-        "add_akashic": cmd_add_akashic,
-        "add_british": cmd_add_british,
-        "add_art": cmd_add_art,
-        "delete_chapter": cmd_delete_chapter,
-        "delete_ranobe": cmd_delete_ranobe,
-        "delete_akashic": cmd_delete_akashic,
-        "delete_british": cmd_delete_british,
-        "delete_art": cmd_delete_art,
-        "toggle_ai": cmd_toggle_ai,
-        "alya_mode": cmd_alya_mode,
-        "blacklist_ai": cmd_blacklist_ai,
-        "unblacklist_ai": cmd_unblacklist_ai,
-        "test_notification": cmd_test_notification,
-    }
-    stateful_commands = {
-        "add_chapter",
-        "add_ranobe",
-        "add_akashic",
-        "add_british",
-        "add_art",
-        "delete_chapter",
-        "delete_ranobe",
-        "delete_akashic",
-        "delete_british",
-    }
-    if cmd not in commands:
-        return await callback.answer("Неизвестная команда.", show_alert=True)
-
-    msg = _fake_admin_message(callback, f"/{cmd}")
-    if msg is None:
-        return await callback.answer("⚠️ Не удалось запустить действие.", show_alert=True)
-    try:
-        await callback.message.delete()
-    except Exception:
-        pass
-    try:
-        if cmd in stateful_commands:
-            await commands[cmd](msg, state)
-        else:
-            await commands[cmd](msg)
-    except Exception as e:
-        logging.exception(f"admin_menu_commands: cmd={cmd} failed", exc_info=e)
-        return await callback.answer(f"❌ {type(e).__name__}", show_alert=True)
-    await callback.answer()
 
 
 # NOTE: json/os/re уже импортируются в БЛОК 1 наверху файла.
@@ -4353,158 +4255,11 @@ from services.reader_pipeline import (  # noqa: E402,F401
 # invalidate_chapter_content_cache вынесена в services/reader_cache.py.
 
 
-@dp.message(Command("toggle_sync"))
-async def cmd_toggle_sync(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('CREATE TABLE IF NOT EXISTS sync_settings (id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)')
-        async with db.execute('SELECT locked FROM sync_settings WHERE id = 1') as cursor:
-            row = await cursor.fetchone()
-
-        if not row:
-            locked = 1
-            await db.execute('INSERT INTO sync_settings (id, locked) VALUES (1, 1)')
-        else:
-            locked = 0 if row[0] else 1
-            await db.execute('UPDATE sync_settings SET locked = ? WHERE id = 1', (locked,))
-        await db.commit()
-
-        if locked:
-            await message.answer(
-                "🔒 <b>Синхронизация заблокирована!</b>\nТеперь команда /sync_webapp не будет работать и ваши данные в WebApp в полной безопасности от перезаписи. Чтобы разблокировать, введите команду снова.",
-                parse_mode="HTML",
-            )
-        else:
-            await message.answer("🔓 <b>Синхронизация разблокирована.</b>\nКоманда /sync_webapp снова активна.", parse_mode="HTML")
-
-
-@dp.message(Command("sync_webapp"))
-async def cmd_sync_webapp(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-
-    # Проверка на блокировку синхронизации
-    async with aiosqlite.connect(DB_PATH) as db:
-        try:
-            async with db.execute('SELECT locked FROM sync_settings WHERE id = 1') as cursor:
-                row = await cursor.fetchone()
-                if row and row[0]:
-                    return await message.answer(
-                        "🔒 Синхронизация сейчас заблокирована. Разблокируйте её командой /toggle_sync перед использованием.",
-                        parse_mode="HTML",
-                    )
-        except Exception as e:
-            # Таблица может отсутствовать на старых инсталляциях до первого /toggle_sync
-            logging.debug(f"sync_webapp: sync_settings table check skipped: {e}")
-
-    msg = await message.answer("🔄 <i>Собираем данные из БД для WebApp...</i>", parse_mode="HTML")
-    try:
-        # build_reader_data() сам читает custom_names из БД — источник истины один,
-        # никакие кастомные имена не теряются даже при добавлении новых глав
-        result, _, _ = await get_cached_reader_data(force_refresh=True)
-
-        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        await msg.edit_text("🔄 <i>Публикуем данные в Github Pages. Ожидайте...</i>", parse_mode="HTML")
-
-        # Асинхронная git-синхронизация (не блокирует Event Loop)
-        success, output = await run_git_sync("sync webapp db")
-
-        if success:
-            await msg.edit_text(
-                "✅ <b>Успешно!</b> Главы синхронизированы с WebApp. (Они появятся в приложении в течение 1-2 минут)", parse_mode="HTML"
-            )
-        else:
-            await msg.edit_text(
-                f"⚠️ База обновлена локально. <code>git push</code> не прошел.\n\n"
-                f"<b>Ответ сервера:</b>\n<pre>{escape_html_text(output)}</pre>\n\n"
-                f"Скорее всего, у бота на сервере нет прав для git push.",
-                parse_mode="HTML",
-            )
-
-    except Exception as e:
-        import traceback
-
-        err_msg = traceback.format_exc()
-        await msg.edit_text(f"❌ <b>Ошибка:</b> {escape_html_text(e)}\n<pre>{escape_html_text(err_msg)}</pre>", parse_mode="HTML")
-
-
-@dp.message(Command("alya_mode"))
-async def cmd_alya_mode(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    new_mode = await toggle_alya_mode()
-    await message.answer(f"✅ Режим Али изменен на: <b>{new_mode}</b>", parse_mode="HTML")
-
-
-@dp.message(Command("blacklist_ai"))
-async def cmd_blacklist_ai(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    try:
-        user_id = int(message.text.split()[1])
-        if await add_to_blacklist(user_id):
-            await message.answer(f"✅ Пользователь {user_id} добавлен в черный список ИИ.")
-        else:
-            await message.answer(f"Пользователь {user_id} УЖЕ в черном списке ИИ.")
-    except (IndexError, ValueError):
-        await message.answer("❌ Формат: /blacklist_ai <ID_пользователя>")
-
-
-@dp.message(Command("unblacklist_ai"))
-async def cmd_unblacklist_ai(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    try:
-        user_id = int(message.text.split()[1])
-        if await remove_from_blacklist(user_id):
-            await message.answer(f"✅ Пользователь {user_id} удален из черного списка ИИ.")
-        else:
-            await message.answer(f"Пользователя {user_id} НЕТ в черном списке ИИ.")
-    except (IndexError, ValueError):
-        await message.answer("❌ Формат: /unblacklist_ai <ID_пользователя>")
-
-
-@dp.message(Command("blacklist_view"))
-async def cmd_blacklist_view(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    bl = await get_blacklist()
-    if not bl:
-        return await message.answer("📝 Чёрный список ИИ пуст.")
-    lines = [f"<code>{uid}</code>" for uid in bl]
-    await message.answer(f"🚫 <b>Чёрный список ИИ ({len(bl)}):</b>\n" + "\n".join(lines), parse_mode="HTML")
-
-
-@dp.message(Command("set_commands_link"))
-async def cmd_set_commands_link(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    try:
-        url = message.text.split(maxsplit=1)[1]
-        await set_commands_link(url)
-        await message.answer(f"✅ Установлена ссылка на все команды: {url}")
-    except IndexError:
-        await message.answer("❌ Формат: /set_commands_link <ссылка>")
-
-
-@dp.message(Command("delete_commands_link"))
-async def cmd_delete_commands_link(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await delete_commands_link()
-    await message.answer("✅ Ссылка на все команды удалена.")
+# cmd_toggle_sync, cmd_sync_webapp, cmd_alya_mode, cmd_blacklist_ai,
+# cmd_unblacklist_ai, cmd_blacklist_view, cmd_set_commands_link,
+# cmd_delete_commands_link → вынесены в services/admin_settings.py
+# (зарегистрированы на settings_router; доступны через re-export на
+# top-level этого файла).
 
 
 async def send_admin_art_item(chat_id: int, index: int, message_to_edit: types.Message = None):
@@ -4690,32 +4445,8 @@ async def process_admin_art_view_back(callback: types.CallbackQuery, state: FSMC
 # (доступен через re-export на top-level этого файла).
 
 
-@dp.message(Command("toggle_ai"))
-async def cmd_toggle_ai(message: types.Message):
-    if message.chat.type not in ["group", "supergroup"]:
-        return await message.answer("Эту команду можно использовать только в группе!")
-
-    admins = await get_admins()
-    is_bot_admin = message.from_user.id in admins
-
-    # Allow group admins or bot admins to toggle AI
-    is_group_admin = False
-    if not is_bot_admin:
-        try:
-            member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-            is_group_admin = member.status in ["creator", "administrator"]
-        except Exception as e:
-            logging.debug(f"toggle_ai: failed to get chat member status: {e}")
-
-    if not is_bot_admin and not is_group_admin:
-        return await message.answer("Только администраторы могут использовать эту команду.")
-
-    enabled = await toggle_group_ai(message.chat.id)
-
-    if enabled:
-        await message.answer("✅ <b>Общение с ИИ в этой группе ВКЛЮЧЕНО.</b>", parse_mode="HTML")
-    else:
-        await message.answer("❌ <b>Общение с ИИ в этой группе ВЫКЛЮЧЕНО.</b>", parse_mode="HTML")
+# cmd_toggle_ai → вынесен в services/admin_settings.py
+# (доступен через re-export на top-level этого файла).
 
 
 @dp.message(Command("cancel"), StateFilter("*"))
@@ -4995,25 +4726,9 @@ from services.likes_api import handle_likes_get, handle_likes_post  # noqa: E402
 from services.typo_api import handle_typo_post  # noqa: E402,F401
 
 
-async def cmd_test_notification(message: types.Message):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-
-    await message.answer(
-        f"🔔 <b>Тест уведомлений</b>\nСписок админов: <code>{admins}</code>\nТвой ID: <code>{message.from_user.id}</code>\n\nСейчас попробую отправить тестовое сообщение...",
-        parse_mode="HTML",
-    )
-
-    count = 0
-    for admin_id in admins:
-        try:
-            await bot.send_message(admin_id, "✅ Тестовое уведомление из системы репортов!")
-            count += 1
-        except Exception as e:
-            await message.answer(f"❌ Ошибка для {admin_id}: {e}")
-
-    await message.answer(f"🏁 Тест завершен. Отправлено: {count}/{len(admins)}")
+# cmd_test_notification → вынесен в services/admin_settings.py
+# (доступен через re-export на top-level этого файла).
+# Вызывается только через admin_menu_commands dispatcher (нет @dp.message).
 
 
 # handle_typo_post вынесен в services/typo_api.py (импорт выше).
@@ -5989,6 +5704,8 @@ async def main():
     dp.include_router(art_router)
     dp.include_router(admin_router)
     dp.include_router(content_router)
+    dp.include_router(rename_router)
+    dp.include_router(settings_router)
     await init_db()
 
     dp.message.outer_middleware(StatsMiddleware())
