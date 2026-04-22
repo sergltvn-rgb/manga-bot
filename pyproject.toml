@@ -47,3 +47,14 @@ ignore = [
 quote-style = "preserve"
 indent-style = "space"
 line-ending = "auto"
+
+# --------------------------------------------------------------------------
+# Pytest: чтобы `import bot` работал из `tests/`, кладём корень в PYTHONPATH.
+# Запуск: `pytest tests/ -q`
+# --------------------------------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+python_files = "test_*.py"
+# Тихий stdout от нашего logging.basicConfig — иначе шум в unit-тестах.
+log_cli = false

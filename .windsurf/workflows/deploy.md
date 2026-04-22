@@ -7,9 +7,15 @@ description: Pre-deploy gate + deploy to mangabot systemd service
 ## 0. Разовая настройка окружения (один раз)
 
 ```powershell
+# Активировать venv (или использовать путь .\.venv\Scripts\python.exe -m ...)
+.\.venv\Scripts\Activate.ps1
+
+# Поставить dev-инструменты ИМЕННО в venv (где уже aiogram, aiosqlite и т. д.)
 pip install -r requirements-dev.txt
 pre-commit install
 ```
+
+**Важно**: на этой машине есть глобальный Python и `.venv`. `aiogram` стоит только в `.venv`. Любые команды (`pytest`, `ruff`) нужно запускать **из venv**, иначе будут `ModuleNotFoundError: aiogram`.
 
 После этого линтер и shadowing-чек запускаются автоматически на каждый `git commit`.
 
