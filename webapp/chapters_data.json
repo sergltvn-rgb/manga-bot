@@ -6,6 +6,20 @@
       "cover_url": "https://img4.teletype.in/files/bb/4f/bb4faec0-5c18-451e-a201-b167ead793d4.png",
       "volumes": [
         {
+          "volume": 1,
+          "custom_name": "Том 1",
+          "chapters": [
+            {
+              "chapter": "1",
+              "custom_name": "Глава 1",
+              "url": "https://telegra.ph/Hroniki-Akashi--Tom-1-Glava-1-04-22",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--Tom-1-Glava-1-04-22"
+              ]
+            }
+          ]
+        },
+        {
           "volume": 11,
           "custom_name": "Том 11",
           "chapters": [
@@ -325,13 +339,13 @@
   ],
   "bot_username": "Alyamangapage_bot",
   "admin_ids": [
-    "7623430602",
     "1424182136",
-    "5477281591",
     "6573251552",
-    "8033148365",
-    "6210312655",
     "1747374025",
-    "1577647113"
+    "5477281591",
+    "8033148365",
+    "7623430602",
+    "1577647113",
+    "6210312655"
   ]
 }
