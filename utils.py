@@ -37,6 +37,8 @@ TTL_ERROR = 5            # Errors, cooldown-warnings, validation fails
 TTL_GAME = 180           # Games, RP, small-random results (3 min)
 TTL_HEAVY_GAME = 300     # Bottles, roulette, ship, lootbox (5 min)
 TTL_MENU = 600           # Menus, FSM dialog prompts (10 min)
+TTL_GROUP_PANEL = 120    # Large user panels in groups: profile/shop/daily (2 min)
+TTL_LEVELUP = 240        # Level-up notifications in groups (4 min)
 
 # ---------------------------------------------------------------------------
 # Background tasks registry: prevent `asyncio.create_task(...)` from being
@@ -300,6 +302,28 @@ async def reply_and_forget(
     if delete_source and is_group:
         schedule_delete_once(message, ttl)
     return msg
+
+
+async def reply_group_ephemeral(
+    message: types.Message,
+    text: str,
+    *,
+    ttl: int = TTL_GROUP_PANEL,
+    **kwargs,
+) -> types.Message | None:
+    """Send a panel-like reply. In groups — auto-delete after `ttl` seconds; in DMs — keep forever.
+
+    Use this for user-facing panels that are noisy in groups but useful as history
+    in DMs: profile, shop, daily, inventory, top, stats, AI opinion.
+    """
+    chat_type = getattr(getattr(message, "chat", None), "type", None)
+    if chat_type in ("group", "supergroup"):
+        return await reply_and_forget(message, text, ttl=ttl, **kwargs)
+    try:
+        return await message.answer(text, **kwargs)
+    except Exception as e:
+        logging.debug(f"reply_group_ephemeral: answer failed: {e}")
+        return None
 
 
 async def cb_warn(
