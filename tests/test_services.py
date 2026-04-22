@@ -256,3 +256,61 @@ class TestTelegraph:
         dumped = str(nodes)
         assert "alert" not in dumped
         assert "Safe" in dumped
+
+
+# --- services.html_utils ---
+
+
+class TestHtmlUtils:
+    def test_imports(self):
+        from services import html_utils  # noqa: F401
+
+    def test_visible_content_detects_text(self):
+        from services.html_utils import _html_fragment_has_visible_content
+
+        assert _html_fragment_has_visible_content("<p>Hello</p>")
+        assert _html_fragment_has_visible_content("<div><img src='x.jpg'/></div>")
+        assert _html_fragment_has_visible_content("<p>&nbsp; Привет &nbsp;</p>")
+        # Пустые / только-теги фрагменты — не visible.
+        assert not _html_fragment_has_visible_content("")
+        assert not _html_fragment_has_visible_content("<p></p>")
+        assert not _html_fragment_has_visible_content("<div>   </div>")
+
+    def test_analyze_counts(self):
+        from services.html_utils import _analyze_html_fragment
+
+        stats = _analyze_html_fragment("<p>Hello <a href='x'>link</a> world</p>" "<img src='y.jpg'/><blockquote>quote</blockquote>")
+        assert stats["anchor_count"] == 1
+        assert stats["image_count"] == 1
+        assert stats["block_count"] == 2  # p + blockquote
+        assert stats["text_len"] > 0
+
+    def test_analyze_empty(self):
+        from services.html_utils import _analyze_html_fragment
+
+        stats = _analyze_html_fragment("")
+        assert stats == {"text_len": 0, "anchor_count": 0, "image_count": 0, "block_count": 0}
+
+    def test_is_low_value(self):
+        from services.html_utils import _is_low_value_html_fragment
+
+        # Картинка → не low-value.
+        assert not _is_low_value_html_fragment("<img src='big.jpg'/>")
+        # Длинный текст → не low-value.
+        assert not _is_low_value_html_fragment("<p>" + "x " * 200 + "</p>")
+        # Только короткая ссылка → low-value.
+        assert _is_low_value_html_fragment('<p><a href="x">См. оригинал</a></p>')
+        # Пустой / очень короткий → low-value.
+        assert _is_low_value_html_fragment("<p>Ok</p>")
+
+    def test_score_prefers_images_and_text(self):
+        from services.html_utils import _score_html_fragment
+
+        # Фрагмент с картинками и текстом > фрагмент со ссылками и коротким текстом.
+        rich = "<p>" + "x " * 100 + "</p><img src='y.jpg'/><p>more</p>"
+        poor = '<p><a href="x">See</a></p>'
+        assert _score_html_fragment(rich) > _score_html_fragment(poor)
+        # Картинка перевешивает даже длинный текст без картинок.
+        with_image = "<img src='x.jpg'/><p>hi</p>"
+        text_only = "<p>" + "x " * 50 + "</p>"
+        assert _score_html_fragment(with_image) > _score_html_fragment(text_only)

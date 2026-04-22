@@ -5128,49 +5128,13 @@ def _normalize_teletype_article_fragment(fragment: str, source_url: str = "") ->
     return normalized.strip()
 
 
-def _html_fragment_has_visible_content(fragment: str) -> bool:
-    if not fragment:
-        return False
-    if re.search(r"<img\b", fragment, flags=re.IGNORECASE):
-        return True
-    text_only = html.unescape(re.sub(r"<[^>]+>", " ", fragment))
-    text_only = re.sub(r"\s+", " ", text_only).strip()
-    return bool(text_only)
-
-
-def _analyze_html_fragment(fragment: str) -> dict[str, int]:
-    raw_fragment = str(fragment or "")
-    text_only = html.unescape(re.sub(r"<[^>]+>", " ", raw_fragment))
-    text_only = re.sub(r"\s+", " ", text_only).strip()
-    return {
-        "text_len": len(text_only),
-        "anchor_count": len(re.findall(r"<a\b", raw_fragment, flags=re.IGNORECASE)),
-        "image_count": len(re.findall(r"<img\b", raw_fragment, flags=re.IGNORECASE)),
-        "block_count": len(re.findall(r"<(?:p|li|blockquote|figure|figcaption|h[1-6]|pre)\b", raw_fragment, flags=re.IGNORECASE)),
-    }
-
-
-def _is_low_value_html_fragment(fragment: str) -> bool:
-    stats = _analyze_html_fragment(fragment)
-    if stats["image_count"] > 0:
-        return False
-    if stats["text_len"] >= 180:
-        return False
-    if stats["block_count"] >= 3 and stats["text_len"] >= 90:
-        return False
-    if stats["anchor_count"] > 0 and stats["text_len"] <= 120:
-        return True
-    return stats["text_len"] < 60 and stats["block_count"] <= 1
-
-
-def _score_html_fragment(fragment: str) -> tuple[int, int, int, int]:
-    stats = _analyze_html_fragment(fragment)
-    return (
-        1 if stats["image_count"] > 0 else 0,
-        min(stats["block_count"], 12),
-        min(stats["text_len"], 4000),
-        -min(stats["anchor_count"], 32),
-    )
+# HTML-утилиты вынесены в services/html_utils.py (Фаза 3 микро-шаг).
+from services.html_utils import (  # noqa: E402,F401
+    _analyze_html_fragment,
+    _html_fragment_has_visible_content,
+    _is_low_value_html_fragment,
+    _score_html_fragment,
+)
 
 
 # _build_chapter_content_cache_key вынесен в services/cache_utils.py.
