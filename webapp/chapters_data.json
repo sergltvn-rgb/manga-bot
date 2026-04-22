@@ -228,6 +228,14 @@
                 "https://teletype.in/@slitvin/gaMq_RhLLK-",
                 "https://telegra.ph/Hroniki-Akashi--12-tom-posleslovie-04-10"
               ]
+            },
+            {
+              "chapter": "Иллюстрации",
+              "custom_name": "Глава Иллюстрации",
+              "url": "https://telegra.ph/Hroniki-Akashi--Tom-12-Glava-Illyustracii-04-22",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--Tom-12-Glava-Illyustracii-04-22"
+              ]
             }
           ]
         }
@@ -320,12 +328,12 @@
   "bot_username": "Alyamangapage_bot",
   "admin_ids": [
     "5477281591",
-    "1747374025",
-    "1577647113",
-    "1424182136",
-    "6573251552",
     "7623430602",
-    "6210312655",
-    "8033148365"
+    "1577647113",
+    "1747374025",
+    "6573251552",
+    "8033148365",
+    "1424182136",
+    "6210312655"
   ]
 }
