@@ -276,16 +276,18 @@ async def global_error_handler(event: types.ErrorEvent) -> bool:
 
 # Глобальная aiohttp сессия (открывается один раз при старте)
 _http_session: aiohttp.ClientSession | None = None
-READER_CACHE_TTL_SECONDS = 30
-CHAPTER_CONTENT_CACHE_TTL_SECONDS = 300
-_reader_data_cache: dict = {
-    "payload": None,
-    "etag": "",
-    "built_at": 0.0,
-}
-_reader_cache_lock = asyncio.Lock()
-_chapter_content_cache: dict = {}
-_chapter_content_cache_lock = asyncio.Lock()
+
+# Reader-кэши (state + TTL + invalidate) вынесены в services/reader_cache.py.
+from services.reader_cache import (  # noqa: E402,F401
+    CHAPTER_CONTENT_CACHE_TTL_SECONDS,
+    READER_CACHE_TTL_SECONDS,
+    _chapter_content_cache,
+    _chapter_content_cache_lock,
+    _reader_cache_lock,
+    _reader_data_cache,
+    invalidate_chapter_content_cache,
+    invalidate_reader_cache,
+)
 
 
 async def get_http_session() -> aiohttp.ClientSession:
@@ -4801,23 +4803,11 @@ async def sync_reader_snapshot(commit_message: str) -> None:
         logging.error(f"Reader sync error: {e}")
 
 
-def invalidate_reader_cache(reason: str = "") -> None:
-    _reader_data_cache["payload"] = None
-    _reader_data_cache["etag"] = ""
-    _reader_data_cache["built_at"] = 0.0
-    invalidate_chapter_content_cache(reason)
-    if reason:
-        logging.info("Reader cache invalidated: %s", reason)
+# `invalidate_reader_cache` и `invalidate_chapter_content_cache` вынесены
+# в services/reader_cache.py (импорт в начале файла).
 
-
-def _compute_reader_etag(payload: dict) -> str:
-    normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-    return f"\"{digest}\""
-
-
-# ETag/cache-key утилиты вынесены в services/cache_utils.py (Фаза 3 микро-шаг).
-from services.cache_utils import _if_none_match_matches, _normalize_etag  # noqa: E402,F401
+# ETag утилиты вынесены в services/cache_utils.py (Фаза 3 микро-шаг).
+from services.cache_utils import _compute_reader_etag, _if_none_match_matches, _normalize_etag  # noqa: E402,F401
 
 
 async def get_cached_reader_data(force_refresh: bool = False) -> tuple[dict, str, bool]:
@@ -5141,17 +5131,8 @@ from services.html_utils import (  # noqa: E402,F401
 from services.cache_utils import _build_chapter_content_cache_key  # noqa: E402,F401
 
 
-def _extract_chapter_urls(chapter_data: dict) -> list[str]:
-    urls: list[str] = []
-    if isinstance(chapter_data.get("urls"), list):
-        for item in chapter_data["urls"]:
-            normalized = _normalize_external_url(item, max_len=2048)
-            if normalized and normalized not in urls:
-                urls.append(normalized)
-    fallback = _normalize_external_url(chapter_data.get("url"), max_len=2048)
-    if fallback and fallback not in urls:
-        urls.append(fallback)
-    return urls
+# _extract_chapter_urls вынесен в services/validators.py (Фаза 3 микро-шаг).
+from services.validators import _extract_chapter_urls  # noqa: E402,F401
 
 
 async def _resolve_reader_chapter_entry(series_id: str, volume: str, chapter: str) -> tuple[dict | None, dict | None, dict | None]:
@@ -5287,10 +5268,7 @@ async def _build_chapter_content_payload(series_id: str, volume: str, chapter: s
     }, 200
 
 
-def invalidate_chapter_content_cache(reason: str = "") -> None:
-    _chapter_content_cache.clear()
-    if reason:
-        logging.info("Chapter content cache invalidated: %s", reason)
+# invalidate_chapter_content_cache вынесена в services/reader_cache.py.
 
 
 async def get_cached_chapter_content(
@@ -6334,7 +6312,7 @@ WEBAPP_TELEMETRY_EVENTS = {
     "cache_version_mismatch",
 }
 MAX_TELEMETRY_PAYLOAD_JSON_LENGTH = 16000
-MAX_TELEMETRY_METRIC_MS = 120000.0
+# MAX_TELEMETRY_METRIC_MS вынесена в services/telemetry_utils.py.
 try:
     SERVER_READER_TELEMETRY_SAMPLE_RATE = float(os.getenv("SERVER_READER_TELEMETRY_SAMPLE_RATE", "0.2"))
 except Exception:
@@ -6344,33 +6322,12 @@ SERVER_READER_TELEMETRY_EVENT = "server_api_reader_ms"
 
 
 # Telemetry-утилиты вынесены в services/telemetry_utils.py (Фаза 3 микро-шаг).
-from services.telemetry_utils import _clip_telemetry_text, _to_finite_float  # noqa: E402,F401
-
-
-def _sanitize_client_chapter_open_payload(payload: dict) -> dict | None:
-    duration = _to_finite_float(payload.get("duration_ms"))
-    if duration is None or duration < 0 or duration > MAX_TELEMETRY_METRIC_MS:
-        return None
-
-    chapter_idx = None
-    raw_idx = payload.get("chapter_idx")
-    if raw_idx is not None and raw_idx != "":
-        try:
-            parsed_idx = int(raw_idx)
-            if 0 <= parsed_idx <= 10000:
-                chapter_idx = parsed_idx
-        except Exception:
-            chapter_idx = None
-
-    return {
-        "duration_ms": round(duration, 2),
-        "series_id": _clip_telemetry_text(payload.get("series_id"), 64),
-        "volume": _clip_telemetry_text(payload.get("volume"), 32),
-        "chapter": _clip_telemetry_text(payload.get("chapter"), 32),
-        "chapter_idx": chapter_idx,
-        "source": _clip_telemetry_text(payload.get("source"), 64),
-        "used_prefetch": bool(payload.get("used_prefetch")),
-    }
+from services.telemetry_utils import (  # noqa: E402,F401
+    MAX_TELEMETRY_METRIC_MS,
+    _clip_telemetry_text,
+    _sanitize_client_chapter_open_payload,
+    _to_finite_float,
+)
 
 
 def _serialize_telemetry_payload(payload: dict) -> str:

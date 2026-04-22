@@ -12,6 +12,10 @@ from __future__ import annotations
 
 import math
 
+# Верхняя граница для `duration_ms`-метрик. Больше 2 минут на один reader-event —
+# это либо заснувшая вкладка, либо баг клиента, игнорируем.
+MAX_TELEMETRY_METRIC_MS: float = 120000.0
+
 
 def _clip_telemetry_text(value: object, max_len: int) -> str:
     """Приводит любое значение к строке, обрезает пробелы и длину.
@@ -35,3 +39,39 @@ def _to_finite_float(value: object) -> float | None:
     if not math.isfinite(number):
         return None
     return number
+
+
+def _sanitize_client_chapter_open_payload(payload: dict) -> dict | None:
+    """Валидирует и нормализует payload события `client_chapter_open_ms`.
+
+    Возвращает `None` если payload невалиден (неправильный `duration_ms`).
+    Иначе — dict с приведёнными к безопасным типам/длинам полями:
+    `duration_ms`, `series_id`, `volume`, `chapter`, `chapter_idx`,
+    `source`, `used_prefetch`.
+
+    Используется хендлером `/api/telemetry` для защиты `chapter_reader_events`
+    от мусора из клиента.
+    """
+    duration = _to_finite_float(payload.get("duration_ms"))
+    if duration is None or duration < 0 or duration > MAX_TELEMETRY_METRIC_MS:
+        return None
+
+    chapter_idx: int | None = None
+    raw_idx = payload.get("chapter_idx")
+    if raw_idx is not None and raw_idx != "":
+        try:
+            parsed_idx = int(raw_idx)
+            if 0 <= parsed_idx <= 10000:
+                chapter_idx = parsed_idx
+        except (TypeError, ValueError):
+            chapter_idx = None
+
+    return {
+        "duration_ms": round(duration, 2),
+        "series_id": _clip_telemetry_text(payload.get("series_id"), 64),
+        "volume": _clip_telemetry_text(payload.get("volume"), 32),
+        "chapter": _clip_telemetry_text(payload.get("chapter"), 32),
+        "chapter_idx": chapter_idx,
+        "source": _clip_telemetry_text(payload.get("source"), 64),
+        "used_prefetch": bool(payload.get("used_prefetch")),
+    }

@@ -68,6 +68,31 @@ def _clean_urls(url_text: str) -> list:
     return links
 
 
+def _extract_chapter_urls(chapter_data: dict) -> list[str]:
+    """Извлекает и нормализует список URL'ов главы из её raw-payload'а.
+
+    Порядок приоритета:
+    1. Массив `urls` (новый формат, несколько источников для одной главы).
+    2. Одиночное поле `url` (legacy-формат) — добавляется как fallback.
+
+    Дубликаты удаляются, невалидные (non-http, credentials, управляющие
+    символы) отсекаются `_normalize_external_url`.
+
+    Используется в `bot.py:build_chapter_content` и обработчике
+    `handle_chapter_content` для сборки списка источников главы.
+    """
+    urls: list[str] = []
+    if isinstance(chapter_data.get("urls"), list):
+        for item in chapter_data["urls"]:
+            normalized = _normalize_external_url(item, max_len=2048)
+            if normalized and normalized not in urls:
+                urls.append(normalized)
+    fallback = _normalize_external_url(chapter_data.get("url"), max_len=2048)
+    if fallback and fallback not in urls:
+        urls.append(fallback)
+    return urls
+
+
 # --- JSON-утилиты ---
 
 

@@ -12,6 +12,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+
+
+def _compute_reader_etag(payload: dict) -> str:
+    """Стабильный ETag для reader-payload'а (JSON-словарь series/volumes/chapters).
+
+    Используется в `get_cached_reader_data` и `handle_reader_data` для
+    генерации `If-None-Match`-совместимого тега. Детерминистичен:
+    тот же payload → тот же ETag (sort_keys=True).
+    """
+    normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"\"{digest}\""
+
 
 def _normalize_etag(tag: str) -> str:
     """Убирает `W/`-префикс weak-ETag и обрезает whitespace.

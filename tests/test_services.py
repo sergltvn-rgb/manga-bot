@@ -121,6 +121,48 @@ class TestValidators:
         # Незасериализуемое → str fallback.
         assert _safe_json_dumps(object()) != ""
 
+    def test_extract_chapter_urls_prefers_urls_list(self):
+        from services.validators import _extract_chapter_urls
+
+        data = {
+            "urls": ["https://a.com", "https://b.com"],
+            "url": "https://legacy.com",
+        }
+        result = _extract_chapter_urls(data)
+        # Оба URL из urls + legacy url добавлен как fallback.
+        assert result == ["https://a.com", "https://b.com", "https://legacy.com"]
+
+    def test_extract_chapter_urls_dedupes(self):
+        from services.validators import _extract_chapter_urls
+
+        data = {
+            "urls": ["https://a.com", "https://a.com", "https://b.com"],
+            "url": "https://a.com",  # Дубль из legacy, не должен добавиться.
+        }
+        assert _extract_chapter_urls(data) == ["https://a.com", "https://b.com"]
+
+    def test_extract_chapter_urls_filters_invalid(self):
+        from services.validators import _extract_chapter_urls
+
+        data = {
+            "urls": ["https://ok.com", "javascript:alert(1)", "not-a-url", ""],
+            "url": None,
+        }
+        assert _extract_chapter_urls(data) == ["https://ok.com"]
+
+    def test_extract_chapter_urls_legacy_only(self):
+        from services.validators import _extract_chapter_urls
+
+        # Старый формат — только одиночное `url`.
+        data = {"url": "https://legacy.com"}
+        assert _extract_chapter_urls(data) == ["https://legacy.com"]
+
+    def test_extract_chapter_urls_empty(self):
+        from services.validators import _extract_chapter_urls
+
+        assert _extract_chapter_urls({}) == []
+        assert _extract_chapter_urls({"urls": [], "url": None}) == []
+
 
 # --- services.cache_utils ---
 
@@ -150,6 +192,33 @@ class TestCacheUtils:
         from services.cache_utils import _build_chapter_content_cache_key
 
         assert _build_chapter_content_cache_key("manga_ru", "1", "5") == "manga_ru::1::5"
+
+    def test_compute_reader_etag_deterministic(self):
+        from services.cache_utils import _compute_reader_etag
+
+        p1 = {"series": [{"id": "a", "x": 1}, {"id": "b", "y": 2}]}
+        p2 = {"series": [{"id": "a", "x": 1}, {"id": "b", "y": 2}]}
+        # Тот же payload → тот же ETag.
+        assert _compute_reader_etag(p1) == _compute_reader_etag(p2)
+        # Формат: кавычки по краям, 64-символьный sha256.
+        etag = _compute_reader_etag(p1)
+        assert etag.startswith('"') and etag.endswith('"')
+        assert len(etag) == 66  # 64 hex + 2 quotes
+
+    def test_compute_reader_etag_differs_on_content_change(self):
+        from services.cache_utils import _compute_reader_etag
+
+        p1 = {"series": [{"id": "a"}]}
+        p2 = {"series": [{"id": "b"}]}
+        assert _compute_reader_etag(p1) != _compute_reader_etag(p2)
+
+    def test_compute_reader_etag_key_order_agnostic(self):
+        from services.cache_utils import _compute_reader_etag
+
+        # sort_keys=True → одинаковый ETag для dict'ов с разным порядком.
+        p1 = {"a": 1, "b": 2}
+        p2 = {"b": 2, "a": 1}
+        assert _compute_reader_etag(p1) == _compute_reader_etag(p2)
 
 
 # --- services.telemetry_utils ---
@@ -181,6 +250,81 @@ class TestTelemetryUtils:
         assert _to_finite_float(float("nan")) is None
         assert _to_finite_float(float("inf")) is None
         assert _to_finite_float(math.inf) is None
+
+    def test_sanitize_chapter_open_valid(self):
+        from services.telemetry_utils import _sanitize_client_chapter_open_payload
+
+        result = _sanitize_client_chapter_open_payload(
+            {
+                "duration_ms": 1234.5678,
+                "series_id": "manga_ru",
+                "volume": "1",
+                "chapter": "5",
+                "chapter_idx": 4,
+                "source": "webapp",
+                "used_prefetch": True,
+            }
+        )
+        assert result == {
+            "duration_ms": 1234.57,  # округлено до 2 знаков
+            "series_id": "manga_ru",
+            "volume": "1",
+            "chapter": "5",
+            "chapter_idx": 4,
+            "source": "webapp",
+            "used_prefetch": True,
+        }
+
+    def test_sanitize_chapter_open_rejects_invalid_duration(self):
+        from services.telemetry_utils import (
+            MAX_TELEMETRY_METRIC_MS,
+            _sanitize_client_chapter_open_payload,
+        )
+
+        # Отрицательная длительность — отклонена.
+        assert _sanitize_client_chapter_open_payload({"duration_ms": -1}) is None
+        # Бесконечность — отклонена.
+        assert _sanitize_client_chapter_open_payload({"duration_ms": float("inf")}) is None
+        # Нечисловая — отклонена.
+        assert _sanitize_client_chapter_open_payload({"duration_ms": "abc"}) is None
+        # Слишком большая — отклонена.
+        assert _sanitize_client_chapter_open_payload({"duration_ms": MAX_TELEMETRY_METRIC_MS + 1}) is None
+
+    def test_sanitize_chapter_open_chapter_idx_bounds(self):
+        from services.telemetry_utils import _sanitize_client_chapter_open_payload
+
+        # 0 ок.
+        r = _sanitize_client_chapter_open_payload({"duration_ms": 100, "chapter_idx": 0})
+        assert r["chapter_idx"] == 0
+        # 10000 ок.
+        r = _sanitize_client_chapter_open_payload({"duration_ms": 100, "chapter_idx": 10000})
+        assert r["chapter_idx"] == 10000
+        # Отрицательный — отбрасывается.
+        r = _sanitize_client_chapter_open_payload({"duration_ms": 100, "chapter_idx": -1})
+        assert r["chapter_idx"] is None
+        # Слишком большой — отбрасывается.
+        r = _sanitize_client_chapter_open_payload({"duration_ms": 100, "chapter_idx": 10001})
+        assert r["chapter_idx"] is None
+        # Нечисловой — отбрасывается.
+        r = _sanitize_client_chapter_open_payload({"duration_ms": 100, "chapter_idx": "bad"})
+        assert r["chapter_idx"] is None
+
+    def test_sanitize_chapter_open_clips_long_strings(self):
+        from services.telemetry_utils import _sanitize_client_chapter_open_payload
+
+        r = _sanitize_client_chapter_open_payload(
+            {
+                "duration_ms": 100,
+                "series_id": "x" * 200,
+                "volume": "y" * 200,
+                "chapter": "z" * 200,
+                "source": "q" * 200,
+            }
+        )
+        assert len(r["series_id"]) == 64
+        assert len(r["volume"]) == 32
+        assert len(r["chapter"]) == 32
+        assert len(r["source"]) == 64
 
 
 # --- services.rate_limit ---
@@ -256,6 +400,68 @@ class TestTelegraph:
         dumped = str(nodes)
         assert "alert" not in dumped
         assert "Safe" in dumped
+
+
+# --- services.reader_cache ---
+
+
+class TestReaderCache:
+    def test_imports(self):
+        from services.reader_cache import (
+            CHAPTER_CONTENT_CACHE_TTL_SECONDS,
+            READER_CACHE_TTL_SECONDS,
+            _chapter_content_cache,
+            _chapter_content_cache_lock,
+            _reader_cache_lock,
+            _reader_data_cache,
+            invalidate_chapter_content_cache,
+            invalidate_reader_cache,
+        )
+
+        assert isinstance(READER_CACHE_TTL_SECONDS, int) and READER_CACHE_TTL_SECONDS > 0
+        assert isinstance(CHAPTER_CONTENT_CACHE_TTL_SECONDS, int) and CHAPTER_CONTENT_CACHE_TTL_SECONDS > 0
+        # State — правильного типа.
+        assert isinstance(_reader_data_cache, dict)
+        assert set(_reader_data_cache.keys()) == {"payload", "etag", "built_at"}
+        assert isinstance(_chapter_content_cache, dict)
+        # Locks созданы.
+        assert _reader_cache_lock is not None
+        assert _chapter_content_cache_lock is not None
+        assert callable(invalidate_reader_cache)
+        assert callable(invalidate_chapter_content_cache)
+
+    def test_invalidate_chapter_content_clears_dict(self):
+        from services.reader_cache import (
+            _chapter_content_cache,
+            invalidate_chapter_content_cache,
+        )
+
+        _chapter_content_cache["test_key"] = {"payload": "x", "status": 200, "built_at": 1.0}
+        assert "test_key" in _chapter_content_cache
+
+        invalidate_chapter_content_cache("unit_test")
+        assert _chapter_content_cache == {}
+
+    def test_invalidate_reader_cache_resets_both(self):
+        from services.reader_cache import (
+            _chapter_content_cache,
+            _reader_data_cache,
+            invalidate_reader_cache,
+        )
+
+        # Наполняем state.
+        _reader_data_cache["payload"] = {"series": []}
+        _reader_data_cache["etag"] = '"abc"'
+        _reader_data_cache["built_at"] = 1234.5
+        _chapter_content_cache["k"] = {"payload": "x", "status": 200, "built_at": 1.0}
+
+        invalidate_reader_cache("unit_test")
+
+        # Reader-payload очищен, chapter-cache тоже.
+        assert _reader_data_cache["payload"] is None
+        assert _reader_data_cache["etag"] == ""
+        assert _reader_data_cache["built_at"] == 0.0
+        assert _chapter_content_cache == {}
 
 
 # --- services.html_utils ---
