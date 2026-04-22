@@ -6389,21 +6389,8 @@ SERVER_READER_TELEMETRY_SAMPLE_RATE = max(0.0, min(1.0, SERVER_READER_TELEMETRY_
 SERVER_READER_TELEMETRY_EVENT = "server_api_reader_ms"
 
 
-def _clip_telemetry_text(value: object, max_len: int) -> str:
-    if value is None:
-        return ""
-    text = str(value).strip()
-    return text[:max_len] if len(text) > max_len else text
-
-
-def _to_finite_float(value: object) -> float | None:
-    try:
-        number = float(value)
-    except Exception:
-        return None
-    if not math.isfinite(number):
-        return None
-    return number
+# Telemetry-утилиты вынесены в services/telemetry_utils.py (Фаза 3 микро-шаг).
+from services.telemetry_utils import _clip_telemetry_text, _to_finite_float  # noqa: E402,F401
 
 
 def _sanitize_client_chapter_open_payload(payload: dict) -> dict | None:
