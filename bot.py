@@ -5824,9 +5824,9 @@ async def handle_ai_chat(request: aiohttp.web.Request) -> aiohttp.web.Response:
         reply = await ask_ai(prompt, system_prompt, history=history if history else None)
         return aiohttp.web.json_response({"reply": reply}, headers=CORS_HEADERS)
     except Exception as e:
-        logging.error(f"AI Chat API Error: {e}")
+        logging.exception("API error in %s", request.path, exc_info=e)
         return aiohttp.web.json_response(
-            {"error": str(e)}, status=500, headers=CORS_HEADERS
+            {"error": "Internal error", "code": 500}, status=500, headers=CORS_HEADERS
         )
 
 async def handle_telemetry_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -5929,7 +5929,8 @@ async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Respon
     except Exception as e:
         logging.error(f"Reader API Error: {e}")
         status_code = 500
-        return aiohttp.web.json_response({"error": str(e), "series": []}, status=500, headers=CORS_HEADERS)
+        logging.exception("API error in %s", request.path, exc_info=e)
+        return aiohttp.web.json_response({"error": "Internal error", "code": 500, "series": []}, status=500, headers=CORS_HEADERS)
     finally:
         duration_ms = (time.perf_counter() - started_at) * 1000.0
         spawn_bg(
@@ -5995,7 +5996,7 @@ async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Resp
             result="error",
             error=str(e),
         )
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 
 # --- Маппинг series_id -> таблица/формат для прямого редактирования URL ---
@@ -6121,7 +6122,7 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
             result="error",
             error=str(e),
         )
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 
 async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -6242,7 +6243,7 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
             result="error",
             error=str(e),
         )
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 
 async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -6364,7 +6365,7 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
             result="error",
             error=str(e),
         )
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 
 async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -6460,7 +6461,7 @@ async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
             result="error",
             error=str(e),
         )
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 
 async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -6531,7 +6532,17 @@ async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Resp
             result="error",
             error=str(e),
         )
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
+
+
+def _api_error_response(exc: Exception, *, context: str = "api", status: int = 500) -> aiohttp.web.Response:
+    """Generic JSON error: не утекает stack/секреты пользователю, но логирует полный контекст."""
+    logging.exception("API error in %s", context, exc_info=exc)
+    return aiohttp.web.json_response(
+        {"error": "Internal error", "code": status},
+        status=status,
+        headers=CORS_HEADERS,
+    )
 
 
 async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -6562,7 +6573,7 @@ async def handle_likes_get(request: aiohttp.web.Request) -> aiohttp.web.Response
                     liked = bool(await c.fetchone())
         return aiohttp.web.json_response({"count": count, "liked": liked}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_likes_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Поставить/убрать лайк (toggle)."""
@@ -6593,7 +6604,7 @@ async def handle_likes_post(request: aiohttp.web.Request) -> aiohttp.web.Respons
 
         return aiohttp.web.json_response({"count": count, "liked": liked}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 # --- Комментарии ---
 
@@ -6638,7 +6649,7 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
         return aiohttp.web.json_response({"comments": comments}, headers=CORS_HEADERS)
     except Exception as e:
         logging.error(f"Error in handle_comments_get: {e}")
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_comment_react_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Лайк/дизлайк комментария."""
@@ -6667,7 +6678,7 @@ async def handle_comment_react_post(request: aiohttp.web.Request) -> aiohttp.web
         
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Добавить комментарий."""
@@ -6710,7 +6721,7 @@ async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Удалить комментарий (только свой или админ)."""
@@ -6743,7 +6754,7 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_comments_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Редактировать свой комментарий. PUT /api/comments/{id}"""
@@ -6805,7 +6816,7 @@ async def handle_comments_update(request: aiohttp.web.Request) -> aiohttp.web.Re
         }, headers=CORS_HEADERS)
     except Exception as e:
         logging.exception("handle_comments_update failed")
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 # --- Репорты об опечатках ---
 
 async def cmd_test_notification(message: types.Message):
@@ -6881,7 +6892,7 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_comments_report(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Жалоба на комментарий."""
@@ -6928,7 +6939,7 @@ async def handle_comments_report(request: aiohttp.web.Request) -> aiohttp.web.Re
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 # --- Аватары и Реакции (Phase 3) ---
 
@@ -6983,7 +6994,7 @@ async def handle_reactions_get(request: aiohttp.web.Request) -> aiohttp.web.Resp
             "user_reaction": user_reaction
         }, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_reactions_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Поставить/изменить реакцию."""
@@ -7026,7 +7037,7 @@ async def handle_reactions_post(request: aiohttp.web.Request) -> aiohttp.web.Res
             
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_rename_request(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Кэширует длинные ID глав и выдает короткий ID (обход лимита 64 символов в deeplink)."""
@@ -7102,7 +7113,7 @@ async def handle_progress_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_progress_get(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Получить все закладки пользователя."""
@@ -7122,7 +7133,7 @@ async def handle_progress_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
         bookmarks = [{"series_id": r[0], "volume_id": r[1], "chapter_key": r[2], "scroll_pos": r[3], "updated_at": r[4]} for r in rows]
         return aiohttp.web.json_response({"bookmarks": bookmarks}, headers=CORS_HEADERS)
     except Exception as e:
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 
 # --- Сортировка глав (Admin DnD) ---
@@ -7252,7 +7263,7 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
             result="error",
             error=str(e),
         )
-        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+        return _api_error_response(e, context=request.path)
 
 async def handle_root_redirect(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Перенаправляет с корня сайта сразу в читалку."""
