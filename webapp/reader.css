@@ -2325,33 +2325,39 @@ input:checked + .slider:before { transform: translateX(20px); }
    РЕПОРТ ОПЕЧАТОК (TYPO REPORTER)
    ========================================================================== */
 
+/* Refresh v4: typo reporter — mini-FAB tooltip + v4 bottom-sheet */
 .typo-tooltip {
     position: absolute;
-    background: var(--text);
-    color: var(--bg);
-    padding: 8px 16px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
+    background: var(--accent-gradient);
+    color: #fff;
+    padding: 9px 16px;
+    border-radius: var(--radius-pill);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
     cursor: pointer;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    box-shadow: 0 8px 24px rgba(var(--accent-rgb), 0.45);
     z-index: 1000;
-    transform: translate(-50%, -100%);
+    transform: translate(-50%, -100%) scale(0.9);
     margin-top: -10px;
     opacity: 0;
-    transition: opacity 0.2s, margin-top 0.2s;
+    transition: opacity 0.22s ease, margin-top 0.22s ease, transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     pointer-events: none;
     white-space: nowrap;
     display: flex;
     align-items: center;
     gap: 8px;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .typo-tooltip.visible {
     opacity: 1;
     margin-top: -15px;
+    transform: translate(-50%, -100%) scale(1);
     pointer-events: all;
 }
+.typo-tooltip:hover { filter: brightness(1.05); }
+.typo-tooltip:active { transform: translate(-50%, -100%) scale(0.96); }
 
 .typo-tooltip::after {
     content: '';
@@ -2361,46 +2367,55 @@ input:checked + .slider:before { transform: translateX(20px); }
     transform: translateX(-50%);
     border-width: 6px 6px 0;
     border-style: solid;
-    border-color: var(--text) transparent transparent transparent;
+    border-color: #ec4899 transparent transparent transparent;
 }
 
 .typo-modal-context {
-    background: var(--card-hover);
-    padding: 12px;
-    border-radius: 8px;
+    background: var(--surface-2);
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
     border-left: 3px solid var(--accent);
     font-size: 14px;
-    color: var(--text-secondary);
-    margin-bottom: 16px;
+    color: var(--text);
+    margin: 0 0 var(--space-3);
     font-style: italic;
-    line-height: 1.5;
+    line-height: 1.55;
 }
 
 .typo-modal-selected {
-    font-weight: bold;
+    font-weight: 700;
+    font-style: normal;
     color: var(--accent);
-    background: var(--accent-light);
-    padding: 0 4px;
-    border-radius: 4px;
+    background: var(--accent-gradient-soft);
+    padding: 1px 6px;
+    border-radius: var(--radius-xs);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
 }
 
 .typo-modal-input {
     width: 100%;
-    background: var(--bg);
-    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
     color: var(--text);
-    padding: 12px;
-    border-radius: 12px;
-    font-size: 15px;
+    padding: 12px 14px;
+    border-radius: var(--radius-md);
+    font-size: 14px;
     outline: none;
     box-sizing: border-box;
     font-family: inherit;
     resize: vertical;
-    min-height: 80px;
-    margin-bottom: 16px;
+    min-height: 90px;
+    max-height: 180px;
+    margin-bottom: var(--space-3);
+    transition: border-color var(--ui-transition-fast), box-shadow var(--ui-transition-fast);
+}
+.typo-modal-input::placeholder {
+    color: color-mix(in srgb, var(--text-secondary) 80%, transparent);
 }
 .typo-modal-input:focus {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--surface-border));
+    box-shadow: var(--shadow-focus);
 }
 
 /* ==========================================================================
