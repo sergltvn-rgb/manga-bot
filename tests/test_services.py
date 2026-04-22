@@ -846,3 +846,25 @@ class TestTelemetry:
         assert "chapter_click" in WEBAPP_TELEMETRY_EVENTS
         # Whitelist; произвольные имена не должны пройти.
         assert "random_bad_event" not in WEBAPP_TELEMETRY_EVENTS
+
+
+# --- services.likes_api + services.telemetry_api ---
+
+
+class TestLikesApi:
+    def test_imports(self):
+        import inspect
+
+        from services.likes_api import handle_likes_get, handle_likes_post
+
+        assert inspect.iscoroutinefunction(handle_likes_get)
+        assert inspect.iscoroutinefunction(handle_likes_post)
+
+
+class TestTelemetryApi:
+    def test_imports(self):
+        import inspect
+
+        from services.telemetry_api import handle_telemetry_post
+
+        assert inspect.iscoroutinefunction(handle_telemetry_post)
