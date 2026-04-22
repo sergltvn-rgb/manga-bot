@@ -70,6 +70,12 @@ def _iter_message_handlers(bot_module):
         stack.append(settings_router)
     except ImportError:
         pass
+    try:
+        from services.art_view import art_view_router
+
+        stack.append(art_view_router)
+    except ImportError:
+        pass
     while stack:
         router = stack.pop()
         for h in router.message.handlers:
