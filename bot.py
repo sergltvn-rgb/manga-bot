@@ -5822,8 +5822,6 @@ MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH = 18000
 MAX_BULK_URLS_PER_REQUEST = 200
 MAX_RENAME_OBJECT_ID_LENGTH = 200
 MAX_RENAME_CACHE_SIZE = 5000
-MAX_API_ERROR_TEXT = 250
-
 # Rate-limiter вынесен в services/rate_limit.py (Фаза 3 шаг 2).
 from services.rate_limit import _enforce_rate_limit  # noqa: E402
 
@@ -5846,50 +5844,14 @@ from services.webapp_middleware import (  # noqa: E402
     apply_webapp_response_headers,
 )
 
+# Admin audit + generic API error response (Фаза 3 шаг 11).
+from services.admin_audit import (  # noqa: E402,F401
+    MAX_API_ERROR_TEXT,
+    _api_error_response,
+    _audit_admin_action,
+)
 
-async def _audit_admin_action(
-    action: str,
-    actor_user_id: str,
-    target: str = "",
-    payload: object = None,
-    result: str = "ok",
-    error: str = "",
-) -> None:
-    try:
-        await write_admin_audit_log(
-            action=action,
-            actor_user_id=str(actor_user_id or ""),
-            target=str(target or ""),
-            payload_json=_safe_json_dumps(payload if payload is not None else {}),
-            result=str(result or "ok"),
-            error=str(error or "")[:MAX_API_ERROR_TEXT],
-        )
-    except Exception as audit_error:
-        logging.error(f"Admin audit log error: {audit_error}")
-
-
-WEBAPP_TELEMETRY_EVENTS = {
-    "client_runtime_error",
-    "client_unhandled_rejection",
-    "client_state_contract_violation",
-    "client_chapter_open_ms",
-    "series_selected",
-    "chapters_screen_opened",
-    "chapter_click",
-    "chapter_content_load_failed",
-    "cache_version_mismatch",
-}
-MAX_TELEMETRY_PAYLOAD_JSON_LENGTH = 16000
-# MAX_TELEMETRY_METRIC_MS вынесена в services/telemetry_utils.py.
-try:
-    SERVER_READER_TELEMETRY_SAMPLE_RATE = float(os.getenv("SERVER_READER_TELEMETRY_SAMPLE_RATE", "0.2"))
-except Exception:
-    SERVER_READER_TELEMETRY_SAMPLE_RATE = 0.2
-SERVER_READER_TELEMETRY_SAMPLE_RATE = max(0.0, min(1.0, SERVER_READER_TELEMETRY_SAMPLE_RATE))
-SERVER_READER_TELEMETRY_EVENT = "server_api_reader_ms"
-
-
-# Telemetry-утилиты вынесены в services/telemetry_utils.py (Фаза 3 микро-шаг).
+# Telemetry-утилиты (чистые) вынесены в services/telemetry_utils.py (Фаза 3 микро-шаг).
 from services.telemetry_utils import (  # noqa: E402,F401
     MAX_TELEMETRY_METRIC_MS,
     _clip_telemetry_text,
@@ -5897,102 +5859,19 @@ from services.telemetry_utils import (  # noqa: E402,F401
     _to_finite_float,
 )
 
+# Telemetry-I/O (БД-запись, sampling, sync с auth) вынесены в services/telemetry.py (Фаза 3 шаг 11).
+from services.telemetry import (  # noqa: E402,F401
+    MAX_TELEMETRY_PAYLOAD_JSON_LENGTH,
+    SERVER_READER_TELEMETRY_EVENT,
+    SERVER_READER_TELEMETRY_SAMPLE_RATE,
+    WEBAPP_TELEMETRY_EVENTS,
+    _insert_webapp_telemetry_event,
+    _record_server_reader_metric,
+    _serialize_telemetry_payload,
+)
 
-def _serialize_telemetry_payload(payload: dict) -> str:
-    payload_json = json.dumps(payload, ensure_ascii=False)
-    if len(payload_json) > MAX_TELEMETRY_PAYLOAD_JSON_LENGTH:
-        payload_json = payload_json[:MAX_TELEMETRY_PAYLOAD_JSON_LENGTH]
-    return payload_json
-
-
-async def _insert_webapp_telemetry_event(
-    *,
-    event_type: str,
-    user_id: str = "",
-    source_module: str = "",
-    message: str = "",
-    stack: str = "",
-    page_url: str = "",
-    user_agent: str = "",
-    payload: dict | None = None,
-) -> None:
-    payload_json = _serialize_telemetry_payload(payload if payload is not None else {})
-    async with aiosqlite.connect("manga.db") as db:
-        await db.execute(
-            """
-            INSERT INTO webapp_telemetry
-            (event_type, user_id, source_module, message, stack, page_url, user_agent, payload_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                _clip_telemetry_text(event_type, 64),
-                _clip_telemetry_text(user_id, 64),
-                _clip_telemetry_text(source_module, 256),
-                _clip_telemetry_text(message, 1200),
-                _clip_telemetry_text(stack, 4000),
-                _clip_telemetry_text(page_url, 2048),
-                _clip_telemetry_text(user_agent, 512),
-                payload_json,
-            ),
-        )
-        await db.commit()
-
-
-async def _record_server_reader_metric(
-    request: aiohttp.web.Request,
-    *,
-    duration_ms: float,
-    status_code: int,
-    cache_hit: bool,
-) -> None:
-    if SERVER_READER_TELEMETRY_SAMPLE_RATE <= 0:
-        return
-    if random.random() > SERVER_READER_TELEMETRY_SAMPLE_RATE:
-        return
-
-    try:
-        user = get_auth_user(request)
-        user_id = str(user.get("id", "")) if user else ""
-        payload = {
-            "duration_ms": round(max(0.0, duration_ms), 2),
-            "status": int(status_code),
-            "cache_hit": bool(cache_hit),
-            "path": _clip_telemetry_text(request.path, 128),
-            "method": _clip_telemetry_text(request.method, 16),
-        }
-        await _insert_webapp_telemetry_event(
-            event_type=SERVER_READER_TELEMETRY_EVENT,
-            user_id=user_id,
-            source_module="bot.py:handle_reader_data",
-            message=f"{payload['duration_ms']}ms status={payload['status']}",
-            page_url=_clip_telemetry_text(request.path_qs, 2048),
-            user_agent=request.headers.get("User-Agent", ""),
-            payload=payload,
-        )
-    except Exception as telemetry_error:
-        logging.warning(f"Server reader telemetry write failed: {telemetry_error}")
-
-
-def get_auth_user(request: aiohttp.web.Request) -> dict | None:
-    """Извлекает и валидирует Telegram пользователя из заголовка Authorization."""
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("tma "):
-        init_data = auth_header[4:]
-    else:
-        # Fallback to initData parameter for backward compatibility if we want it,
-        # but header is preferred.
-        init_data = request.query.get("initData", "")
-
-    if not init_data:
-        return None
-
-    parsed = validate_telegram_data(init_data, BOT_TOKEN)
-    if not parsed or 'user' not in parsed:
-        return None
-    try:
-        return json.loads(parsed['user'])
-    except Exception:
-        return None
+# Telegram WebApp auth вынесен в services/auth.py (Фаза 3 шаг 11).
+from services.auth import get_auth_user  # noqa: E402,F401
 
 
 # --- ИИ-чат (серверный прокси для WebApp) ---
@@ -6662,14 +6541,7 @@ async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Resp
         return _api_error_response(e, context=request.path)
 
 
-def _api_error_response(exc: Exception, *, context: str = "api", status: int = 500) -> aiohttp.web.Response:
-    """Generic JSON error: не утекает stack/секреты пользователю, но логирует полный контекст."""
-    logging.exception("API error in %s", context, exc_info=exc)
-    return aiohttp.web.json_response(
-        {"error": "Internal error", "code": status},
-        status=status,
-        headers=CORS_HEADERS,
-    )
+# _api_error_response вынесен в services/admin_audit.py (Фаза 3 шаг 11).
 
 
 async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Response:

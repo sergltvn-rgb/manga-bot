@@ -742,3 +742,107 @@ class TestReaderApi:
         assert resp.status == 400
         body = json.loads(resp.body.decode())
         assert body["error"] == "invalid chapter"
+
+
+# --- services.auth ---
+
+
+class TestAuth:
+    def test_get_auth_user_no_header_returns_none(self):
+        from aiohttp.test_utils import make_mocked_request
+
+        from services.auth import get_auth_user
+
+        req = make_mocked_request("GET", "/api/reader-data")
+        assert get_auth_user(req) is None
+
+    def test_get_auth_user_empty_tma_returns_none(self):
+        from aiohttp.test_utils import make_mocked_request
+        from multidict import CIMultiDict
+
+        from services.auth import get_auth_user
+
+        # Authorization: tma (пустой initData) → None.
+        req = make_mocked_request("GET", "/api/reader-data", headers=CIMultiDict({"Authorization": "tma "}))
+        assert get_auth_user(req) is None
+
+    def test_get_auth_user_bad_signature_returns_none(self):
+        from aiohttp.test_utils import make_mocked_request
+        from multidict import CIMultiDict
+
+        from services.auth import get_auth_user
+
+        # Подпись заведомо невалидная → validate_telegram_data() вернёт None.
+        req = make_mocked_request(
+            "GET",
+            "/api/reader-data",
+            headers=CIMultiDict({"Authorization": "tma user=%7B%22id%22%3A1%7D&hash=deadbeef"}),
+        )
+        assert get_auth_user(req) is None
+
+
+# --- services.admin_audit ---
+
+
+class TestAdminAudit:
+    def test_api_error_response_returns_500(self):
+        import json
+
+        from services.admin_audit import _api_error_response
+
+        resp = _api_error_response(RuntimeError("boom"), context="/api/test")
+        assert resp.status == 500
+        body = json.loads(resp.body.decode())
+        assert body["error"] == "Internal error"
+        assert body["code"] == 500
+        # Stack не должен утекать в тело ответа.
+        assert "boom" not in resp.body.decode()
+        assert "RuntimeError" not in resp.body.decode()
+
+    def test_api_error_response_custom_status(self):
+        import json
+
+        from services.admin_audit import _api_error_response
+
+        resp = _api_error_response(ValueError("bad"), context="/api/test", status=400)
+        assert resp.status == 400
+        body = json.loads(resp.body.decode())
+        assert body["code"] == 400
+
+    def test_max_api_error_text_constant(self):
+        from services.admin_audit import MAX_API_ERROR_TEXT
+
+        assert MAX_API_ERROR_TEXT == 250
+
+
+# --- services.telemetry ---
+
+
+class TestTelemetry:
+    def test_serialize_payload_small(self):
+        from services.telemetry import _serialize_telemetry_payload
+
+        result = _serialize_telemetry_payload({"a": 1, "b": "hello"})
+        assert '"a": 1' in result or '"a":1' in result
+        assert "hello" in result
+
+    def test_serialize_payload_truncates_huge(self):
+        from services.telemetry import MAX_TELEMETRY_PAYLOAD_JSON_LENGTH, _serialize_telemetry_payload
+
+        # Огромный payload — должен быть обрезан до лимита.
+        huge = {"data": "x" * (MAX_TELEMETRY_PAYLOAD_JSON_LENGTH + 10000)}
+        result = _serialize_telemetry_payload(huge)
+        assert len(result) == MAX_TELEMETRY_PAYLOAD_JSON_LENGTH
+
+    def test_sample_rate_in_range(self):
+        from services.telemetry import SERVER_READER_TELEMETRY_SAMPLE_RATE
+
+        assert 0.0 <= SERVER_READER_TELEMETRY_SAMPLE_RATE <= 1.0
+
+    def test_webapp_telemetry_events_whitelist(self):
+        from services.telemetry import WEBAPP_TELEMETRY_EVENTS
+
+        assert "client_runtime_error" in WEBAPP_TELEMETRY_EVENTS
+        assert "chapter_click" in WEBAPP_TELEMETRY_EVENTS
+        # Whitelist; произвольные имена не должны пройти.
+        assert "random_bad_event" not in WEBAPP_TELEMETRY_EVENTS
