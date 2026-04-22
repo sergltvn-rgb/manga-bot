@@ -284,6 +284,72 @@ async def test_admin_validation_errors(session: aiohttp.ClientSession, api_url: 
         ensure(resp.status == 400, f"/api/sort invalid order expected 400, got {resp.status}")
 
 
+async def test_chapter_content_prefers_richer_source(session: aiohttp.ClientSession, api_url: str) -> None:
+    print("10) /api/chapter-content should prefer the richer source when mixed links are present")
+    original_get_cached_reader_data = bot.get_cached_reader_data
+    original_fetch_telegra_ph_html = bot._fetch_telegra_ph_html
+    original_fetch_teletype_html = bot._fetch_teletype_html
+
+    async def fake_get_cached_reader_data(force_refresh: bool = False):
+        return {
+            "series": [
+                {
+                    "id": "manga_ru",
+                    "volumes": [
+                        {
+                            "volume": 1,
+                            "chapters": [
+                                {
+                                    "chapter": "1",
+                                    "custom_name": "Mixed Source Chapter",
+                                    "url": "",
+                                    "urls": [
+                                        "https://telegra.ph/mixed-short",
+                                        "https://teletype.in/@reader/full-chapter",
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }, '"embedded-mixed-source"', force_refresh
+
+    async def fake_fetch_telegra_ph_html(_source_url: str) -> str:
+        return '<p><a href="https://example.org/gallery">Цветные иллюстрации</a></p>'
+
+    async def fake_fetch_teletype_html(_source_url: str) -> str:
+        return (
+            "<p>Полный текст главы должен побеждать короткую ссылку на галерею, "
+            "даже если Telegraph идет первым в списке источников.</p>"
+            "<p>Во втором абзаце достаточно текста, чтобы источник считался полноценным.</p>"
+        )
+
+    try:
+        bot.invalidate_chapter_content_cache("embedded_mixed_source_test")
+        bot.get_cached_reader_data = fake_get_cached_reader_data
+        bot._fetch_telegra_ph_html = fake_fetch_telegra_ph_html
+        bot._fetch_teletype_html = fake_fetch_teletype_html
+
+        async with session.get(
+            f"{api_url}/api/chapter-content?series_id=manga_ru&volume=1&chapter=1"
+        ) as resp:
+            ensure(resp.status == 200, f"/api/chapter-content mixed-source expected 200, got {resp.status}")
+            payload = await read_json(resp)
+
+        ensure(payload.get("ok") is True, "mixed-source chapter should resolve to ok=true")
+        ensure(payload.get("source_type") == "teletype", "expected richer teletype content to win over short telegraph")
+        ensure(
+            "Полный текст главы" in str(payload.get("html") or ""),
+            "mixed-source chapter should return the richer teletype HTML",
+        )
+    finally:
+        bot.get_cached_reader_data = original_get_cached_reader_data
+        bot._fetch_telegra_ph_html = original_fetch_telegra_ph_html
+        bot._fetch_teletype_html = original_fetch_teletype_html
+        bot.invalidate_chapter_content_cache("embedded_mixed_source_test_cleanup")
+
+
 async def _count_admin_audit_rows(action: str, actor_user_id: int) -> int:
     async with aiosqlite.connect("manga.db") as db:
         async with db.execute(
@@ -295,7 +361,7 @@ async def _count_admin_audit_rows(action: str, actor_user_id: int) -> int:
 
 
 async def test_admin_rate_limit_and_audit(session: aiohttp.ClientSession, api_url: str) -> None:
-    print("10) Admin endpoint should hit 429 and write audit rows")
+    print("11) Admin endpoint should hit 429 and write audit rows")
     headers = {"Origin": ALLOWED_ORIGIN, "Content-Type": "application/json", **auth_header(ADMIN_ID, "Admin")}
 
     action = "rename_request_cache"
@@ -344,6 +410,7 @@ async def main() -> None:
             await test_comment_validation_and_rate_limit(session, api_url)
             await test_reactions_validation_and_rate_limit(session, api_url)
             await test_admin_validation_errors(session, api_url)
+            await test_chapter_content_prefers_richer_source(session, api_url)
             await test_admin_rate_limit_and_audit(session, api_url)
     finally:
         await runner.cleanup()

@@ -8,6 +8,8 @@ import asyncio
 import json
 import math
 import time
+import os
+import hashlib
 import re
 import random
 import aiosqlite
@@ -16,7 +18,9 @@ import aiohttp.web
 import io
 import html
 from datetime import datetime
+from html.parser import HTMLParser
 from typing import Union
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
 from aiogram.filters import Command, StateFilter
@@ -34,6 +38,39 @@ from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL, API_HOST
 
 # Кэш для коротких ссылок переименования (обход лимита 64 символа в deeplink)
 RENAME_CACHE = {}
+
+
+def _resolve_webapp_cache_buster() -> str:
+    """Определяет версию ассетов WebApp, чтобы обойти кэш Telegram/браузера.
+
+    Приоритет:
+      1. Явная переменная окружения WEBAPP_CACHE_BUSTER (нестрока пустая).
+      2. Короткий SHA текущего git HEAD (авто-инвалидирует кэш после каждого деплоя).
+      3. Временная метка (fallback, если .git недоступен).
+    """
+    explicit = str(os.getenv("WEBAPP_CACHE_BUSTER", "")).strip()
+    if explicit:
+        return explicit
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        sha = (out.stdout or "").strip()
+        if sha and out.returncode == 0:
+            return sha
+    except Exception:
+        pass
+    # Fallback: epoch seconds — гарантирует свежесть, но меняется на каждом рестарте.
+    return str(int(time.time()))
+
+
+WEBAPP_CACHE_BUSTER = _resolve_webapp_cache_buster()
+logging.getLogger(__name__).info("WebApp cache buster: %s", WEBAPP_CACHE_BUSTER)
 from handlers.rp import rp_router, RP_ACTIONS
 from database import (
     init_db, update_rp_stat, get_user_stats, get_chapters, get_chapter_link, 
@@ -50,6 +87,7 @@ from database import (
     add_referral, get_referral_stats, get_user_referred_by,
     get_setting, set_setting, get_custom_name,
     upsert_user_profile, get_user_profile_by_username,
+    write_admin_audit_log,
 )
 
 COOLDOWN_TIME = 30 
@@ -60,6 +98,16 @@ dp = Dispatcher()
 
 # Глобальная aiohttp сессия (открывается один раз при старте)
 _http_session: aiohttp.ClientSession | None = None
+READER_CACHE_TTL_SECONDS = 30
+CHAPTER_CONTENT_CACHE_TTL_SECONDS = 300
+_reader_data_cache: dict = {
+    "payload": None,
+    "etag": "",
+    "built_at": 0.0,
+}
+_reader_cache_lock = asyncio.Lock()
+_chapter_content_cache: dict = {}
+_chapter_content_cache_lock = asyncio.Lock()
 
 async def get_http_session() -> aiohttp.ClientSession:
     """Возвращает единственную aiohttp-сессию, создаёт лениво."""
@@ -67,6 +115,16 @@ async def get_http_session() -> aiohttp.ClientSession:
     if _http_session is None or _http_session.closed:
         _http_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
     return _http_session
+
+def build_webapp_url(page_name: str) -> str:
+    base = f"{WEBAPP_URL.rstrip('/')}/webapp/{str(page_name).lstrip('/')}"
+    query_items: list[tuple[str, str]] = []
+    if API_HOST:
+        query_items.append(("api", str(API_HOST)))
+    if WEBAPP_CACHE_BUSTER:
+        query_items.append(("rev", WEBAPP_CACHE_BUSTER))
+    query = urlencode(query_items)
+    return f"{base}?{query}" if query else base
 
 # --- Хелперы ---
 def fmt_name(uid, name):
@@ -353,56 +411,85 @@ async def upload_to_telegraph(title, html_content):
     # Рекурсивный парсер HTML в Telegraph Nodes
     def html_to_nodes(html_text):
         from html.parser import HTMLParser
-        
+        allowed_tags = {
+            "a", "aside", "b", "blockquote", "br", "code", "em", "figcaption", "figure",
+            "h3", "h4", "hr", "i", "img", "li", "ol", "p", "pre", "s", "strong", "u", "ul",
+        }
+        drop_content_tags = {"script", "style", "iframe", "object", "embed"}
+
         class TelegraParser(HTMLParser):
             def __init__(self):
                 super().__init__()
                 self.nodes = []
                 self.stack = []
-            
+                self.drop_depth = 0
+
+            def _nearest_parent(self):
+                for item in reversed(self.stack):
+                    if isinstance(item, dict):
+                        return item
+                return None
+
             def handle_starttag(self, tag, attrs):
+                tag = str(tag or "").lower()
+                if tag in drop_content_tags:
+                    self.drop_depth += 1
+                    self.stack.append(None)
+                    return
+                if tag not in allowed_tags:
+                    self.stack.append(None)
+                    return
+
                 node = {"tag": tag, "children": []}
-                # Обработка атрибутов (href для a, src для img)
                 attr_dict = {k: v for k, v in attrs}
                 if tag == "a" and "href" in attr_dict:
-                    node["attrs"] = {"href": attr_dict["href"]}
+                    href = _normalize_external_url(attr_dict["href"], max_len=2048)
+                    if href:
+                        node["attrs"] = {"href": href}
                 elif tag == "img" and "src" in attr_dict:
-                    node["attrs"] = {"src": attr_dict["src"]}
-                
-                # Добавляем в дерево
-                if self.stack:
-                    self.stack[-1]["children"].append(node)
+                    src = _normalize_external_url(attr_dict["src"], max_len=2048)
+                    if src:
+                        node["attrs"] = {"src": src}
+
+                parent = self._nearest_parent()
+                if parent is not None:
+                    parent["children"].append(node)
                 else:
                     self.nodes.append(node)
-                
-                # Самозакрывающиеся теги не пушим в стек
-                if tag not in ["br", "img", "hr"]:
+
+                if tag not in {"br", "img", "hr"}:
                     self.stack.append(node)
-            
+                else:
+                    self.stack.append(None)
+
             def handle_endtag(self, tag):
-                if tag in ["br", "img", "hr"]: return
-                if self.stack and self.stack[-1]["tag"] == tag:
-                    self.stack.pop()
-            
-            def handle_data(self, data):
-                if not data.strip() and not self.stack: return
+                tag = str(tag or "").lower()
                 if self.stack:
-                    self.stack[-1]["children"].append(data)
+                    self.stack.pop()
+                if tag in drop_content_tags and self.drop_depth > 0:
+                    self.drop_depth -= 1
+
+            def handle_data(self, data):
+                if self.drop_depth > 0:
+                    return
+                if not data.strip() and not self.stack:
+                    return
+                parent = self._nearest_parent()
+                if parent is not None:
+                    parent["children"].append(data)
                 else:
                     self.nodes.append(data)
-        
+
         parser = TelegraParser()
         parser.feed(html_text)
-        
-        # Telegraph API не принимает инлайновые элементы (a, b, i, s и т.д.) или "голые" строки
-        # в корне массива content. Все они должны быть обернуты в блочные элементы (обычно <p>).
-        BLOCK_TAGS = ["p", "h3", "h4", "ol", "ul", "blockquote", "aside", "figure", "img", "video", "iframe", "pre", "hr"]
+
+        block_tags = {"p", "h3", "h4", "ol", "ul", "blockquote", "aside", "figure", "img", "pre", "hr"}
         wrapped_nodes = []
         for n in parser.nodes:
             if isinstance(n, str):
                 if n.strip():
                     wrapped_nodes.append({"tag": "p", "children": [n]})
-            elif isinstance(n, dict) and n.get("tag") not in BLOCK_TAGS:
+            elif isinstance(n, dict) and n.get("tag") not in block_tags:
                 wrapped_nodes.append({"tag": "p", "children": [n]})
             else:
                 wrapped_nodes.append(n)
@@ -646,7 +733,7 @@ def get_main_menu(is_group: bool = False):
 @dp.callback_query(F.data == "section_read")
 async def process_section_read(callback: types.CallbackQuery):
     # Правильный URL читалки
-    reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html" + (f"?api={API_HOST}" if API_HOST else "")
+    reader_url = build_webapp_url("reader.html")
     
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📗 Читать мангу", callback_data="read_langs"))
@@ -692,7 +779,7 @@ async def process_section_ai(callback: types.CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
+    alya_chat_url = build_webapp_url("index.html")
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     await safe_edit_or_reply(callback, "🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -860,7 +947,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
         builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-        alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
+        alya_chat_url = build_webapp_url("index.html")
         builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
         builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
         return await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -910,7 +997,7 @@ async def _redirect_to_dm(message: types.Message, section: str, label: str):
 @dp.message(F.text == "📖 Читать", StateFilter("*"))
 async def handle_reply_read(message: types.Message, state: FSMContext):
     await state.clear()
-    reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html" + (f"?api={API_HOST}" if API_HOST else "")
+    reader_url = build_webapp_url("reader.html")
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="📗 Читать мангу", callback_data="read_langs"))
     builder.row(types.InlineKeyboardButton(text="📘 Читать ранобэ", callback_data="read_ranobe_langs"))
@@ -937,7 +1024,7 @@ async def handle_reply_ai(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="🌸 Чат с Алей", callback_data="ai_char_alya"))
     builder.row(types.InlineKeyboardButton(text="🎧 Чат с Масачикой", callback_data="ai_char_masachika"))
-    alya_chat_url = f"{WEBAPP_URL.rstrip('/')}/webapp/index.html" + (f"?api={API_HOST}" if API_HOST else "")
+    alya_chat_url = build_webapp_url("index.html")
     builder.row(types.InlineKeyboardButton(text="🌐 Веб-чат с Алей", web_app=WebAppInfo(url=alya_chat_url)))
     builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
     await message.answer("🤖 <b>ИИ чаты:</b>\nВыберите персонажа:", parse_mode="HTML", reply_markup=builder.as_markup())
@@ -1111,6 +1198,7 @@ async def process_rename_name(message: types.Message, state: FSMContext):
     try:
         from database import set_custom_name
         await set_custom_name(obj_id, new_name)
+        invalidate_reader_cache("custom_name_changed")
         await state.clear()
         safe_new_name = escape_html_text(new_name)
         
@@ -1122,7 +1210,7 @@ async def process_rename_name(message: types.Message, state: FSMContext):
         # Синхронизация JSON
         import aiosqlite
         import json
-        result = await build_reader_data()
+        result, _, _ = await get_cached_reader_data(force_refresh=True)
         
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -3726,10 +3814,543 @@ async def sync_reader_snapshot(commit_message: str) -> None:
         logging.error(f"Reader sync error: {e}")
 
 
-def _clean_urls(url_text: str) -> list:
-    # Ищем все ссылки
-    links = re.findall(r'(https?://[^\s<"\'>]+)', url_text)
-    return links
+def invalidate_reader_cache(reason: str = "") -> None:
+    _reader_data_cache["payload"] = None
+    _reader_data_cache["etag"] = ""
+    _reader_data_cache["built_at"] = 0.0
+    invalidate_chapter_content_cache(reason)
+    if reason:
+        logging.info("Reader cache invalidated: %s", reason)
+
+
+def _compute_reader_etag(payload: dict) -> str:
+    normalized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"\"{digest}\""
+
+
+def _normalize_etag(tag: str) -> str:
+    value = (tag or "").strip()
+    if value.startswith("W/"):
+        value = value[2:]
+    return value
+
+
+def _if_none_match_matches(if_none_match_header: str, etag: str) -> bool:
+    if not if_none_match_header:
+        return False
+    etag_norm = _normalize_etag(etag)
+    for raw_tag in if_none_match_header.split(","):
+        tag = raw_tag.strip()
+        if not tag:
+            continue
+        if tag == "*":
+            return True
+        if _normalize_etag(tag) == etag_norm:
+            return True
+    return False
+
+
+async def get_cached_reader_data(force_refresh: bool = False) -> tuple[dict, str, bool]:
+    now = time.time()
+    cached_payload = _reader_data_cache["payload"]
+    cache_age = now - float(_reader_data_cache["built_at"] or 0.0)
+    if not force_refresh and cached_payload is not None and cache_age < READER_CACHE_TTL_SECONDS:
+        return cached_payload, str(_reader_data_cache["etag"]), True
+
+    async with _reader_cache_lock:
+        now = time.time()
+        cached_payload = _reader_data_cache["payload"]
+        cache_age = now - float(_reader_data_cache["built_at"] or 0.0)
+        if not force_refresh and cached_payload is not None and cache_age < READER_CACHE_TTL_SECONDS:
+            return cached_payload, str(_reader_data_cache["etag"]), True
+
+        fresh_payload = await build_reader_data()
+        fresh_etag = _compute_reader_etag(fresh_payload)
+        _reader_data_cache["payload"] = fresh_payload
+        _reader_data_cache["etag"] = fresh_etag
+        _reader_data_cache["built_at"] = time.time()
+        return fresh_payload, fresh_etag, False
+
+
+def _render_inline_chapter_html(text: str) -> str:
+    parts = []
+    for block in re.split(r"\n\s*\n", str(text or "").strip()):
+        line = block.strip()
+        if not line:
+            continue
+        escaped = html.escape(line, quote=False).replace("\n", "<br>")
+        parts.append(f"<p>{escaped}</p>")
+    return "".join(parts)
+
+
+def _render_telegraph_nodes_server(nodes: list) -> str:
+    if not isinstance(nodes, list):
+        return ""
+
+    allowed_tags = {
+        "p", "br", "strong", "em", "b", "i", "u", "s", "blockquote",
+        "code", "pre", "a", "h3", "h4", "figure", "figcaption", "img",
+        "ul", "ol", "li", "hr"
+    }
+    void_tags = {"br", "img", "hr"}
+    attr_allowlist = {
+        "a": {"href"},
+        "img": {"src", "alt"},
+    }
+
+    def render(node: object) -> str:
+        if isinstance(node, str):
+            return html.escape(node, quote=False)
+        if not isinstance(node, dict):
+            return ""
+
+        tag = str(node.get("tag") or "").lower().strip()
+        if not tag:
+            return ""
+        if tag not in allowed_tags:
+            return "".join(render(child) for child in (node.get("children") or []))
+
+        attrs = []
+        for key, value in (node.get("attrs") or {}).items():
+            attr_name = str(key or "").lower().strip()
+            if attr_name not in attr_allowlist.get(tag, set()):
+                continue
+            attr_value = str(value or "").strip()
+            if tag == "img" and attr_name == "src" and attr_value.startswith("/"):
+                attr_value = urljoin("https://telegra.ph", attr_value)
+            if tag == "a" and attr_name == "href":
+                normalized = _normalize_external_url(attr_value, max_len=2048)
+                if not normalized:
+                    continue
+                attr_value = normalized
+            if not attr_value:
+                continue
+            attrs.append(f'{attr_name}="{html.escape(attr_value, quote=True)}"')
+
+        attrs_text = f" {' '.join(attrs)}" if attrs else ""
+        children_html = "".join(render(child) for child in (node.get("children") or []))
+        if tag == "img":
+            if 'src="' not in attrs_text:
+                return ""
+            attrs_text += ' loading="lazy"'
+        if tag in void_tags:
+            return f"<{tag}{attrs_text}>"
+        return f"<{tag}{attrs_text}>{children_html}</{tag}>"
+
+    return "".join(render(item) for item in nodes)
+
+
+class _SafeHtmlFragmentParser(HTMLParser):
+    _ALLOWED_TAGS = {
+        "article", "section", "div", "p", "br", "strong", "em", "b", "i",
+        "u", "s", "blockquote", "code", "pre", "a", "h1", "h2", "h3", "h4",
+        "h5", "h6", "figure", "figcaption", "img", "ul", "ol", "li", "hr",
+        "span"
+    }
+    _VOID_TAGS = {"br", "img", "hr"}
+    _ATTR_ALLOWLIST = {
+        "a": {"href"},
+        "img": {"src", "alt"},
+    }
+
+    def __init__(self, base_url: str = "") -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.result: list[str] = []
+        self._tag_stack: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        name = str(tag or "").lower()
+        if name in {"script", "style", "noscript", "iframe"}:
+            self._skip_depth += 1
+            self._tag_stack.append("__skip__")
+            return
+        if self._skip_depth:
+            self._tag_stack.append("__skip__")
+            return
+        if name not in self._ALLOWED_TAGS:
+            self._tag_stack.append("__drop__")
+            return
+
+        clean_attrs = []
+        allowed_attrs = self._ATTR_ALLOWLIST.get(name, set())
+        for key, value in attrs:
+            attr_name = str(key or "").lower()
+            if attr_name not in allowed_attrs:
+                continue
+            raw_value = str(value or "").strip()
+            if name == "a" and attr_name == "href":
+                normalized = _normalize_external_url(raw_value, max_len=2048)
+                if not normalized:
+                    continue
+                raw_value = normalized
+            elif name == "img" and attr_name == "src":
+                raw_value = urljoin(self.base_url or "", raw_value)
+                normalized = _normalize_external_url(raw_value, max_len=2048)
+                if not normalized:
+                    continue
+                raw_value = normalized
+            if not raw_value:
+                continue
+            clean_attrs.append(f'{attr_name}="{html.escape(raw_value, quote=True)}"')
+
+        attrs_text = f" {' '.join(clean_attrs)}" if clean_attrs else ""
+        if name == "img" and 'src="' not in attrs_text:
+            self._tag_stack.append("__drop__")
+            return
+        if name == "img":
+            attrs_text += ' loading="lazy"'
+        self.result.append(f"<{name}{attrs_text}>")
+        self._tag_stack.append(name)
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self._tag_stack:
+            return
+        marker = self._tag_stack.pop()
+        if marker == "__skip__":
+            if self._skip_depth:
+                self._skip_depth -= 1
+            return
+        if marker == "__drop__" or marker in self._VOID_TAGS:
+            return
+        self.result.append(f"</{marker}>")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        text = str(data or "")
+        if not text:
+            return
+        self.result.append(html.escape(text, quote=False))
+
+    def handle_entityref(self, name: str) -> None:
+        if self._skip_depth:
+            return
+        self.result.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        if self._skip_depth:
+            return
+        self.result.append(f"&#{name};")
+
+
+def _sanitize_html_fragment(fragment: str, base_url: str = "") -> str:
+    parser = _SafeHtmlFragmentParser(base_url=base_url)
+    parser.feed(str(fragment or ""))
+    parser.close()
+    cleaned = "".join(parser.result)
+    cleaned = re.sub(r"(?:\s*<br>\s*){3,}", "<br><br>", cleaned)
+    return cleaned.strip()
+
+
+def _extract_teletype_article_fragment(page_html: str) -> str:
+    if not page_html:
+        return ""
+    match = re.search(
+        r'<article[^>]*itemprop=["\']articleBody["\'][^>]*>(.*?)</article>',
+        page_html,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        match = re.search(r"<article\b[^>]*>(.*?)</article>", page_html, flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    fragment = match.group(1)
+    fragment = re.sub(r"<!--.*?-->", "", fragment, flags=re.DOTALL)
+    fragment = re.sub(r"<a[^>]*name=[\"'][^\"']+[\"'][^>]*>\s*</a>", "", fragment, flags=re.IGNORECASE)
+    return fragment.strip()
+
+
+def _extract_img_attrs_from_tag(img_tag: str, source_url: str = "") -> tuple[str, str]:
+    if not img_tag:
+        return "", ""
+    src_match = re.search(r'\bsrc\s*=\s*(["\'])(.*?)\1', img_tag, flags=re.IGNORECASE | re.DOTALL)
+    if not src_match:
+        return "", ""
+    raw_src = html.unescape(str(src_match.group(2) or "").strip())
+    normalized_src = _normalize_external_url(urljoin(source_url or "", raw_src), max_len=2048)
+    if not normalized_src:
+        return "", ""
+
+    alt_match = re.search(r'\balt\s*=\s*(["\'])(.*?)\1', img_tag, flags=re.IGNORECASE | re.DOTALL)
+    alt_text = html.unescape(str(alt_match.group(2) or "").strip()) if alt_match else ""
+    return normalized_src, alt_text
+
+
+def _normalize_teletype_article_fragment(fragment: str, source_url: str = "") -> str:
+    if not fragment:
+        return ""
+
+    def replace_figure(match: re.Match[str]) -> str:
+        figure_html = match.group(0)
+        noscript_img = re.search(r"<noscript\b[^>]*>\s*(<img\b.*?>)\s*</noscript>", figure_html, flags=re.IGNORECASE | re.DOTALL)
+        if not noscript_img:
+            return figure_html
+
+        src, alt = _extract_img_attrs_from_tag(noscript_img.group(1), source_url=source_url)
+        if not src:
+            return figure_html
+
+        alt_attr = f' alt="{html.escape(alt, quote=True)}"' if alt else ""
+        caption_match = re.search(r"<figcaption\b[^>]*>(.*?)</figcaption>", figure_html, flags=re.IGNORECASE | re.DOTALL)
+        caption_html = caption_match.group(0) if caption_match else ""
+        return f'<figure><img src="{html.escape(src, quote=True)}"{alt_attr} loading="lazy">{caption_html}</figure>'
+
+    normalized = re.sub(r"<figure\b.*?</figure>", replace_figure, fragment, flags=re.IGNORECASE | re.DOTALL)
+
+    def replace_noscript_img(match: re.Match[str]) -> str:
+        src, alt = _extract_img_attrs_from_tag(match.group(1), source_url=source_url)
+        if not src:
+            return ""
+        alt_attr = f' alt="{html.escape(alt, quote=True)}"' if alt else ""
+        return f'<img src="{html.escape(src, quote=True)}"{alt_attr} loading="lazy">'
+
+    normalized = re.sub(
+        r"<noscript\b[^>]*>\s*(<img\b.*?>)\s*</noscript>",
+        replace_noscript_img,
+        normalized,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    return normalized.strip()
+
+
+def _html_fragment_has_visible_content(fragment: str) -> bool:
+    if not fragment:
+        return False
+    if re.search(r"<img\b", fragment, flags=re.IGNORECASE):
+        return True
+    text_only = html.unescape(re.sub(r"<[^>]+>", " ", fragment))
+    text_only = re.sub(r"\s+", " ", text_only).strip()
+    return bool(text_only)
+
+
+def _analyze_html_fragment(fragment: str) -> dict[str, int]:
+    raw_fragment = str(fragment or "")
+    text_only = html.unescape(re.sub(r"<[^>]+>", " ", raw_fragment))
+    text_only = re.sub(r"\s+", " ", text_only).strip()
+    return {
+        "text_len": len(text_only),
+        "anchor_count": len(re.findall(r"<a\b", raw_fragment, flags=re.IGNORECASE)),
+        "image_count": len(re.findall(r"<img\b", raw_fragment, flags=re.IGNORECASE)),
+        "block_count": len(
+            re.findall(r"<(?:p|li|blockquote|figure|figcaption|h[1-6]|pre)\b", raw_fragment, flags=re.IGNORECASE)
+        ),
+    }
+
+
+def _is_low_value_html_fragment(fragment: str) -> bool:
+    stats = _analyze_html_fragment(fragment)
+    if stats["image_count"] > 0:
+        return False
+    if stats["text_len"] >= 180:
+        return False
+    if stats["block_count"] >= 3 and stats["text_len"] >= 90:
+        return False
+    if stats["anchor_count"] > 0 and stats["text_len"] <= 120:
+        return True
+    return stats["text_len"] < 60 and stats["block_count"] <= 1
+
+
+def _score_html_fragment(fragment: str) -> tuple[int, int, int, int]:
+    stats = _analyze_html_fragment(fragment)
+    return (
+        1 if stats["image_count"] > 0 else 0,
+        min(stats["block_count"], 12),
+        min(stats["text_len"], 4000),
+        -min(stats["anchor_count"], 32),
+    )
+
+
+def _build_chapter_content_cache_key(series_id: str, volume: str, chapter: str) -> str:
+    return f"{str(series_id)}::{str(volume)}::{str(chapter)}"
+
+
+def _extract_chapter_urls(chapter_data: dict) -> list[str]:
+    urls: list[str] = []
+    if isinstance(chapter_data.get("urls"), list):
+        for item in chapter_data["urls"]:
+            normalized = _normalize_external_url(item, max_len=2048)
+            if normalized and normalized not in urls:
+                urls.append(normalized)
+    fallback = _normalize_external_url(chapter_data.get("url"), max_len=2048)
+    if fallback and fallback not in urls:
+        urls.append(fallback)
+    return urls
+
+
+async def _resolve_reader_chapter_entry(series_id: str, volume: str, chapter: str) -> tuple[dict | None, dict | None, dict | None]:
+    payload, _, _ = await get_cached_reader_data(force_refresh=False)
+    for series in payload.get("series", []):
+        if str(series.get("id")) != str(series_id):
+            continue
+        for vol in series.get("volumes", []):
+            if str(vol.get("volume")) != str(volume):
+                continue
+            for chapter_data in vol.get("chapters", []):
+                if str(chapter_data.get("chapter")) == str(chapter):
+                    return payload, series, chapter_data
+            return payload, series, None
+        return payload, series, None
+    return payload, None, None
+
+
+async def _fetch_telegra_ph_html(source_url: str) -> str:
+    match = re.search(r"telegra\.ph/(.+)$", str(source_url or ""), flags=re.IGNORECASE)
+    if not match:
+        return ""
+    api_url = f"https://api.telegra.ph/getPage/{match.group(1)}?return_content=true"
+    session = await get_http_session()
+    async with session.get(api_url, headers={"Accept": "application/json"}) as resp:
+        if resp.status != 200:
+            return ""
+        data = await resp.json(content_type=None)
+    if not data or not data.get("ok"):
+        return ""
+    return _render_telegraph_nodes_server(data.get("result", {}).get("content") or [])
+
+
+async def _fetch_teletype_html(source_url: str) -> str:
+    session = await get_http_session()
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "ru,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    async with session.get(source_url, headers=headers) as resp:
+        if resp.status != 200:
+            return ""
+        page_html = await resp.text()
+    article_fragment = _extract_teletype_article_fragment(page_html)
+    if not article_fragment:
+        return ""
+    normalized_fragment = _normalize_teletype_article_fragment(article_fragment, source_url=source_url)
+    if not normalized_fragment:
+        return ""
+    sanitized_fragment = _sanitize_html_fragment(normalized_fragment, base_url=source_url)
+    if not _html_fragment_has_visible_content(sanitized_fragment):
+        return ""
+    return sanitized_fragment
+
+
+async def _build_chapter_content_payload(series_id: str, volume: str, chapter: str) -> tuple[dict | None, int]:
+    _, series, chapter_data = await _resolve_reader_chapter_entry(series_id, volume, chapter)
+    if not series:
+        return None, 404
+    if not chapter_data:
+        return None, 404
+
+    chapter_text = str(chapter_data.get("text") or "").strip()
+    source_urls = _extract_chapter_urls(chapter_data)
+    fallback_url = source_urls[0] if source_urls else None
+    chapter_name = str(chapter_data.get("custom_name") or f"Глава {chapter}")
+
+    if chapter_text:
+        return {
+            "ok": True,
+            "source_type": "inline",
+            "html": _render_inline_chapter_html(chapter_text),
+            "fallback_url": fallback_url,
+            "series_id": str(series_id),
+            "volume": str(volume),
+            "chapter": str(chapter),
+            "chapter_name": chapter_name,
+        }, 200
+
+    preferred_urls = sorted(
+        source_urls,
+        key=lambda value: (0 if "telegra.ph" in value else 1 if "teletype.in" in value else 2, source_urls.index(value)),
+    )
+
+    best_payload: dict | None = None
+    best_score: tuple[int, int, int, int] | None = None
+
+    for url in preferred_urls:
+        try:
+            html_fragment = ""
+            source_type = "fallback"
+            if "telegra.ph" in url:
+                html_fragment = await _fetch_telegra_ph_html(url)
+                source_type = "telegraph"
+            elif "teletype.in" in url:
+                html_fragment = await _fetch_teletype_html(url)
+                source_type = "teletype"
+
+            if html_fragment and _html_fragment_has_visible_content(html_fragment):
+                candidate_payload = {
+                    "ok": True,
+                    "source_type": source_type,
+                    "html": html_fragment,
+                    "fallback_url": url,
+                    "series_id": str(series_id),
+                    "volume": str(volume),
+                    "chapter": str(chapter),
+                    "chapter_name": chapter_name,
+                }
+                candidate_score = _score_html_fragment(html_fragment)
+                if best_score is None or candidate_score > best_score:
+                    best_payload = candidate_payload
+                    best_score = candidate_score
+
+                if not _is_low_value_html_fragment(html_fragment):
+                    return candidate_payload, 200
+        except Exception as fetch_error:
+            logging.warning("Chapter content fetch failed for %s: %s", url, fetch_error)
+
+    if best_payload is not None:
+        return best_payload, 200
+
+    return {
+        "ok": False,
+        "source_type": "fallback",
+        "html": "",
+        "fallback_url": fallback_url,
+        "series_id": str(series_id),
+        "volume": str(volume),
+        "chapter": str(chapter),
+        "chapter_name": chapter_name,
+    }, 200
+
+
+def invalidate_chapter_content_cache(reason: str = "") -> None:
+    _chapter_content_cache.clear()
+    if reason:
+        logging.info("Chapter content cache invalidated: %s", reason)
+
+
+async def get_cached_chapter_content(series_id: str, volume: str, chapter: str, force_refresh: bool = False) -> tuple[dict | None, bool, int]:
+    cache_key = _build_chapter_content_cache_key(series_id, volume, chapter)
+    now = time.time()
+    cached_entry = _chapter_content_cache.get(cache_key)
+    if (
+        not force_refresh
+        and isinstance(cached_entry, dict)
+        and (now - float(cached_entry.get("built_at") or 0.0)) < CHAPTER_CONTENT_CACHE_TTL_SECONDS
+    ):
+        return cached_entry.get("payload"), True, int(cached_entry.get("status") or 200)
+
+    async with _chapter_content_cache_lock:
+        now = time.time()
+        cached_entry = _chapter_content_cache.get(cache_key)
+        if (
+            not force_refresh
+            and isinstance(cached_entry, dict)
+            and (now - float(cached_entry.get("built_at") or 0.0)) < CHAPTER_CONTENT_CACHE_TTL_SECONDS
+        ):
+            return cached_entry.get("payload"), True, int(cached_entry.get("status") or 200)
+
+        payload, status_code = await _build_chapter_content_payload(series_id, volume, chapter)
+        if payload is not None:
+            _chapter_content_cache[cache_key] = {
+                "payload": payload,
+                "status": status_code,
+                "built_at": time.time(),
+            }
+        else:
+            _chapter_content_cache.pop(cache_key, None)
+        return payload, False, status_code
+
 
 @dp.message(Command("toggle_sync"))
 async def cmd_toggle_sync(message: types.Message):
@@ -3775,7 +4396,7 @@ async def cmd_sync_webapp(message: types.Message):
     try:
         # build_reader_data() сам читает custom_names из БД — источник истины один,
         # никакие кастомные имена не теряются даже при добавлении новых глав
-        result = await build_reader_data()
+        result, _, _ = await get_cached_reader_data(force_refresh=True)
         
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
@@ -4212,7 +4833,8 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
 
     # СИНХРОНИЗАЦИЯ: Обновляем JSON и пушим в GitHub
     try:
-        result = await build_reader_data()
+        invalidate_reader_cache("chapter_uploaded_via_bot")
+        result, _, _ = await get_cached_reader_data(force_refresh=True)
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result, f, ensure_ascii=False, indent=2)
@@ -4555,11 +5177,440 @@ class StatsMiddleware(BaseMiddleware):
 # БЛОК: API СЕРВЕР ДЛЯ ЧИТАЛКИ (WebApp Reader)
 # ==============================================================================
 
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
+CORS_BASE_HEADERS = {
     "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Expose-Headers": "ETag",
 }
+CORS_HEADERS = dict(CORS_BASE_HEADERS)
+_CORS_ALLOWED_ORIGIN_SUFFIXES = ("telegram.org",)
+API_MAX_BODY_BYTES = int(os.getenv("API_MAX_BODY_BYTES", "262144"))
+
+MAX_CHAPTER_KEY_LENGTH = 160
+MAX_COMMENT_TEXT_LENGTH = 500
+MAX_REPORT_REASON_LENGTH = 300
+MAX_COMMENT_REPORT_TEXT_LENGTH = 2000
+MAX_TYPO_SELECTED_TEXT_LENGTH = 600
+MAX_TYPO_CONTEXT_TEXT_LENGTH = 2600
+MAX_TYPO_COMMENT_LENGTH = 800
+MAX_SERIES_ID_LENGTH = 64
+MAX_CHAPTER_ID_LENGTH = 32
+MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH = 18000
+MAX_BULK_URLS_PER_REQUEST = 200
+MAX_RENAME_OBJECT_ID_LENGTH = 200
+MAX_RENAME_CACHE_SIZE = 5000
+MAX_AUDIT_PAYLOAD_LENGTH = 4000
+MAX_API_ERROR_TEXT = 250
+
+RATE_LIMIT_RULES = {
+    "comments_post": {"limit": 8, "window": 60},
+    "comments_update": {"limit": 20, "window": 60},
+    "comments_react": {"limit": 30, "window": 60},
+    "reactions_post": {"limit": 30, "window": 60},
+    "comments_report": {"limit": 6, "window": 300},
+    "typo_report": {"limit": 8, "window": 300},
+    "admin_rename_delete": {"limit": 30, "window": 60},
+    "admin_chapter_edit": {"limit": 30, "window": 60},
+    "admin_chapter_bulk": {"limit": 12, "window": 60},
+    "admin_chapter_add": {"limit": 30, "window": 60},
+    "admin_chapter_delete": {"limit": 20, "window": 60},
+    "admin_series_update": {"limit": 20, "window": 60},
+    "admin_sort": {"limit": 20, "window": 60},
+    "admin_rename_request": {"limit": 40, "window": 60},
+}
+_rate_limit_buckets: dict[str, list[float]] = {}
+_rate_limit_lock = asyncio.Lock()
+
+def _extract_origin(url_value: str) -> str:
+    try:
+        parsed = urlsplit(str(url_value or "").strip())
+    except Exception:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+
+def _load_cors_allowed_origins() -> set[str]:
+    origins: set[str] = set()
+    for raw in (WEBAPP_URL, API_HOST):
+        origin = _extract_origin(raw)
+        if origin:
+            origins.add(origin)
+    extra = os.getenv("WEBAPP_CORS_ALLOWLIST", "")
+    for item in extra.split(","):
+        origin = _extract_origin(item)
+        if origin:
+            origins.add(origin)
+    origins.update({
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    })
+    return origins
+
+CORS_ALLOWED_ORIGINS = _load_cors_allowed_origins()
+
+def _origin_allowed(origin: str) -> bool:
+    normalized = _extract_origin(origin)
+    if not normalized:
+        return False
+    if normalized in CORS_ALLOWED_ORIGINS:
+        return True
+    host = (urlsplit(normalized).hostname or "").lower()
+    for suffix in _CORS_ALLOWED_ORIGIN_SUFFIXES:
+        sfx = suffix.lower()
+        if host == sfx or host.endswith(f".{sfx}"):
+            return True
+    return False
+
+def _resolve_allowed_origin(request: aiohttp.web.Request) -> str:
+    origin = request.headers.get("Origin", "").strip()
+    if not origin:
+        return ""
+    return _extract_origin(origin) if _origin_allowed(origin) else ""
+
+def _build_cors_headers(request: aiohttp.web.Request) -> dict:
+    headers = dict(CORS_BASE_HEADERS)
+    headers["Vary"] = "Origin"
+    allowed_origin = _resolve_allowed_origin(request)
+    if allowed_origin:
+        headers["Access-Control-Allow-Origin"] = allowed_origin
+    return headers
+
+def _merge_vary_header(existing_value: str, token: str) -> str:
+    values = [v.strip() for v in str(existing_value or "").split(",") if v.strip()]
+    token_norm = token.strip()
+    if token_norm and token_norm not in values:
+        values.append(token_norm)
+    return ", ".join(values) if values else token_norm
+
+def _normalize_external_url(raw_url: str, max_len: int = 2048) -> str | None:
+    candidate = str(raw_url or "").strip()
+    if not candidate or len(candidate) > max_len:
+        return None
+    if any(ord(ch) < 32 for ch in candidate):
+        return None
+    try:
+        parsed = urlsplit(candidate)
+    except Exception:
+        return None
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        return None
+    if not parsed.netloc:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    normalized = urlunsplit((scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+    return normalized if len(normalized) <= max_len else None
+
+def _clean_urls(url_text: str) -> list:
+    links: list[str] = []
+    for raw in re.findall(r'(https?://[^\s<"\'>]+)', str(url_text or "")):
+        normalized = _normalize_external_url(raw)
+        if normalized and normalized not in links:
+            links.append(normalized)
+    return links
+
+def _safe_json_dumps(value: object, max_len: int = MAX_AUDIT_PAYLOAD_LENGTH) -> str:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        encoded = str(value)
+    return encoded[:max_len] if len(encoded) > max_len else encoded
+
+def _is_valid_series_id(series_id: str) -> bool:
+    sid = str(series_id or "").strip()
+    if not sid or len(sid) > MAX_SERIES_ID_LENGTH:
+        return False
+    if sid in {"akashic_records", "british_belle"}:
+        return True
+    if sid.startswith("manga_") or sid.startswith("ranobe_"):
+        return bool(re.fullmatch(r"[A-Za-z0-9_]{1,48}", sid.split("_", 1)[1] if "_" in sid else ""))
+    return False
+
+def _is_valid_chapter_token(chapter: object) -> bool:
+    token = str(chapter or "").strip()
+    if not token or len(token) > MAX_CHAPTER_ID_LENGTH:
+        return False
+    # Разрешаем любые печатные символы (включая кириллицу и пробелы),
+    # кроме управляющих и DEL (0x7F), а также HTML/JS-опасных (< > & " ' ` \).
+    # SQL не ломается, так как запросы параметризованы. Сам chapter используется
+    # как идентификатор строк в БД и в URL (client-side encoded).
+    return bool(re.fullmatch(r"[^\x00-\x1f\x7f<>&\"'`\\]+", token))
+
+def _rate_limit_identity(request: aiohttp.web.Request, user_id: str = "") -> str:
+    if user_id:
+        return f"user:{user_id}"
+    xff = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if xff:
+        return f"ip:{xff}"
+    if request.remote:
+        return f"ip:{request.remote}"
+    return "ip:unknown"
+
+async def _enforce_rate_limit(request: aiohttp.web.Request, scope: str, user_id: str = "") -> aiohttp.web.Response | None:
+    rule = RATE_LIMIT_RULES.get(scope)
+    if not rule:
+        return None
+    now = time.time()
+    window = int(rule["window"])
+    limit = int(rule["limit"])
+    key = f"{scope}:{_rate_limit_identity(request, user_id)}"
+    async with _rate_limit_lock:
+        events = [ts for ts in _rate_limit_buckets.get(key, []) if now - ts < window]
+        if len(events) >= limit:
+            retry_after = max(1, int(window - (now - events[0])))
+            headers = _build_cors_headers(request)
+            headers["Retry-After"] = str(retry_after)
+            return aiohttp.web.json_response(
+                {"error": "rate_limit_exceeded", "retry_after": retry_after},
+                status=429,
+                headers=headers,
+            )
+        events.append(now)
+        _rate_limit_buckets[key] = events
+    return None
+
+async def _audit_admin_action(
+    action: str,
+    actor_user_id: str,
+    target: str = "",
+    payload: object = None,
+    result: str = "ok",
+    error: str = "",
+) -> None:
+    try:
+        await write_admin_audit_log(
+            action=action,
+            actor_user_id=str(actor_user_id or ""),
+            target=str(target or ""),
+            payload_json=_safe_json_dumps(payload if payload is not None else {}),
+            result=str(result or "ok"),
+            error=str(error or "")[:MAX_API_ERROR_TEXT],
+        )
+    except Exception as audit_error:
+        logging.error(f"Admin audit log error: {audit_error}")
+
+WEBAPP_TELEMETRY_EVENTS = {
+    "client_runtime_error",
+    "client_unhandled_rejection",
+    "client_state_contract_violation",
+    "client_chapter_open_ms",
+    "series_selected",
+    "chapters_screen_opened",
+    "chapter_click",
+    "chapter_content_load_failed",
+    "cache_version_mismatch",
+}
+MAX_TELEMETRY_PAYLOAD_JSON_LENGTH = 16000
+MAX_TELEMETRY_METRIC_MS = 120000.0
+try:
+    SERVER_READER_TELEMETRY_SAMPLE_RATE = float(os.getenv("SERVER_READER_TELEMETRY_SAMPLE_RATE", "0.2"))
+except Exception:
+    SERVER_READER_TELEMETRY_SAMPLE_RATE = 0.2
+SERVER_READER_TELEMETRY_SAMPLE_RATE = max(0.0, min(1.0, SERVER_READER_TELEMETRY_SAMPLE_RATE))
+SERVER_READER_TELEMETRY_EVENT = "server_api_reader_ms"
+
+_STATIC_LONG_CACHE_EXTENSIONS = (
+    ".css", ".js", ".mjs", ".map",
+    ".woff", ".woff2", ".ttf", ".otf",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+)
+
+def _webapp_cache_control_for_request(request: aiohttp.web.Request) -> str:
+    path = request.path.lower()
+    # HTML/app shell and frequently changing metadata must revalidate.
+    if path.endswith(("/reader.html", "/index.html", "/manifest.json", "/sw.js", "/chapters_data.json")):
+        return "no-cache"
+    # Versioned assets (?v=12) can be cached aggressively.
+    if "v" in request.rel_url.query:
+        return "public, max-age=31536000, immutable"
+    if path.endswith(_STATIC_LONG_CACHE_EXTENSIONS):
+        return "public, max-age=86400"
+    return "public, max-age=3600"
+
+def _response_is_compressible(response: aiohttp.web.StreamResponse) -> bool:
+    content_type = str(response.headers.get("Content-Type", "")).lower()
+    if not content_type:
+        return False
+    if content_type.startswith("image/") and "svg" not in content_type:
+        return False
+    return (
+        content_type.startswith("text/")
+        or "json" in content_type
+        or "javascript" in content_type
+        or "xml" in content_type
+        or "svg" in content_type
+    )
+
+async def apply_webapp_response_headers(request: aiohttp.web.Request, response: aiohttp.web.StreamResponse) -> None:
+    if request.path.startswith("/webapp/"):
+        response.headers.setdefault("Cache-Control", _webapp_cache_control_for_request(request))
+    if request.path.startswith(("/webapp/", "/api/")):
+        response.headers["Vary"] = _merge_vary_header(response.headers.get("Vary", ""), "Accept-Encoding")
+        if "Content-Encoding" not in response.headers and _response_is_compressible(response):
+            try:
+                response.enable_compression()
+            except Exception:
+                pass
+    if request.path.startswith("/api/"):
+        cors_headers = _build_cors_headers(request)
+        response.headers["Access-Control-Allow-Methods"] = CORS_BASE_HEADERS["Access-Control-Allow-Methods"]
+        response.headers["Access-Control-Allow-Headers"] = CORS_BASE_HEADERS["Access-Control-Allow-Headers"]
+        response.headers["Access-Control-Expose-Headers"] = CORS_BASE_HEADERS["Access-Control-Expose-Headers"]
+        if "Access-Control-Allow-Origin" in cors_headers:
+            response.headers["Access-Control-Allow-Origin"] = cors_headers["Access-Control-Allow-Origin"]
+        elif "Access-Control-Allow-Origin" in response.headers:
+            del response.headers["Access-Control-Allow-Origin"]
+        response.headers["Vary"] = _merge_vary_header(response.headers.get("Vary", ""), "Origin")
+
+@aiohttp.web.middleware
+async def api_security_middleware(request: aiohttp.web.Request, handler):
+    if request.path.startswith("/api/"):
+        origin = request.headers.get("Origin", "").strip()
+        if origin and not _resolve_allowed_origin(request):
+            return aiohttp.web.json_response(
+                {"error": "origin_not_allowed"},
+                status=403,
+                headers=_build_cors_headers(request),
+            )
+        content_length = request.content_length
+        if (
+            content_length is not None
+            and content_length > API_MAX_BODY_BYTES
+        ):
+            return aiohttp.web.json_response(
+                {"error": "payload_too_large"},
+                status=413,
+                headers=_build_cors_headers(request),
+            )
+    try:
+        return await handler(request)
+    except aiohttp.web.HTTPRequestEntityTooLarge:
+        return aiohttp.web.json_response(
+            {"error": "payload_too_large"},
+            status=413,
+            headers=_build_cors_headers(request),
+        )
+
+def _clip_telemetry_text(value: object, max_len: int) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return text[:max_len] if len(text) > max_len else text
+
+
+def _to_finite_float(value: object) -> float | None:
+    try:
+        number = float(value)
+    except Exception:
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def _sanitize_client_chapter_open_payload(payload: dict) -> dict | None:
+    duration = _to_finite_float(payload.get("duration_ms"))
+    if duration is None or duration < 0 or duration > MAX_TELEMETRY_METRIC_MS:
+        return None
+
+    chapter_idx = None
+    raw_idx = payload.get("chapter_idx")
+    if raw_idx is not None and raw_idx != "":
+        try:
+            parsed_idx = int(raw_idx)
+            if 0 <= parsed_idx <= 10000:
+                chapter_idx = parsed_idx
+        except Exception:
+            chapter_idx = None
+
+    return {
+        "duration_ms": round(duration, 2),
+        "series_id": _clip_telemetry_text(payload.get("series_id"), 64),
+        "volume": _clip_telemetry_text(payload.get("volume"), 32),
+        "chapter": _clip_telemetry_text(payload.get("chapter"), 32),
+        "chapter_idx": chapter_idx,
+        "source": _clip_telemetry_text(payload.get("source"), 64),
+        "used_prefetch": bool(payload.get("used_prefetch")),
+    }
+
+
+def _serialize_telemetry_payload(payload: dict) -> str:
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    if len(payload_json) > MAX_TELEMETRY_PAYLOAD_JSON_LENGTH:
+        payload_json = payload_json[:MAX_TELEMETRY_PAYLOAD_JSON_LENGTH]
+    return payload_json
+
+
+async def _insert_webapp_telemetry_event(
+    *,
+    event_type: str,
+    user_id: str = "",
+    source_module: str = "",
+    message: str = "",
+    stack: str = "",
+    page_url: str = "",
+    user_agent: str = "",
+    payload: dict | None = None,
+) -> None:
+    payload_json = _serialize_telemetry_payload(payload if payload is not None else {})
+    async with aiosqlite.connect("manga.db") as db:
+        await db.execute(
+            """
+            INSERT INTO webapp_telemetry
+            (event_type, user_id, source_module, message, stack, page_url, user_agent, payload_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _clip_telemetry_text(event_type, 64),
+                _clip_telemetry_text(user_id, 64),
+                _clip_telemetry_text(source_module, 256),
+                _clip_telemetry_text(message, 1200),
+                _clip_telemetry_text(stack, 4000),
+                _clip_telemetry_text(page_url, 2048),
+                _clip_telemetry_text(user_agent, 512),
+                payload_json,
+            ),
+        )
+        await db.commit()
+
+
+async def _record_server_reader_metric(
+    request: aiohttp.web.Request,
+    *,
+    duration_ms: float,
+    status_code: int,
+    cache_hit: bool,
+) -> None:
+    if SERVER_READER_TELEMETRY_SAMPLE_RATE <= 0:
+        return
+    if random.random() > SERVER_READER_TELEMETRY_SAMPLE_RATE:
+        return
+
+    try:
+        user = get_auth_user(request)
+        user_id = str(user.get("id", "")) if user else ""
+        payload = {
+            "duration_ms": round(max(0.0, duration_ms), 2),
+            "status": int(status_code),
+            "cache_hit": bool(cache_hit),
+            "path": _clip_telemetry_text(request.path, 128),
+            "method": _clip_telemetry_text(request.method, 16),
+        }
+        await _insert_webapp_telemetry_event(
+            event_type=SERVER_READER_TELEMETRY_EVENT,
+            user_id=user_id,
+            source_module="bot.py:handle_reader_data",
+            message=f"{payload['duration_ms']}ms status={payload['status']}",
+            page_url=_clip_telemetry_text(request.path_qs, 2048),
+            user_agent=request.headers.get("User-Agent", ""),
+            payload=payload,
+        )
+    except Exception as telemetry_error:
+        logging.warning(f"Server reader telemetry write failed: {telemetry_error}")
 
 def get_auth_user(request: aiohttp.web.Request) -> dict | None:
     """Извлекает и валидирует Telegram пользователя из заголовка Authorization."""
@@ -4631,28 +5682,134 @@ async def handle_ai_chat(request: aiohttp.web.Request) -> aiohttp.web.Response:
             {"error": str(e)}, status=500, headers=CORS_HEADERS
         )
 
+async def handle_telemetry_post(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Принимает клиентские telemetry-события WebApp (ошибки рантайма/промисов)."""
+    try:
+        user = get_auth_user(request)
+        data = await request.json()
+        if not isinstance(data, dict):
+            return aiohttp.web.json_response({"error": "invalid payload"}, status=400, headers=CORS_HEADERS)
+
+        event_type = _clip_telemetry_text(data.get("event_type"), 64)
+        if event_type not in WEBAPP_TELEMETRY_EVENTS:
+            return aiohttp.web.json_response({"error": "unsupported event_type"}, status=400, headers=CORS_HEADERS)
+
+        payload = data.get("payload", {})
+        if not isinstance(payload, dict):
+            payload = {"value": str(payload)}
+
+        user_id = str(user.get("id", "")) if user else _clip_telemetry_text(payload.get("user_id"), 64)
+        source_module = _clip_telemetry_text(payload.get("module") or payload.get("source"), 256)
+        message = _clip_telemetry_text(payload.get("message"), 1200)
+        stack = _clip_telemetry_text(payload.get("stack"), 4000)
+        page_url = _clip_telemetry_text(data.get("page_url") or payload.get("page_url"), 2048)
+        user_agent = _clip_telemetry_text(request.headers.get("User-Agent", ""), 512)
+
+        if event_type == "client_chapter_open_ms":
+            sanitized_payload = _sanitize_client_chapter_open_payload(payload)
+            if sanitized_payload is None:
+                return aiohttp.web.json_response({"error": "invalid duration_ms"}, status=400, headers=CORS_HEADERS)
+            payload = sanitized_payload
+            source_module = source_module or "reader.js"
+            message = f"{payload['duration_ms']}ms"
+            stack = ""
+
+        await _insert_webapp_telemetry_event(
+            event_type=event_type,
+            user_id=user_id,
+            source_module=source_module,
+            message=message,
+            stack=stack,
+            page_url=page_url,
+            user_agent=user_agent,
+            payload=payload,
+        )
+
+        return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+    except json.JSONDecodeError:
+        return aiohttp.web.json_response({"error": "invalid json"}, status=400, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Telemetry API Error: {e}")
+        return aiohttp.web.json_response({"error": "internal"}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_chapter_content(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    series_id = str(request.query.get("series_id", "")).strip()
+    volume = str(request.query.get("volume", "")).strip()
+    chapter = str(request.query.get("chapter", "")).strip()
+
+    if not _is_valid_series_id(series_id):
+        return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+    if not volume or len(volume) > 32 or not re.fullmatch(r"[A-Za-z0-9._-]+", volume):
+        return aiohttp.web.json_response({"error": "invalid volume"}, status=400, headers=CORS_HEADERS)
+    if not _is_valid_chapter_token(chapter):
+        return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
+
+    try:
+        payload, cache_hit, status_code = await get_cached_chapter_content(series_id, volume, chapter, force_refresh=False)
+        if payload is None:
+            return aiohttp.web.json_response({"error": "not found"}, status=status_code, headers=CORS_HEADERS)
+
+        headers = dict(CORS_HEADERS)
+        headers["Cache-Control"] = "no-cache"
+        payload_with_cache = dict(payload)
+        payload_with_cache["cache_status"] = "hit" if cache_hit else "miss"
+        return aiohttp.web.json_response(payload_with_cache, status=status_code, headers=headers)
+    except Exception as e:
+        logging.error("Chapter content API Error for %s/%s/%s: %s", series_id, volume, chapter, e)
+        return aiohttp.web.json_response({"error": "internal"}, status=500, headers=CORS_HEADERS)
+
 async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Возвращает данные для читалки. Единственный источник истины — build_reader_data(),
     который корректно применяет custom_names из БД ко всем элементам."""
+    started_at = time.perf_counter()
+    status_code = 500
+    cache_hit = False
     try:
-        result = await build_reader_data()
-        return aiohttp.web.json_response(result, headers=CORS_HEADERS)
+        result, etag, cache_hit = await get_cached_reader_data(force_refresh=False)
+        headers = dict(CORS_HEADERS)
+        headers.update({
+            "ETag": etag,
+            "Cache-Control": "no-cache",
+            "Vary": "If-None-Match",
+        })
+        if_none_match = request.headers.get("If-None-Match", "")
+        if _if_none_match_matches(if_none_match, etag):
+            status_code = 304
+            return aiohttp.web.Response(status=304, headers=headers)
+        status_code = 200
+        return aiohttp.web.json_response(result, headers=headers)
     except Exception as e:
         logging.error(f"Reader API Error: {e}")
+        status_code = 500
         return aiohttp.web.json_response({"error": str(e), "series": []}, status=500, headers=CORS_HEADERS)
+    finally:
+        duration_ms = (time.perf_counter() - started_at) * 1000.0
+        asyncio.create_task(
+            _record_server_reader_metric(
+                request,
+                duration_ms=duration_ms,
+                status_code=status_code,
+                cache_hit=cache_hit,
+            )
+        )
 
 
 async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Сброс кастомного имени элемента обратно в дефолт. Только для AdminMode."""
+    user_id = ""
     try:
         user = get_auth_user(request)
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
         user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_rename_delete", user_id=user_id)
+        if limited:
+            return limited
 
         data = await request.json()
         obj_id = data.get('obj_id', '').strip()
-        if not obj_id:
+        if not obj_id or len(obj_id) > MAX_RENAME_OBJECT_ID_LENGTH:
             return aiohttp.web.json_response({"error": "missing obj_id"}, status=400, headers=CORS_HEADERS)
         # Проверяем что запрашивающий — админ
         admins = await get_admins()
@@ -4665,17 +5822,32 @@ async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Resp
         async with aiosqlite.connect('manga.db') as db:
             await db.execute('DELETE FROM custom_names WHERE id = ?', (obj_id,))
             await db.commit()
+        invalidate_reader_cache("custom_name_deleted")
 
         # Обновляем JSON и синхронизируем с GitHub в фоне
-        result = await build_reader_data()
+        result, _, _ = await get_cached_reader_data(force_refresh=True)
         import json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         
         asyncio.create_task(run_git_sync("reset custom name via webapp"))
+        await _audit_admin_action(
+            action="rename_delete",
+            actor_user_id=user_id,
+            target=obj_id,
+            payload={"obj_id": obj_id},
+            result="ok",
+        )
 
         return aiohttp.web.json_response({"ok": True, "obj_id": obj_id}, headers=CORS_HEADERS)
     except Exception as e:
+        await _audit_admin_action(
+            action="rename_delete",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 
@@ -4697,11 +5869,15 @@ def _get_table_info(series_id: str, volume):
 
 async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """PUT: Обновить URL главы. Только для админов."""
+    user_id = ""
     try:
         user = get_auth_user(request)
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
         user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_chapter_edit", user_id=user_id)
+        if limited:
+            return limited
         admins = await get_admins()
         try:
             if int(user_id) not in admins:
@@ -4710,29 +5886,43 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
             return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
 
         data = await request.json()
-        series_id = data.get('series_id', '')
+        series_id = str(data.get('series_id', '')).strip()
         volume = data.get('volume')
-        chapter = data.get('chapter', '')
-        new_url = data.get('url', '').strip()
+        chapter = str(data.get('chapter', '')).strip()
+        new_url_raw = str(data.get('url', '')).strip()
 
-        if not series_id or not chapter or not new_url:
+        if not series_id or not chapter or not new_url_raw:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_chapter_token(chapter):
+            return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
+        if len(new_url_raw) > MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "payload too large"}, status=400, headers=CORS_HEADERS)
+        if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
+            return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
 
         info = _get_table_info(series_id, volume)
         if not info:
             return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
 
         # ИЗВЛЕКАЕМ ВСЕ ССЫЛКИ
-        links = _clean_urls(new_url)
+        links = _clean_urls(new_url_raw)
 
         # Конвертируем только если ВООБЩЕ нет ссылок и текст большой
-        if not links and len(new_url) > 30:
+        if not links and len(new_url_raw) > 30:
             title = f"Глава {chapter}"
             s_name = await get_custom_name(f"series_{series_id}") or series_id
             title = f"{s_name} — Глава {chapter}"
-            telegraph_url = await upload_to_telegraph(title, new_url)
+            telegraph_url = await upload_to_telegraph(title, new_url_raw)
             if telegraph_url:
-                new_url = telegraph_url
+                links = [telegraph_url]
+
+        if not links:
+            return aiohttp.web.json_response({"error": "invalid or unsupported URL"}, status=400, headers=CORS_HEADERS)
+        if len(links) > MAX_BULK_URLS_PER_REQUEST:
+            return aiohttp.web.json_response({"error": "too many urls"}, status=400, headers=CORS_HEADERS)
+        new_url = " ".join(links)
 
         table, _, _, _ = info
         
@@ -4758,27 +5948,46 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
                     (chapter, lang, new_url, next_order)
                 )
             await db.commit()
+        invalidate_reader_cache("chapter_url_edited")
 
         # Пересобираем JSON и синхронизируем
-        result = await build_reader_data()
+        result, _, _ = await get_cached_reader_data(force_refresh=True)
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result, f, ensure_ascii=False, indent=2)
         asyncio.create_task(run_git_sync("URL edited via webapp editor"))
+        await _audit_admin_action(
+            action="chapter_edit",
+            actor_user_id=user_id,
+            target=f"{series_id}:{chapter}",
+            payload={"series_id": series_id, "volume": volume, "chapter": chapter, "url_count": len(links)},
+            result="ok",
+        )
 
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         logging.error(f"Chapter Edit API Error: {e}")
+        await _audit_admin_action(
+            action="chapter_edit",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 
 async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """POST: Массовое добавление глав с URL. Только для админов."""
+    user_id = ""
     try:
         user = get_auth_user(request)
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
         user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_chapter_bulk", user_id=user_id)
+        if limited:
+            return limited
         admins = await get_admins()
         try:
             if int(user_id) not in admins:
@@ -4787,13 +5996,33 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
             return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
 
         data = await request.json()
-        series_id = data.get('series_id', '')
+        series_id = str(data.get('series_id', '')).strip()
         volume = data.get('volume')
         start_chapter = data.get('start_chapter', 1)
         urls = data.get('urls', [])
 
         if not series_id or not urls:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
+            return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
+        if not isinstance(urls, list):
+            return aiohttp.web.json_response({"error": "urls must be array"}, status=400, headers=CORS_HEADERS)
+        if len(urls) > MAX_BULK_URLS_PER_REQUEST:
+            return aiohttp.web.json_response({"error": "too many urls"}, status=400, headers=CORS_HEADERS)
+        try:
+            start_chapter_int = int(str(start_chapter))
+        except Exception:
+            return aiohttp.web.json_response({"error": "invalid start_chapter"}, status=400, headers=CORS_HEADERS)
+        if start_chapter_int < 0:
+            return aiohttp.web.json_response({"error": "invalid start_chapter"}, status=400, headers=CORS_HEADERS)
+        normalized_urls: list[str] = []
+        for idx, raw_url in enumerate(urls, start=1):
+            normalized = _normalize_external_url(str(raw_url or "").strip())
+            if not normalized:
+                return aiohttp.web.json_response({"error": f"invalid url at index {idx}"}, status=400, headers=CORS_HEADERS)
+            normalized_urls.append(normalized)
 
         info = _get_table_info(series_id, volume)
         if not info:
@@ -4812,9 +6041,8 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
                 row = await cursor.fetchone()
                 current_max = row[0] or 0
 
-            for i, url in enumerate(urls):
-                ch_num = str(start_chapter + i)
-                url = url.strip()
+            for i, url in enumerate(normalized_urls):
+                ch_num = str(start_chapter_int + i)
                 if not url:
                     continue
                 
@@ -4835,22 +6063,340 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
                     )
                 added += 1
             await db.commit()
+        invalidate_reader_cache("chapters_bulk_uploaded")
 
         # Пересобираем JSON и синхронизируем
-        result = await build_reader_data()
+        result, _, _ = await get_cached_reader_data(force_refresh=True)
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result, f, ensure_ascii=False, indent=2)
         asyncio.create_task(run_git_sync(f"bulk upload {added} chapters via webapp"))
+        await _audit_admin_action(
+            action="chapter_bulk_upload",
+            actor_user_id=user_id,
+            target=series_id,
+            payload={
+                "series_id": series_id,
+                "volume": volume,
+                "start_chapter": start_chapter_int,
+                "urls_count": len(normalized_urls),
+                "added": added,
+            },
+            result="ok",
+        )
 
         return aiohttp.web.json_response({"ok": True, "added": added}, headers=CORS_HEADERS)
     except Exception as e:
         logging.error(f"Bulk Upload API Error: {e}")
+        await _audit_admin_action(
+            action="chapter_bulk_upload",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """POST: Добавить одну главу. Только для админов."""
+    user_id = ""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_chapter_add", user_id=user_id)
+        if limited:
+            return limited
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = str(data.get('series_id', '')).strip()
+        volume = data.get('volume')
+        chapter = str(data.get('chapter', '')).strip()
+        name = str(data.get('name', '') or '').strip()
+        url_raw = str(data.get('url', '') or '').strip()
+
+        if not series_id or not chapter or not url_raw:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_chapter_token(chapter):
+            return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
+        if len(url_raw) > MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "payload too large"}, status=400, headers=CORS_HEADERS)
+        if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
+            return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
+
+        info = _get_table_info(series_id, volume)
+        if not info:
+            return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
+
+        links = _clean_urls(url_raw)
+        if not links:
+            return aiohttp.web.json_response({"error": "invalid or unsupported URL"}, status=400, headers=CORS_HEADERS)
+        if len(links) > MAX_BULK_URLS_PER_REQUEST:
+            return aiohttp.web.json_response({"error": "too many urls"}, status=400, headers=CORS_HEADERS)
+        new_url = " ".join(links)
+
+        table, _, _, _ = info
+
+        async with aiosqlite.connect('manga.db') as db:
+            # Reject if chapter already exists so callers know to use PUT /api/chapters.
+            if series_id in ('akashic_records', 'british_belle'):
+                async with db.execute(
+                    f"SELECT 1 FROM {table} WHERE volume=? AND chapter=?",
+                    (volume, chapter)
+                ) as cur:
+                    exists_row = await cur.fetchone()
+                if exists_row:
+                    return aiohttp.web.json_response({"error": "chapter already exists"}, status=409, headers=CORS_HEADERS)
+
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE volume=?", (volume,)) as cur:
+                    row = await cur.fetchone()
+                    next_order = (row[0] or 0) + 1
+                await db.execute(
+                    f'INSERT INTO {table} (volume, chapter, url, sort_order) VALUES (?, ?, ?, ?)',
+                    (volume, chapter, new_url, next_order)
+                )
+            else:
+                lang = series_id.split('_', 1)[1] if '_' in series_id else 'ru'
+                async with db.execute(
+                    f"SELECT 1 FROM {table} WHERE chapter_number=? AND lang=?",
+                    (chapter, lang)
+                ) as cur:
+                    exists_row = await cur.fetchone()
+                if exists_row:
+                    return aiohttp.web.json_response({"error": "chapter already exists"}, status=409, headers=CORS_HEADERS)
+
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=?", (lang,)) as cur:
+                    row = await cur.fetchone()
+                    next_order = (row[0] or 0) + 1
+                await db.execute(
+                    f'INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?)',
+                    (chapter, lang, new_url, next_order)
+                )
+
+            # Сохраняем кастомное имя главы, если указано.
+            if name:
+                vol_token = volume if series_id in ('akashic_records', 'british_belle') else 1
+                name_clean = name[:MAX_RENAME_OBJECT_ID_LENGTH]
+                await db.execute(
+                    'INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)',
+                    (f"chap_{series_id}_{vol_token}_{chapter}", name_clean)
+                )
+            await db.commit()
+        invalidate_reader_cache("chapter_added")
+
+        result_data, _, _ = await get_cached_reader_data(force_refresh=True)
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"add chapter {chapter} via webapp"))
+        await _audit_admin_action(
+            action="chapter_add",
+            actor_user_id=user_id,
+            target=f"{series_id}:{chapter}",
+            payload={"series_id": series_id, "volume": volume, "chapter": chapter, "url_count": len(links)},
+            result="ok",
+        )
+
+        return aiohttp.web.json_response({"ok": True, "chapter": chapter}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Chapter Add API Error: {e}")
+        await _audit_admin_action(
+            action="chapter_add",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """DELETE: Удалить главу. Только для админов."""
+    user_id = ""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_chapter_delete", user_id=user_id)
+        if limited:
+            return limited
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = str(data.get('series_id', '')).strip()
+        volume = data.get('volume')
+        chapter = str(data.get('chapter', '')).strip()
+
+        if not series_id or not chapter:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_chapter_token(chapter):
+            return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
+        if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
+            return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
+
+        info = _get_table_info(series_id, volume)
+        if not info:
+            return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
+
+        table, _, _, _ = info
+        deleted = 0
+
+        async with aiosqlite.connect('manga.db') as db:
+            if series_id in ('akashic_records', 'british_belle'):
+                cursor = await db.execute(
+                    f"DELETE FROM {table} WHERE volume=? AND chapter=?",
+                    (volume, chapter)
+                )
+                deleted = cursor.rowcount or 0
+                await cursor.close()
+                vol_token = volume
+            else:
+                lang = series_id.split('_', 1)[1] if '_' in series_id else 'ru'
+                cursor = await db.execute(
+                    f"DELETE FROM {table} WHERE chapter_number=? AND lang=?",
+                    (chapter, lang)
+                )
+                deleted = cursor.rowcount or 0
+                await cursor.close()
+                vol_token = 1
+
+            if deleted == 0:
+                await db.rollback()
+                return aiohttp.web.json_response({"error": "chapter not found"}, status=404, headers=CORS_HEADERS)
+
+            # Убираем связанное кастомное имя главы, если было.
+            await db.execute(
+                'DELETE FROM custom_names WHERE id = ?',
+                (f"chap_{series_id}_{vol_token}_{chapter}",)
+            )
+            await db.commit()
+        invalidate_reader_cache("chapter_deleted")
+
+        result_data, _, _ = await get_cached_reader_data(force_refresh=True)
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"delete chapter {chapter} via webapp"))
+        await _audit_admin_action(
+            action="chapter_delete",
+            actor_user_id=user_id,
+            target=f"{series_id}:{chapter}",
+            payload={"series_id": series_id, "volume": volume, "chapter": chapter},
+            result="ok",
+        )
+
+        return aiohttp.web.json_response({"ok": True, "deleted": deleted}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Chapter Delete API Error: {e}")
+        await _audit_admin_action(
+            action="chapter_delete",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+
+async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """PUT: Обновить мета-данные серии (пока — только обложка). Только для админов."""
+    user_id = ""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_series_update", user_id=user_id)
+        if limited:
+            return limited
+        admins = await get_admins()
+        try:
+            if int(user_id) not in admins:
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+        except (ValueError, TypeError):
+            return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+        data = await request.json()
+        series_id = str(data.get('series_id', '')).strip()
+        cover_url_raw = str(data.get('cover_url', '') or '').strip()
+
+        if not series_id:
+            return aiohttp.web.json_response({"error": "missing series_id"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+
+        cover_url_clean: str | None = None
+        if cover_url_raw:
+            cover_url_clean = _normalize_external_url(cover_url_raw)
+            if not cover_url_clean:
+                return aiohttp.web.json_response({"error": "invalid cover_url"}, status=400, headers=CORS_HEADERS)
+
+        cover_key = f"cover_{series_id}"
+        async with aiosqlite.connect('manga.db') as db:
+            if cover_url_clean is None:
+                await db.execute('DELETE FROM custom_names WHERE id = ?', (cover_key,))
+            else:
+                await db.execute(
+                    'INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)',
+                    (cover_key, cover_url_clean)
+                )
+            await db.commit()
+        invalidate_reader_cache("series_cover_updated")
+
+        result_data, _, _ = await get_cached_reader_data(force_refresh=True)
+        import json as _json
+        with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
+            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+        asyncio.create_task(run_git_sync(f"update cover for {series_id} via webapp"))
+        await _audit_admin_action(
+            action="series_update",
+            actor_user_id=user_id,
+            target=series_id,
+            payload={"series_id": series_id, "has_cover": bool(cover_url_clean)},
+            result="ok",
+        )
+
+        return aiohttp.web.json_response({"ok": True, "cover_url": cover_url_clean or ""}, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.error(f"Series Update API Error: {e}")
+        await _audit_admin_action(
+            action="series_update",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 
 async def handle_cors_preflight(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    return aiohttp.web.Response(status=200, headers=CORS_HEADERS)
+    origin = request.headers.get("Origin", "").strip()
+    if origin and not _resolve_allowed_origin(request):
+        return aiohttp.web.json_response(
+            {"error": "origin_not_allowed"},
+            status=403,
+            headers=_build_cors_headers(request),
+        )
+    headers = _build_cors_headers(request)
+    return aiohttp.web.Response(status=204, headers=headers)
 
 # --- Лайки ---
 
@@ -4917,7 +6463,8 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
                     c.id, c.user_id, c.user_name, c.text, c.created_at, c.parent_id,
                     COUNT(CASE WHEN r.type = 'like' THEN 1 END) as likes,
                     COUNT(CASE WHEN r.type = 'dislike' THEN 1 END) as dislikes,
-                    MAX(CASE WHEN r.user_id = ? THEN r.type ELSE NULL END) as user_reaction
+                    MAX(CASE WHEN r.user_id = ? THEN r.type ELSE NULL END) as user_reaction,
+                    c.updated_at
                 FROM chapter_comments c
                 LEFT JOIN comment_reactions r ON c.id = r.comment_id
                 WHERE c.chapter_key = ?
@@ -4937,7 +6484,8 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
                 "parent_id": r[5],
                 "likes": r[6],
                 "dislikes": r[7],
-                "user_reaction": r[8]
+                "user_reaction": r[8],
+                "updated_at": r[9]
             } for r in rows
         ]
         return aiohttp.web.json_response({"comments": comments}, headers=CORS_HEADERS)
@@ -4952,16 +6500,23 @@ async def handle_comment_react_post(request: aiohttp.web.Request) -> aiohttp.web
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
         user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "comments_react", user_id=user_id)
+        if limited:
+            return limited
 
         data = await request.json()
         comment_id = data.get('comment_id')
-        reaction_type = data.get('type') # 'like' or 'dislike'
+        reaction_type = str(data.get('type', '')).strip() # 'like' or 'dislike'
+        try:
+            comment_id_int = int(comment_id)
+        except Exception:
+            return aiohttp.web.json_response({"error": "invalid comment_id"}, status=400, headers=CORS_HEADERS)
         
-        if not comment_id or reaction_type not in ['like', 'dislike']:
+        if comment_id_int <= 0 or reaction_type not in ['like', 'dislike']:
             return aiohttp.web.json_response({"error": "invalid arguments"}, status=400, headers=CORS_HEADERS)
 
         from database import add_comment_reaction
-        await add_comment_reaction(int(comment_id), user_id, reaction_type)
+        await add_comment_reaction(comment_id_int, user_id, reaction_type)
         
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
@@ -4974,16 +6529,30 @@ async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
         user_id = str(user.get("id", ""))
-        user_name = user.get("first_name", "Аноним")
+        limited = await _enforce_rate_limit(request, "comments_post", user_id=user_id)
+        if limited:
+            return limited
+        user_name = str(user.get("first_name", "Аноним"))[:80]
 
         data = await request.json()
-        chapter_key = data.get('chapter_key', '')
-        text = data.get('text', '').strip()
+        chapter_key = str(data.get('chapter_key', '')).strip()
+        text = str(data.get('text', '')).strip()
         parent_id = data.get('parent_id', None)
         if not chapter_key or not text:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
-        if len(text) > 500:
+        if len(chapter_key) > MAX_CHAPTER_KEY_LENGTH:
+            return aiohttp.web.json_response({"error": "invalid chapter_key"}, status=400, headers=CORS_HEADERS)
+        if len(text) > MAX_COMMENT_TEXT_LENGTH:
             return aiohttp.web.json_response({"error": "too long"}, status=400, headers=CORS_HEADERS)
+        if parent_id not in (None, "", 0):
+            try:
+                parent_id = int(parent_id)
+                if parent_id <= 0:
+                    raise ValueError("invalid parent_id")
+            except Exception:
+                return aiohttp.web.json_response({"error": "invalid parent_id"}, status=400, headers=CORS_HEADERS)
+        else:
+            parent_id = None
 
         async with aiosqlite.connect('manga.db') as db:
             await db.execute(
@@ -5028,6 +6597,68 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
+
+async def handle_comments_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """Редактировать свой комментарий. PUT /api/comments/{id}"""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "comments_update", user_id=user_id)
+        if limited:
+            return limited
+
+        try:
+            comment_id = int(request.match_info.get('id', '0'))
+        except (TypeError, ValueError):
+            return aiohttp.web.json_response({"error": "invalid comment id"}, status=400, headers=CORS_HEADERS)
+        if comment_id <= 0:
+            return aiohttp.web.json_response({"error": "invalid comment id"}, status=400, headers=CORS_HEADERS)
+
+        data = await request.json()
+        new_text = str(data.get('text', '')).strip()
+        if not new_text:
+            return aiohttp.web.json_response({"error": "text required"}, status=400, headers=CORS_HEADERS)
+        if len(new_text) > MAX_COMMENT_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "too long"}, status=400, headers=CORS_HEADERS)
+
+        async with aiosqlite.connect('manga.db') as db:
+            # Проверяем владельца (редактировать может только автор — админ удаляет, но не редактирует от имени)
+            async with db.execute('SELECT user_id FROM chapter_comments WHERE id = ?', (comment_id,)) as c:
+                row = await c.fetchone()
+            if not row:
+                return aiohttp.web.json_response({"error": "not found"}, status=404, headers=CORS_HEADERS)
+            if str(row[0]) != str(user_id):
+                return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
+
+            await db.execute(
+                "UPDATE chapter_comments SET text = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (new_text, comment_id)
+            )
+            await db.commit()
+
+            # Возвращаем свежие данные чтобы клиент мог сразу применить
+            async with db.execute(
+                'SELECT id, text, updated_at FROM chapter_comments WHERE id = ?',
+                (comment_id,)
+            ) as c:
+                updated_row = await c.fetchone()
+
+        if not updated_row:
+            return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
+
+        return aiohttp.web.json_response({
+            "ok": True,
+            "comment": {
+                "id": updated_row[0],
+                "text": updated_row[1],
+                "updated_at": updated_row[2],
+            }
+        }, headers=CORS_HEADERS)
+    except Exception as e:
+        logging.exception("handle_comments_update failed")
+        return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 # --- Репорты об опечатках ---
 
 async def cmd_test_notification(message: types.Message):
@@ -5053,16 +6684,27 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
         user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "typo_report", user_id=user_id)
+        if limited:
+            return limited
         user_name = user.get("first_name", "Аноним")
 
         data = await request.json()
-        chapter_key = data.get('chapter_key', '')
-        selected_text = data.get('selected_text', '').strip()
-        context_text = data.get('context_text', '').strip()
-        comment = data.get('comment', '').strip()
+        chapter_key = str(data.get('chapter_key', '')).strip()
+        selected_text = str(data.get('selected_text', '')).strip()
+        context_text = str(data.get('context_text', '')).strip()
+        comment = str(data.get('comment', '')).strip()
 
         if not chapter_key or not selected_text or not context_text:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if len(chapter_key) > MAX_CHAPTER_KEY_LENGTH:
+            return aiohttp.web.json_response({"error": "invalid chapter_key"}, status=400, headers=CORS_HEADERS)
+        if len(selected_text) > MAX_TYPO_SELECTED_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "selected_text too long"}, status=400, headers=CORS_HEADERS)
+        if len(context_text) > MAX_TYPO_CONTEXT_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "context_text too long"}, status=400, headers=CORS_HEADERS)
+        if len(comment) > MAX_TYPO_COMMENT_LENGTH:
+            return aiohttp.web.json_response({"error": "comment too long"}, status=400, headers=CORS_HEADERS)
 
         async with aiosqlite.connect('manga.db') as db:
             await db.execute(
@@ -5101,22 +6743,33 @@ async def handle_comments_report(request: aiohttp.web.Request) -> aiohttp.web.Re
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
         user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "comments_report", user_id=user_id)
+        if limited:
+            return limited
         user_name = user.get("first_name", "Аноним")
 
         data = await request.json()
         comment_id = data.get('comment_id')
-        reason = data.get('reason', '').strip()
-        comment_text = data.get('comment_text', '').strip()
+        reason = str(data.get('reason', '')).strip()
+        comment_text = str(data.get('comment_text', '')).strip()
+        try:
+            comment_id_int = int(comment_id)
+        except Exception:
+            return aiohttp.web.json_response({"error": "invalid comment_id"}, status=400, headers=CORS_HEADERS)
 
-        if not comment_id or not reason:
+        if comment_id_int <= 0 or not reason:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if len(reason) > MAX_REPORT_REASON_LENGTH:
+            return aiohttp.web.json_response({"error": "reason too long"}, status=400, headers=CORS_HEADERS)
+        if len(comment_text) > MAX_COMMENT_REPORT_TEXT_LENGTH:
+            return aiohttp.web.json_response({"error": "comment_text too long"}, status=400, headers=CORS_HEADERS)
 
         # Уведомление админам
         admins = await get_admins()
         report_text = (
             f"🚫 <b>Жалоба на комментарий!</b>\n"
             f"От: {html.escape(user_name)} (ID: <code>{user_id}</code>)\n"
-            f"ID комментария: <code>{comment_id}</code>\n"
+            f"ID комментария: <code>{comment_id_int}</code>\n"
             f"Причина: {html.escape(reason)}\n\n"
             f"<b>Текст комментария:</b>\n<i>{html.escape(comment_text)}</i>"
         )
@@ -5192,14 +6845,21 @@ async def handle_reactions_post(request: aiohttp.web.Request) -> aiohttp.web.Res
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
         user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "reactions_post", user_id=user_id)
+        if limited:
+            return limited
         
         data = await request.json()
-        chapter_key = data.get('chapter_key', '')
-        reaction = data.get('reaction', '') # Например: "👍", "❤️", "🔥"
+        chapter_key = str(data.get('chapter_key', '')).strip()
+        reaction = str(data.get('reaction', '')).strip() # Например: "👍", "❤️", "🔥"
         
         if not chapter_key or not reaction:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
-            
+        if len(chapter_key) > MAX_CHAPTER_KEY_LENGTH:
+            return aiohttp.web.json_response({"error": "invalid chapter_key"}, status=400, headers=CORS_HEADERS)
+        if len(reaction) > 16:
+            return aiohttp.web.json_response({"error": "invalid reaction"}, status=400, headers=CORS_HEADERS)
+             
         async with aiosqlite.connect('manga.db') as db:
             # Если такая же реакция уже стоит - убираем (toggle)
             async with db.execute(
@@ -5223,17 +6883,44 @@ async def handle_reactions_post(request: aiohttp.web.Request) -> aiohttp.web.Res
 
 async def handle_rename_request(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Кэширует длинные ID глав и выдает короткий ID (обход лимита 64 символов в deeplink)."""
+    user_id = ""
     user = get_auth_user(request)
     if not user:
         return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
-    data = await request.json()
-    obj_id = data.get('obj_id', '').strip()
-    if not obj_id:
-        return aiohttp.web.json_response({"error": "missing obj_id"}, status=400, headers=CORS_HEADERS)
-    
-    short_id = str(uuid.uuid4())[:8]
-    RENAME_CACHE[short_id] = obj_id
-    return aiohttp.web.json_response({"ok": True, "short_id": short_id}, headers=CORS_HEADERS)
+    user_id = str(user.get("id", ""))
+    limited = await _enforce_rate_limit(request, "admin_rename_request", user_id=user_id)
+    if limited:
+        return limited
+    try:
+        data = await request.json()
+        obj_id = str(data.get('obj_id', '')).strip()
+        if not obj_id or len(obj_id) > MAX_RENAME_OBJECT_ID_LENGTH:
+            return aiohttp.web.json_response({"error": "missing obj_id"}, status=400, headers=CORS_HEADERS)
+        
+        if len(RENAME_CACHE) >= MAX_RENAME_CACHE_SIZE:
+            # Keep cache bounded and drop oldest key.
+            oldest_key = next(iter(RENAME_CACHE.keys()), None)
+            if oldest_key:
+                RENAME_CACHE.pop(oldest_key, None)
+        short_id = str(uuid.uuid4())[:8]
+        RENAME_CACHE[short_id] = obj_id
+        await _audit_admin_action(
+            action="rename_request_cache",
+            actor_user_id=user_id,
+            target=obj_id,
+            payload={"obj_id": obj_id, "short_id": short_id},
+            result="ok",
+        )
+        return aiohttp.web.json_response({"ok": True, "short_id": short_id}, headers=CORS_HEADERS)
+    except Exception as e:
+        await _audit_admin_action(
+            action="rename_request_cache",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return aiohttp.web.json_response({"error": "internal"}, status=500, headers=CORS_HEADERS)
 
 # --- Прогресс чтения (Закладки) ---
 
@@ -5295,10 +6982,15 @@ async def handle_progress_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
 
 async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """Сохранить порядок глав после перетаскивания (только для админов)."""
+    user_id_str = ""
     try:
         user = get_auth_user(request)
         if not user:
             return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id_str = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_sort", user_id=user_id_str)
+        if limited:
+            return limited
         user_id = int(user.get("id", 0))
         
         admins = await get_admins()
@@ -5306,12 +6998,22 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
             return aiohttp.web.json_response({"error": "Forbidden"}, status=403, headers=CORS_HEADERS)
 
         data = await request.json()
-        series_id = data.get('series_id', '')
+        series_id = str(data.get('series_id', '')).strip()
         volume = data.get('volume', '')
         order = data.get('order', [])  # List of chapter identifiers in new order
 
         if not series_id or not order:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if not isinstance(order, list) or len(order) > MAX_BULK_URLS_PER_REQUEST:
+            return aiohttp.web.json_response({"error": "invalid order"}, status=400, headers=CORS_HEADERS)
+        normalized_order = []
+        for chapter_id in order:
+            token = str(chapter_id).strip()
+            if not _is_valid_chapter_token(token):
+                return aiohttp.web.json_response({"error": "invalid chapter in order"}, status=400, headers=CORS_HEADERS)
+            normalized_order.append(token)
 
         # Determine the table and index value
         table = None
@@ -5341,25 +7043,68 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
         if not table:
             return aiohttp.web.json_response({"error": "unknown series type"}, status=400, headers=CORS_HEADERS)
 
+        total_changes = 0
+        unmatched: list[str] = []
         async with aiosqlite.connect('manga.db') as db:
+            # Probe: how many rows exist for this (table, id_col)?
+            async with db.execute(
+                f'SELECT COUNT(*) FROM {table} WHERE {id_col} = ?',
+                (str(idx_val),),
+            ) as cur:
+                row = await cur.fetchone()
+                existing_rows = int(row[0]) if row else 0
+
             # Update sort_order for each chapter
-            for idx, chapter_id in enumerate(order):
-                await db.execute(
+            for idx, chapter_id in enumerate(normalized_order):
+                cursor = await db.execute(
                     f'UPDATE {table} SET sort_order = ? WHERE {id_col} = ? AND {chapter_col} = ?',
                     (idx, str(idx_val), str(chapter_id))
                 )
+                changed = cursor.rowcount or 0
+                total_changes += changed
+                if changed == 0:
+                    unmatched.append(str(chapter_id))
             await db.commit()
+        logging.info(
+            "sort_chapters: series=%s vol=%r table=%s id_col=%s idx_val=%r sent=%d existing=%d updated=%d unmatched=%s",
+            series_id, volume, table, id_col, idx_val,
+            len(normalized_order), existing_rows, total_changes, unmatched[:5],
+        )
+        if total_changes == 0 and existing_rows > 0:
+            return aiohttp.web.json_response({
+                "error": "No rows updated. Check series_id/volume mapping.",
+                "debug": {
+                    "table": table, "id_col": id_col, "idx_val": str(idx_val),
+                    "sent": len(normalized_order), "existing": existing_rows,
+                    "unmatched_sample": unmatched[:5],
+                },
+            }, status=409, headers=CORS_HEADERS)
+        invalidate_reader_cache("chapters_sorted")
 
         # Обновляем JSON и синхронизируем с GitHub
-        result = await build_reader_data()
+        result, _, _ = await get_cached_reader_data(force_refresh=True)
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result, f, ensure_ascii=False, indent=2)
         asyncio.create_task(run_git_sync(f"chapters sorting updated for {series_id}"))
+        await _audit_admin_action(
+            action="sort_chapters",
+            actor_user_id=user_id_str,
+            target=series_id,
+            payload={"series_id": series_id, "volume": volume, "order_size": len(normalized_order)},
+            result="ok",
+        )
 
       
         return aiohttp.web.json_response({"ok": True}, headers=CORS_HEADERS)
     except Exception as e:
+        await _audit_admin_action(
+            action="sort_chapters",
+            actor_user_id=user_id_str,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
         return aiohttp.web.json_response({"error": str(e)}, status=500, headers=CORS_HEADERS)
 
 async def handle_root_redirect(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -5370,14 +7115,121 @@ async def handle_root_redirect(request: aiohttp.web.Request) -> aiohttp.web.Resp
 # БЛОК: ЗАПУСК БОТА
 # ==============================================================================
 
+
+
+def create_webapp_api_app() -> aiohttp.web.Application:
+    """Create aiohttp WebApp API app with routes, middleware, and static files."""
+    app = aiohttp.web.Application(
+        middlewares=[api_security_middleware],
+        client_max_size=API_MAX_BODY_BYTES,
+    )
+    app.on_response_prepare.append(apply_webapp_response_headers)
+    app.on_cleanup.append(close_webapp_resources)
+
+    app.router.add_get("/api/reader", handle_reader_data)
+    app.router.add_get("/api/chapter-content", handle_chapter_content)
+    app.router.add_post("/api/telemetry", handle_telemetry_post)
+
+    app.router.add_get("/", handle_root_redirect)
+    app.router.add_options("/api/reader", handle_cors_preflight)
+    app.router.add_options("/api/chapter-content", handle_cors_preflight)
+    app.router.add_options("/api/telemetry", handle_cors_preflight)
+
+    app.router.add_get("/api/likes", handle_likes_get)
+    app.router.add_post("/api/likes", handle_likes_post)
+    app.router.add_options("/api/likes", handle_cors_preflight)
+
+    app.router.add_get("/api/comments", handle_comments_get)
+    app.router.add_post("/api/comments", handle_comments_post)
+    app.router.add_post("/api/comments/react", handle_comment_react_post)
+    app.router.add_options("/api/comments/react", handle_cors_preflight)
+    app.router.add_options("/api/comments", handle_cors_preflight)
+    app.router.add_route("DELETE", "/api/comments", handle_comments_delete)
+    # Edit own comment: PUT /api/comments/{id}
+    app.router.add_route("PUT", "/api/comments/{id}", handle_comments_update)
+    app.router.add_options("/api/comments/{id}", handle_cors_preflight)
+    app.router.add_post("/api/comments/report", handle_comments_report)
+    app.router.add_options("/api/comments/report", handle_cors_preflight)
+
+    app.router.add_get("/api/avatar", handle_avatar_get)
+    app.router.add_options("/api/avatar", handle_cors_preflight)
+
+    app.router.add_get("/api/reactions", handle_reactions_get)
+    app.router.add_post("/api/reactions", handle_reactions_post)
+    app.router.add_options("/api/reactions", handle_cors_preflight)
+
+    app.router.add_route("DELETE", "/api/rename", handle_rename_delete)
+    app.router.add_options("/api/rename", handle_cors_preflight)
+
+    app.router.add_get("/api/progress", handle_progress_get)
+    app.router.add_post("/api/progress", handle_progress_post)
+    app.router.add_options("/api/progress", handle_cors_preflight)
+
+    app.router.add_post("/api/typo", handle_typo_post)
+    app.router.add_options("/api/typo", handle_cors_preflight)
+
+    app.router.add_post("/api/rename/request", handle_rename_request)
+    app.router.add_options("/api/rename/request", handle_cors_preflight)
+
+    app.router.add_route("PUT", "/api/sort", handle_sort_chapters)
+    app.router.add_options("/api/sort", handle_cors_preflight)
+
+    app.router.add_post("/api/ai_chat", handle_ai_chat)
+    app.router.add_options("/api/ai_chat", handle_cors_preflight)
+
+    app.router.add_route("PUT", "/api/chapters", handle_chapter_edit)
+    app.router.add_route("POST", "/api/chapters", handle_chapter_add)
+    app.router.add_route("DELETE", "/api/chapters", handle_chapter_delete)
+    app.router.add_options("/api/chapters", handle_cors_preflight)
+
+    app.router.add_post("/api/chapters/bulk", handle_chapter_bulk)
+    app.router.add_options("/api/chapters/bulk", handle_cors_preflight)
+
+    app.router.add_route("PUT", "/api/series", handle_series_update)
+    app.router.add_options("/api/series", handle_cors_preflight)
+
+    try:
+        app.router.add_static('/webapp', 'webapp', show_index=True)
+        logging.info("Static route /webapp registered.")
+    except Exception as e:
+        logging.warning(f"Failed to register /webapp: {e}")
+
+    return app
+
+
+async def start_webapp_api_server(host: str = "0.0.0.0", port: int = 8080) -> aiohttp.web.AppRunner:
+    """Start WebApp API server and return runner for cleanup."""
+    app = create_webapp_api_app()
+    runner = aiohttp.web.AppRunner(app)
+    await runner.setup()
+    site = aiohttp.web.TCPSite(runner, host, int(port))
+    await site.start()
+    logging.info("WebApp API server started on %s:%s", host, port)
+    return runner
+
+
+async def close_webapp_resources(_app: aiohttp.web.Application) -> None:
+    """Close shared HTTP sessions used by API and bot runtime."""
+    global _http_session
+    if _http_session and not _http_session.closed:
+        await _http_session.close()
+
+    session_obj = getattr(bot, "session", None)
+    if session_obj is not None:
+        try:
+            await session_obj.close()
+        except Exception:
+            logging.exception("Failed to close bot session during cleanup")
+
+
 async def main():
     dp.include_router(rp_router)
-    
+
     await init_db()
-    
+
     dp.message.outer_middleware(StatsMiddleware())
-    
-    # === Регистрация команд бота ===
+
+    # Register bot commands
     commands = [
         BotCommand(command="start", description="Главное меню"),
         BotCommand(command="help", description="Список всех команд"),
@@ -5386,81 +7238,21 @@ async def main():
         BotCommand(command="pay", description="Перевести монеты"),
         BotCommand(command="marry", description="Вступить в брак (реплай)"),
         BotCommand(command="divorce", description="Расторгнуть брак"),
-        BotCommand(command="marriages", description="Топ пар")
+        BotCommand(command="marriages", description="Топ пар"),
     ]
     await bot.set_my_commands(commands, BotCommandScopeDefault())
-    
-    # === Установка кнопки WebApp в меню чата ===
-    reader_url = f"{WEBAPP_URL.rstrip('/')}/webapp/reader.html" + (f"?api={API_HOST}" if API_HOST else "")
-    await bot.set_chat_menu_button(menu_button=types.MenuButtonWebApp(text="✨ Читалка", web_app=types.WebAppInfo(url=reader_url)))
-    
-    # === API сервер для WebApp читалки ===
-    app = aiohttp.web.Application()
-    app.router.add_get("/api/reader", handle_reader_data)
-    # Редирект с главной страницы на WebApp
-    app.router.add_get("/", handle_root_redirect)
-    app.router.add_options("/api/reader", handle_cors_preflight)
-    # Лайки
-    app.router.add_get("/api/likes", handle_likes_get)
-    app.router.add_post("/api/likes", handle_likes_post)
-    app.router.add_options("/api/likes", handle_cors_preflight)
-    # Комментарии
-    app.router.add_get("/api/comments", handle_comments_get)
-    app.router.add_post("/api/comments", handle_comments_post)
-    app.router.add_post("/api/comments/react", handle_comment_react_post)
-    app.router.add_options("/api/comments/react", handle_cors_preflight)
-    app.router.add_options("/api/comments", handle_cors_preflight)
-    app.router.add_route("DELETE", "/api/comments", handle_comments_delete)
-    app.router.add_post("/api/comments/report", handle_comments_report)
-    app.router.add_options("/api/comments/report", handle_cors_preflight)
-    # Аватары
-    app.router.add_get("/api/avatar", handle_avatar_get)
-    app.router.add_options("/api/avatar", handle_cors_preflight)
-    # Реакции на главу
-    app.router.add_get("/api/reactions", handle_reactions_get)
-    app.router.add_post("/api/reactions", handle_reactions_post)
-    app.router.add_options("/api/reactions", handle_cors_preflight)
-    # Переименование/сброс имён (режим редактора)
-    app.router.add_route("DELETE", "/api/rename", handle_rename_delete)
-    app.router.add_options("/api/rename", handle_cors_preflight)
-    # Прогресс чтения
-    app.router.add_get("/api/progress", handle_progress_get)
-    app.router.add_post("/api/progress", handle_progress_post)
-    app.router.add_options("/api/progress", handle_cors_preflight)
-    # Репорты об опечатках
-    app.router.add_post("/api/typo", handle_typo_post)
-    app.router.add_options("/api/typo", handle_cors_preflight)
-    # Создание короткой ссылки для переименования
-    app.router.add_post("/api/rename/request", handle_rename_request)
-    app.router.add_options("/api/rename/request", handle_cors_preflight)
-    # Сортировка глав (Admin DnD)
-    app.router.add_route("PUT", "/api/sort", handle_sort_chapters)
-    app.router.add_options("/api/sort", handle_cors_preflight)
-    # ИИ-чат (серверный прокси — ключ Groq не покидает сервер)
-    app.router.add_post("/api/ai_chat", handle_ai_chat)
-    app.router.add_options("/api/ai_chat", handle_cors_preflight)
-    # Редактирование URL глав (Admin)
-    app.router.add_route("PUT", "/api/chapters", handle_chapter_edit)
-    app.router.add_options("/api/chapters", handle_cors_preflight)
-    # Массовое добавление глав (Admin)
-    app.router.add_post("/api/chapters/bulk", handle_chapter_bulk)
-    app.router.add_options("/api/chapters/bulk", handle_cors_preflight)
-    
-    # --- Статические файлы для WebApp ---
-    # Это позволяет запускать читалку прямо с того же сервера, что и API. 
-    # В WEBAPP_URL в codes.env теперь можно прописать URL этого сервера (или ngrok).
-    try:
-        app.router.add_static('/webapp', 'webapp', show_index=True)
-        logging.info("Маршрут /webapp зарегистрирован для статических файлов.")
-    except Exception as e:
-        logging.warning(f"Не удалось зарегистрировать /webapp: {e}")
-    
-    runner = aiohttp.web.AppRunner(app)
-    await runner.setup()
-    site = aiohttp.web.TCPSite(runner, "0.0.0.0", 8080)
-    await site.start()
-    logging.info("API сервер для читалки запущен на порту 8080")
-    
+
+    # Configure WebApp button
+    reader_url = build_webapp_url("reader.html")
+    await bot.set_chat_menu_button(
+        menu_button=types.MenuButtonWebApp(
+            text="✨ Читалка",
+            web_app=types.WebAppInfo(url=reader_url),
+        )
+    )
+
+    runner = await start_webapp_api_server("0.0.0.0", 8080)
+
     logging.info("Бот запущен. База данных готова.")
     await bot.delete_webhook(drop_pending_updates=True)
     try:
@@ -5470,7 +7262,6 @@ async def main():
         if _http_session and not _http_session.closed:
             await _http_session.close()
         await runner.cleanup()
-
 if __name__ == "__main__":
     try: asyncio.run(main())
     except KeyboardInterrupt: logging.info("Бот остановлен.")

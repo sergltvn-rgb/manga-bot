@@ -8,9 +8,19 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:wght@400;700&family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="reader.css?v=12">
+    <script>
+        (function () {
+            const params = new URLSearchParams(window.location.search);
+            const rev = params.get('rev') || '23';
+            window.__READER_REV = rev;
+            const css = document.createElement('link');
+            css.rel = 'stylesheet';
+            css.href = `reader.css?v=${encodeURIComponent(rev)}`;
+            document.head.appendChild(css);
+        })();
+    </script>
 </head>
-<body class="theme-light">
+<body class="theme-dark">
     <!-- ★ Reading Progress Bar -->
     <div id="reading-progress-container" class="reading-progress-container">
         <div id="reading-progress-bar" class="reading-progress-bar"></div>
@@ -21,9 +31,19 @@
     
     <!-- ★ Toast Container -->
     <div id="toast-container" class="toast-container"></div>
+    <div id="network-status" class="network-status-banner hidden" aria-live="polite"></div>
 
     <!-- ★ Swipe-back edge indicator -->
     <div id="swipe-back-indicator" class="swipe-back-indicator"></div>
+
+    <!-- Refresh v4: Pull-to-refresh indicator -->
+    <div id="pull-refresh-indicator" class="pull-refresh-indicator" aria-hidden="true">
+        <svg class="ptr-spinner" viewBox="0 0 24 24" width="18" height="18">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="44" stroke-dashoffset="0" opacity="0.3"/>
+            <path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        <span class="ptr-label">Потяните для обновления</span>
+    </div>
 
     <!-- === ЭКРАН 1: Выбор серии === -->
     <div id="screen-series" class="screen active">
@@ -63,13 +83,15 @@
                 <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
         </div>
+        <!-- Refresh v4: series detail hero (renders only if series has fields) -->
+        <div id="series-detail-hero" class="series-detail-hero" hidden></div>
         <div class="volume-tabs" id="volume-tabs"></div>
         <div id="chapters-list" class="content-area"></div>
     </div>
 
     <!-- === ЭКРАН 3: Чтение === -->
     <div id="screen-reader" class="screen">
-        <div class="reader-header" id="reader-header">
+        <div class="reader-header reader-top-bar" id="reader-top-bar">
             <button class="back-btn" onclick="backFromReader()" aria-label="Назад">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
@@ -145,43 +167,53 @@
                         <div class="comment-tab" id="tab-sort-new" onclick="sortComments('new')">По дате</div>
                     </div>
                     
-                    <div class="comment-form" id="comment-form">
-                        <!-- Mode buttons removed for inline preview -->
-                        
-                        <div id="comment-write-area">
-                            <div id="comment-toolbar" class="comment-toolbar">
-                                <button type="button" onclick="insertFormatting('[b]', '[/b]')" title="Жирный"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
-                                <button type="button" onclick="insertFormatting('[i]', '[/i]')" title="Курсив"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
-                                <button type="button" onclick="insertFormatting('[s]', '[/s]')" title="Зачеркнутый"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><path d="M16 6a5 5 0 0 0-8 0"/><path d="M8 18a5 5 0 0 0 8 0"/></svg></button>
-                                <button type="button" onclick="insertFormatting('[quote]', '[/quote]')" title="Цитата"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-1-2.25-2.25-2.25S5.5 3.75 5.5 5V8c0 1.25 1 2.25 2.25 2.25H10v3c0 1.25-1 2.25-2.25 2.25-1.5 0-2.75 1-2.75 2.5s1.25 2.5 2.75 2.5h.25z"/></svg></button>
-                                <button type="button" onclick="insertFormatting('||', '||')" title="Спойлер"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg></button>
+                    <div class="comment-form tg-style" id="comment-form">
+                        <div id="reply-indicator" class="reply-indicator" style="display:none;">
+                            <div class="reply-indicator-body">
+                                <div class="reply-indicator-label">Ответ</div>
+                                <div class="reply-indicator-name" id="reply-to-name"></div>
                             </div>
-                            <div id="reply-indicator" class="reply-indicator" style="display:none;">
-                                <span>Ответ: <strong id="reply-to-name"></strong></span>
-                                <button type="button" class="cancel-reply-btn" onclick="cancelReply()">
-                                    <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                                </button>
-                            </div>
-                            <textarea id="comment-input" class="comment-input" placeholder="Напишите комментарий..." maxlength="500" rows="3" oninput="updateCommentPreview()"></textarea>
+                            <button type="button" class="cancel-reply-btn" onclick="cancelReply()" aria-label="Отменить ответ">
+                                <svg class="icon-xs" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
                         </div>
-                        
+                        <div id="comment-toolbar" class="comment-toolbar hidden" aria-hidden="true">
+                            <button type="button" onclick="insertFormatting('[b]', '[/b]')" title="Жирный"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/><path d="M6 12h9a4 4 0 0 1 4 4 4 4 0 0 1-4 4H6z"/></svg></button>
+                            <button type="button" onclick="insertFormatting('[i]', '[/i]')" title="Курсив"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg></button>
+                            <button type="button" onclick="insertFormatting('[s]', '[/s]')" title="Зачеркнутый"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><path d="M16 6a5 5 0 0 0-8 0"/><path d="M8 18a5 5 0 0 0 8 0"/></svg></button>
+                            <button type="button" onclick="insertFormatting('[quote]', '[/quote]')" title="Цитата"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-1-2.25-2.25-2.25S5.5 3.75 5.5 5V8c0 1.25 1 2.25 2.25 2.25H10v3c0 1.25-1 2.25-2.25 2.25-1.5 0-2.75 1-2.75 2.5s1.25 2.5 2.75 2.5h.25z"/></svg></button>
+                            <button type="button" onclick="insertFormatting('||', '||')" title="Спойлер"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.52 13.52 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></svg></button>
+                        </div>
+                        <div class="comment-input-row">
+                            <button type="button" class="comment-format-toggle" id="comment-format-toggle" onclick="toggleCommentToolbar()" title="Форматирование" aria-label="Показать панель форматирования">
+                                <span aria-hidden="true">Aa</span>
+                            </button>
+                            <textarea id="comment-input" class="comment-input-inline" placeholder="Написать комментарий…" maxlength="500" rows="1" oninput="updateCommentPreview(); autoGrowCommentInput(this)"></textarea>
+                            <button type="button" class="comment-send-btn" onclick="postComment()" aria-label="Отправить">
+                                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
+                        </div>
                         <div id="comment-preview-area" class="comment-preview-area hidden"></div>
-                        <button type="button" class="comment-submit-btn" onclick="postComment()">Отправить</button>
+                        <div id="comment-send-status" class="comment-send-status hidden" aria-live="polite"></div>
                     </div>
 
                     <div id="comments-list" class="comments-list"></div>
                 </div>
             </div>
 
-            <!-- ★ Pull-to-next-chapter indicator -->
-            <div id="pull-next-indicator" class="pull-next-indicator" style="display:none;">
-                <div class="pull-next-content">
-                    <svg class="icon pull-next-arrow" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    <span id="pull-next-text">Тяните для следующей главы</span>
-                </div>
+        </div>
+        <!-- Refresh v5: Pull-to-next overlay (absolute поверх .reader-content, не участвует в scroll) -->
+        <div id="pull-next-indicator" class="pull-next-indicator" aria-hidden="true">
+            <div class="pull-next-ring-wrap">
+                <svg class="pull-next-ring" viewBox="0 0 44 44" aria-hidden="true">
+                    <circle class="ring-bg" cx="22" cy="22" r="19"/>
+                    <circle class="ring-fg" cx="22" cy="22" r="19" pathLength="100" stroke-dasharray="100" stroke-dashoffset="100"/>
+                </svg>
+                <svg class="pull-next-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M19 12l-7 7-7-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-
-            <!-- ★ Floating Admin FAB (Phase 4) -->
+            <div class="pull-next-label" id="pull-next-text">Следующая глава</div>
+        </div>
+        <!-- ★ Floating Admin FAB (Phase 4) -->
             <div id="admin-fab-container" class="admin-fab-container" style="display:none;">
                 <button class="admin-fab-btn" id="admin-fab-btn" onclick="toggleAdminMenu()">
                     <svg class="icon-sm" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -189,27 +221,36 @@
                 <div id="admin-menu" class="admin-menu glass-panel hidden">
                     <div class="admin-menu-header">Инструменты Админа</div>
                     <button class="admin-menu-item" onclick="renameChapterCurrent()"><span class="icon">📝</span> Переименовать главу</button>
+                    <button class="admin-menu-item" onclick="resetCurrentChapterName()"><span class="icon">🔄</span> Сброс имени</button>
                     <button class="admin-menu-item" onclick="openEditUrlModal(currentChapterIdx)"><span class="icon">🔗</span> Ред. ссылки</button>
+                    <button class="admin-menu-item" onclick="openAddChapterForCurrent()"><span class="icon">📄</span> Добавить главу</button>
+                    <button class="admin-menu-item" onclick="deleteChapterCurrent()"><span class="icon">🗑️</span> Удалить главу</button>
                     <button class="admin-menu-item" onclick="openBulkModal()"><span class="icon">📦</span> Масс. загрузка</button>
+                    <button class="admin-menu-item" onclick="openCoverEditForCurrent()"><span class="icon">🖼️</span> Обложка серии</button>
                 </div>
             </div>
-        </div>
-        <div class="reader-bottom-bar" id="reader-bottom-bar">
-            <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">
-                <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Пред.
-            </button>
-            <span class="chapter-indicator" id="chapter-indicator">1 / 10</span>
-            <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">
-                След.
-                <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:4px;"><path d="M5 12h14M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
+            <div class="reader-bottom-bar" id="reader-bottom-bar">
+                <!-- Refresh v4: Interactive chapter scrubber -->
+                <div class="reader-scrubber-row" id="reader-scrubber-row" aria-hidden="false">
+                    <input type="range" class="reader-scrubber" id="reader-scrubber" min="0" max="1000" value="0" step="1" aria-label="Прогресс главы">
+                </div>
+                <div class="reader-bottom-actions">
+                    <button class="nav-btn" id="prev-chapter-btn" onclick="navigateChapter(-1)">
+                        <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-right:4px;"><path d="M19 12H5M12 19l-7-7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                        Пред.
+                    </button>
+                    <span class="chapter-indicator" id="chapter-indicator">1 / 10</span>
+                    <button class="nav-btn" id="next-chapter-btn" onclick="navigateChapter(1)">
+                        След.
+                        <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px;margin-left:4px;"><path d="M5 12h14M12 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </button>
+                </div>
         </div>
 
         <!-- ★ Morphing FAB (пункт 10) -->
         <div class="fab-container" id="fab-container">
             <!-- Autoscroll Play/Pause FAB -->
-            <button id="autoscroll-fab" class="autoscroll-fab hidden" onclick="toggleAutoscroll()">▶</button>
+            <button id="autoscroll-fab" class="autoscroll-fab hidden" onclick="toggleAutoscroll()" aria-label="Запустить автоскролл"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M6 4.5v15L20 12z"/></svg></button>
 
             <div class="fab-menu hidden" id="fab-menu">
                 <button class="fab-menu-item" data-action="toc" onclick="fabAction('toc')">
@@ -267,12 +308,25 @@
             </div>
             
             <h3 class="library-section-title">В процессе чтения</h3>
+            <div id="library-filters" class="library-filter-row">
+                <button class="library-filter-btn active" data-filter="in_progress" onclick="setLibraryFilter('in_progress')">В процессе</button>
+                <button class="library-filter-btn" data-filter="not_started" onclick="setLibraryFilter('not_started')">Не начато</button>
+                <button class="library-filter-btn" data-filter="completed" onclick="setLibraryFilter('completed')">Завершено</button>
+            </div>
             <div id="library-list">
                 <div class="skeleton-cards">
                     <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Refresh v4: глобальный admin FAB (виден только в admin_mode на series/chapters/library) -->
+    <div id="global-admin-fab" class="global-admin-fab" hidden>
+        <button type="button" class="global-admin-fab-btn" id="global-admin-fab-btn" onclick="toggleGlobalAdminMenu()" aria-label="Админ действия">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <div id="global-admin-menu" class="global-admin-menu" hidden></div>
     </div>
 
     <!-- === ТАБ БАР (Нижняя навигация) === -->
@@ -291,137 +345,162 @@
     <div id="settings-overlay" class="modal-overlay hidden" onclick="toggleSettings()"></div>
     <div id="settings-panel" class="settings-panel hidden glass-panel">
         <div class="settings-header">Настройки читалки</div>
-        
-        <div class="settings-tabs">
-            <button class="settings-tab-btn active" id="tab-btn-font" onclick="showSettingsTab('font')">Шрифт</button>
-            <button class="settings-tab-btn" id="tab-btn-display" onclick="showSettingsTab('display')">Вид</button>
-            <button class="settings-tab-btn" id="tab-btn-nav" onclick="showSettingsTab('nav')">Навигация</button>
+
+        <!-- Refresh v5: sticky live-превью текущих стилей -->
+        <div class="settings-preview" id="settings-preview">
+            <div class="settings-preview-inner" id="settings-preview-inner">
+                <p class="settings-preview-text">Это пример отрывка. Настройки применяются мгновенно — видно, как меняется шрифт, размер, межстрочный интервал, красная строка, ширина, яркость и буквица.</p>
+            </div>
+            <!-- Overlay для яркости (dimmer) — синхронизирован с .dimmer-overlay всего приложения -->
+            <div class="settings-preview-dimmer" id="settings-preview-dimmer" aria-hidden="true"></div>
         </div>
 
-        <!-- Tab: Font -->
-        <div id="settings-tab-font" class="settings-tab-content">
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-fontSize">Размер текста</label>
-                    <span id="label-fontSize" class="setting-value-badge">17px</span>
+        <!-- Refresh v5: все настройки в одной прокрутке, разделены section-titles -->
+        <div class="settings-scroll-body">
+
+            <div class="settings-section">
+                <div class="settings-section-title">Шрифт</div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-fontSize">Размер текста</label>
+                        <span id="label-fontSize" class="setting-value-badge">17px</span>
+                    </div>
+                    <input type="range" id="input-fontSize" min="12" max="30" value="17" step="1" oninput="setFontSize(this.value)">
                 </div>
-                <input type="range" id="input-fontSize" min="12" max="30" value="17" step="1" oninput="setFontSize(this.value)">
-            </div>
-            
-            <div class="setting-item-block">
-                <label>Шрифт</label>
-                <div class="segmented-control">
-                    <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">С засечками</button>
-                    <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
+
+                <div class="setting-item-block">
+                    <label>Шрифт</label>
+                    <div class="segmented-control">
+                        <button onclick="setFont('serif')" data-font="serif" class="active" style="font-family: 'Noto Serif'">С засечками</button>
+                        <button onclick="setFont('sans')" data-font="sans" style="font-family: Inter">Без засечек</button>
+                        <button onclick="setFont('mono')" data-font="mono" style="font-family: 'JetBrains Mono', monospace">Моно</button>
+                    </div>
+                </div>
+
+                <div class="setting-item-block">
+                    <label>Выравнивание</label>
+                    <div class="segmented-control">
+                        <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
+                        <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
+                    </div>
+                </div>
+
+                <div class="setting-item-row">
+                    <div class="setting-info">
+                        <label for="input-dropCap">Буквица</label>
+                        <p class="setting-hint">Увеличенная первая буква главы</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="input-dropCap" onchange="setDropCap(this.checked)" checked>
+                        <span class="slider"></span>
+                    </label>
                 </div>
             </div>
 
-            <div class="setting-item-block">
-                <label>Выравнивание</label>
-                <div class="segmented-control">
-                    <button onclick="setTextAlign('left')" data-align="left" class="active">По левому</button>
-                    <button onclick="setTextAlign('justify')" data-align="justify">По ширине</button>
+            <div class="settings-section">
+                <div class="settings-section-title">Дисплей</div>
+
+                <div class="setting-item-block">
+                    <label>Цветовая схема</label>
+                    <div class="theme-grid">
+                        <button class="theme-chip theme-light active" onclick="setTheme('light')" data-theme="light">Светлая</button>
+                        <button class="theme-chip theme-sepia" onclick="setTheme('sepia')" data-theme="sepia">Сепия</button>
+                        <button class="theme-chip theme-gray" onclick="setTheme('gray')" data-theme="gray">Серая</button>
+                        <button class="theme-chip theme-dark" onclick="setTheme('dark')" data-theme="dark">Темная</button>
+                        <button class="theme-chip theme-warm" onclick="setTheme('warm')" data-theme="warm">Тёплая</button>
+                        <button class="theme-chip theme-amoled" onclick="setTheme('amoled')" data-theme="amoled">Amoled</button>
+                        <button class="theme-chip theme-high-contrast" onclick="setTheme('high-contrast')" data-theme="high-contrast">Контраст</button>
+                    </div>
+                </div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-textWidth">Макс. ширина</label>
+                        <span id="label-textWidth" class="setting-value-badge">90%</span>
+                    </div>
+                    <input type="range" id="input-textWidth" min="50" max="100" value="90" step="1" oninput="setTextWidth(this.value)">
+                </div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-dimmerValue">Яркость экрана</label>
+                        <span id="label-dimmerValue" class="setting-value-badge">0%</span>
+                    </div>
+                    <input type="range" id="input-dimmerValue" min="0" max="85" value="0" step="5" oninput="setDimmer(this.value)">
+                </div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-lineHeight">Межстрочный интервал</label>
+                        <span id="label-lineHeight" class="setting-value-badge">1.8</span>
+                    </div>
+                    <input type="range" id="input-lineHeight" min="1.0" max="2.5" value="1.8" step="0.1" oninput="setLineHeight(this.value)">
+                </div>
+
+                <div class="setting-item-block">
+                    <div class="setting-label-row">
+                        <label for="input-letterSpacing">Расстояние между букв</label>
+                        <span id="label-letterSpacing" class="setting-value-badge">0px</span>
+                    </div>
+                    <input type="range" id="input-letterSpacing" min="-1" max="5" value="0" step="0.5" oninput="setLetterSpacing(this.value)">
                 </div>
             </div>
+
+            <div class="settings-section">
+                <div class="settings-section-title">Навигация</div>
+
+                <div class="setting-item-row">
+                    <div class="setting-info">
+                        <label for="indent-toggle">Красная строка</label>
+                        <p class="setting-hint">Отступ первого абзаца</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="indent-toggle" checked onchange="setIndent(this.checked)">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+
+                <div class="setting-item-block" id="para-indent-group">
+                    <div class="setting-label-row">
+                        <label for="input-paraIndent">Размер отступа</label>
+                        <span id="label-paraIndent" class="setting-value-badge">25px</span>
+                    </div>
+                    <input type="range" id="input-paraIndent" min="0" max="60" value="25" step="5" oninput="setParaIndent(this.value)">
+                </div>
+
+                <div class="setting-item-row">
+                    <div class="setting-info">
+                        <label for="autoscroll-toggle">Автопрокрутка</label>
+                        <p class="setting-hint">Листать текст автоматически</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+
+                <div class="setting-item-block autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
+                    <div class="setting-label-row">
+                        <label for="autoscroll-speed">Скорость прокрутки</label>
+                    </div>
+                    <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
+                </div>
+
+                <div class="setting-item-row" id="admin-mode-setting">
+                    <div class="setting-info">
+                        <label for="admin-mode-toggle">Режим редактора</label>
+                        <p class="setting-hint" id="admin-mode-hint">Только для администраторов</p>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
+                        <span class="slider round"></span>
+                    </label>
+                </div>
+            </div>
+
         </div>
 
-        <!-- Tab: Display -->
-        <div id="settings-tab-display" class="settings-tab-content hidden">
-            <div class="setting-item-block">
-                <label>Цветовая схема</label>
-                <div class="theme-grid">
-                    <button class="theme-chip theme-light active" onclick="setTheme('light')" data-theme="light">Светлая</button>
-                    <button class="theme-chip theme-sepia" onclick="setTheme('sepia')" data-theme="sepia">Сепия</button>
-                    <button class="theme-chip theme-gray" onclick="setTheme('gray')" data-theme="gray">Серая</button>
-                    <button class="theme-chip theme-dark" onclick="setTheme('dark')" data-theme="dark">Темная</button>
-                    <button class="theme-chip theme-amoled" onclick="setTheme('amoled')" data-theme="amoled">Amoled</button>
-                </div>
-            </div>
-
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-textWidth">Макс. ширина</label>
-                    <span id="label-textWidth" class="setting-value-badge">90%</span>
-                </div>
-                <input type="range" id="input-textWidth" min="50" max="100" value="90" step="1" oninput="setTextWidth(this.value)">
-            </div>
-
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-dimmerValue">Яркость экрана</label>
-                    <span id="label-dimmerValue" class="setting-value-badge">0%</span>
-                </div>
-                <input type="range" id="input-dimmerValue" min="0" max="85" value="0" step="5" oninput="setDimmer(this.value)">
-            </div>
-
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-lineHeight">Межстрочный интервал</label>
-                    <span id="label-lineHeight" class="setting-value-badge">1.8</span>
-                </div>
-                <input type="range" id="input-lineHeight" min="1.0" max="2.5" value="1.8" step="0.1" oninput="setLineHeight(this.value)">
-            </div>
-            
-            <div class="setting-item-block">
-                <div class="setting-label-row">
-                    <label for="input-letterSpacing">Расстояние между букв</label>
-                    <span id="label-letterSpacing" class="setting-value-badge">0px</span>
-                </div>
-                <input type="range" id="input-letterSpacing" min="-1" max="5" value="0" step="0.5" oninput="setLetterSpacing(this.value)">
-            </div>
-        </div>
-
-        <!-- Tab: Navigation -->
-        <div id="settings-tab-nav" class="settings-tab-content hidden">
-            <div class="setting-item-row">
-                <div class="setting-info">
-                    <label for="indent-toggle">Красная строка</label>
-                    <p class="setting-hint">Отступ первого абзаца</p>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="indent-toggle" checked onchange="setIndent(this.checked)">
-                    <span class="slider round"></span>
-                </label>
-            </div>
-
-            <div class="setting-item-block" id="para-indent-group">
-                <div class="setting-label-row">
-                    <label for="input-paraIndent">Размер отступа</label>
-                    <span id="label-paraIndent" class="setting-value-badge">25px</span>
-                </div>
-                <input type="range" id="input-paraIndent" min="0" max="60" value="25" step="5" oninput="setParaIndent(this.value)">
-            </div>
-            
-            <div class="setting-item-row">
-                <div class="setting-info">
-                    <label for="autoscroll-toggle">Автопрокрутка</label>
-                    <p class="setting-hint">Листать текст автоматически</p>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="autoscroll-toggle" onchange="toggleAutoscrollSetting(this.checked)">
-                    <span class="slider round"></span>
-                </label>
-            </div>
-
-            <div class="setting-item-block autoscroll-speed-group" id="autoscroll-speed-group" style="display:none;">
-                <div class="setting-label-row">
-                    <label for="autoscroll-speed">Скорость прокрутки</label>
-                </div>
-                <input type="range" id="autoscroll-speed" min="1" max="10" value="3" oninput="setAutoscrollSpeed(this.value)">
-            </div>
-
-            <div class="setting-item-row" style="margin-top:16px; border-top:1px solid var(--divider); padding-top:16px;">
-                <div class="setting-info">
-                    <label for="admin-mode-toggle">Режим редактора</label>
-                    <p class="setting-hint">Только для администраторов</p>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" id="admin-mode-toggle" onchange="toggleAdminMode(this.checked)">
-                    <span class="slider round"></span>
-                </label>
-            </div>
-        </div>
-        
         <button class="close-settings-btn" onclick="toggleSettings()">Готово</button>
     </div>
 
@@ -462,6 +541,42 @@
         </div>
     </div>
 
+    <!-- === Add Chapter Modal (Admin) === -->
+    <div id="add-chapter-overlay" class="modal-overlay hidden" onclick="closeAddChapterModal()"></div>
+    <div id="add-chapter-modal" class="edit-url-modal hidden">
+        <h3>Добавить главу</h3>
+        <p class="edit-url-chapter-name">Будет добавлена в текущий том.</p>
+        <label class="add-chapter-field">
+            <span>Номер главы</span>
+            <input type="text" id="add-chapter-number" class="edit-url-input" placeholder="например: 15 или 15.5">
+        </label>
+        <label class="add-chapter-field">
+            <span>Имя (опционально)</span>
+            <input type="text" id="add-chapter-name" class="edit-url-input" placeholder="Глава 15 — Встреча">
+        </label>
+        <label class="add-chapter-field">
+            <span>Ссылка</span>
+            <input type="text" id="add-chapter-url" class="edit-url-input" placeholder="https://telegra.ph/...">
+        </label>
+        <div class="edit-url-actions">
+            <button class="edit-url-cancel" onclick="closeAddChapterModal()">Отмена</button>
+            <button class="edit-url-save" id="add-chapter-save" onclick="saveAddChapter()">Добавить</button>
+        </div>
+    </div>
+
+    <!-- === Series Cover Edit Modal (Admin) === -->
+    <div id="cover-edit-overlay" class="modal-overlay hidden" onclick="closeCoverEditModal()"></div>
+    <div id="cover-edit-modal" class="edit-url-modal hidden">
+        <h3>Обложка серии</h3>
+        <p class="edit-url-chapter-name" id="cover-edit-series-name"></p>
+        <input type="text" id="cover-edit-input" class="edit-url-input" placeholder="https://..." oninput="updateCoverPreview()">
+        <img id="cover-edit-preview" class="cover-edit-preview" alt="" style="display:none;">
+        <div class="edit-url-actions">
+            <button class="edit-url-cancel" onclick="closeCoverEditModal()">Отмена</button>
+            <button class="edit-url-save" id="cover-edit-save" onclick="saveCoverEdit()">Сохранить</button>
+        </div>
+    </div>
+
     <!-- === Typo Reporter === -->
     <div id="typo-tooltip" class="typo-tooltip">
         <svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-1px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -481,6 +596,13 @@
         </div>
     </div>
 
-    <script src="reader.js?v=12"></script>
+    <script>
+        (function () {
+            const rev = window.__READER_REV || '23';
+            const script = document.createElement('script');
+            script.src = `reader.js?v=${encodeURIComponent(rev)}`;
+            document.body.appendChild(script);
+        })();
+    </script>
 </body>
 </html>

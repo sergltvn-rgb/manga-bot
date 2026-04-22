@@ -3,12 +3,20 @@
     {
       "id": "akashic_records",
       "title": "Хроники Акаши",
-      "cover_url": "",
+      "cover_url": "https://img4.teletype.in/files/bb/4f/bb4faec0-5c18-451e-a201-b167ead793d4.png",
       "volumes": [
         {
           "volume": 11,
           "custom_name": "Том 11",
           "chapters": [
+            {
+              "chapter": "Иллюстрации",
+              "custom_name": "Цветные Иллюстрации",
+              "url": "https://telegra.ph/Hroniki-Akashi--Tom-11-Glava-Illyustracii-04-21",
+              "urls": [
+                "https://telegra.ph/Hroniki-Akashi--Tom-11-Glava-Illyustracii-04-21"
+              ]
+            },
             {
               "chapter": "0",
               "custom_name": "Пролог",
@@ -228,7 +236,7 @@
     {
       "id": "ranobe_alya",
       "title": "Воительница Аля",
-      "cover_url": "",
+      "cover_url": "https://preview.redd.it/the-hero-alya-who-sometimes-hides-her-feeling-in-russian-v0-nadp4kreg6qg1.jpg?width=640&crop=smart&auto=webp&s=0e2e3a965b8c356e89108d38a439082d2c339516",
       "volumes": [
         {
           "volume": 1,
@@ -257,7 +265,7 @@
     {
       "id": "manga_ru",
       "title": "Аля иногда... Манга",
-      "cover_url": "",
+      "cover_url": "https://cover.imglib.info/uploads/cover/tokidoki-bosotto-roshiago-de-dereru-tonari-no-alya-san-tenacity-saho/cover/912a56e4-e10f-46e5-85e0-4b1aa62f51a5_orig.jpg",
       "volumes": [
         {
           "volume": 1,
@@ -309,5 +317,15 @@
       ]
     }
   ],
-  "bot_username": "Alyamangapage_bot"
+  "bot_username": "Alyamangapage_bot",
+  "admin_ids": [
+    "5477281591",
+    "1747374025",
+    "1577647113",
+    "1424182136",
+    "6573251552",
+    "7623430602",
+    "6210312655",
+    "8033148365"
+  ]
 }
