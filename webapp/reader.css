@@ -1573,33 +1573,88 @@ input[type="range"]::-webkit-slider-thumb {
 .retry-btn:hover { box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.45); }
 .retry-btn:active { transform: scale(0.95); opacity: 0.9; }
 
+/* Refresh v4: Pull-to-Refresh — pill-индикатор сверху, управление через JS (inline translateY + data-state) */
+.pull-refresh-indicator {
+    position: fixed;
+    top: env(safe-area-inset-top, 0px);
+    left: 50%;
+    transform: translate(-50%, -110%);
+    z-index: 4500;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 18px;
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-pill);
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    box-shadow: var(--shadow-pop);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    white-space: nowrap;
+    max-width: calc(100vw - 24px);
+}
+.pull-refresh-indicator[data-state="pulling"],
+.pull-refresh-indicator[data-state="ready"],
+.pull-refresh-indicator[data-state="refreshing"] {
+    opacity: 1;
+}
+.pull-refresh-indicator[data-state="refreshing"] .ptr-spinner {
+    animation: ptr-spin 0.9s linear infinite;
+}
+.pull-refresh-indicator[data-state="ready"] .ptr-label::after { content: ' — отпустите'; }
+@keyframes ptr-spin {
+    to { transform: rotate(360deg); }
+}
+.ptr-spinner {
+    flex-shrink: 0;
+}
+
+/* Refresh v4: network banner — pill с градиентом под статус */
 .network-status-banner {
     position: fixed;
     top: calc(env(safe-area-inset-top, 0px) + 10px);
-    left: 12px;
-    right: 12px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-6px);
+    max-width: calc(100vw - 24px);
     z-index: 4000;
-    padding: 9px 12px;
-    border-radius: 10px;
-    border: 1px solid transparent;
+    padding: 8px 16px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--surface-border);
+    background: var(--surface-1);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: 0.2px;
     text-align: center;
-    backdrop-filter: blur(6px);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: var(--shadow-pop);
+    opacity: 0;
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+                opacity 0.25s ease;
+    pointer-events: none;
 }
-.network-status-banner.hidden {
-    display: none;
+.network-status-banner:not(.hidden) {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+    pointer-events: auto;
 }
+.network-status-banner.hidden { display: none; }
 .network-status-banner.offline {
-    background: rgba(220, 38, 38, 0.12);
-    border-color: rgba(220, 38, 38, 0.35);
-    color: var(--text);
+    background: linear-gradient(135deg, #dc2626 0%, #ef4444 100%);
+    border-color: transparent;
+    color: #fff;
 }
 .network-status-banner.online {
-    background: color-mix(in srgb, var(--accent) 12%, var(--bg));
-    border-color: color-mix(in srgb, var(--accent) 38%, var(--divider));
-    color: var(--text);
+    background: linear-gradient(135deg, #16a34a 0%, #22c55e 100%);
+    border-color: transparent;
+    color: #fff;
 }
 
 .hidden { display: none !important; }

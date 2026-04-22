@@ -36,6 +36,15 @@
     <!-- ★ Swipe-back edge indicator -->
     <div id="swipe-back-indicator" class="swipe-back-indicator"></div>
 
+    <!-- Refresh v4: Pull-to-refresh indicator -->
+    <div id="pull-refresh-indicator" class="pull-refresh-indicator" aria-hidden="true">
+        <svg class="ptr-spinner" viewBox="0 0 24 24" width="18" height="18">
+            <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="44" stroke-dashoffset="0" opacity="0.3"/>
+            <path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        <span class="ptr-label">Потяните для обновления</span>
+    </div>
+
     <!-- === ЭКРАН 1: Выбор серии === -->
     <div id="screen-series" class="screen active">
         <div class="reader-header">

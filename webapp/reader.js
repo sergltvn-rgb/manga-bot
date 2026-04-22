@@ -5265,6 +5265,131 @@ function haptic(style = 'light') {
     } catch (e) { }
 }
 
+// Refresh v4: Pull-to-Refresh для экранов series / chapters / library.
+// Работает на scroll-контейнерах `.content-area` и `#chapters-list`/`#series-list`.
+// Активируется при scrollTop === 0 и pull вниз >= 80px + 150ms delay.
+(function bindPullToRefresh() {
+    try {
+        const PTR_SELECTORS = ['#series-list', '#chapters-list', '#library-list'];
+        const THRESHOLD = 80;
+        const HOLD_MS = 150;
+        const indicator = document.getElementById('pull-refresh-indicator');
+        if (!indicator) return;
+
+        let startY = 0;
+        let lastY = 0;
+        let active = false;
+        let readyAt = 0;
+        let target = null;
+        let refreshing = false;
+
+        const setIndicator = (state, progress = 0) => {
+            if (!indicator) return;
+            if (!state) {
+                indicator.removeAttribute('data-state');
+                indicator.style.transform = 'translate(-50%, -110%)';
+                return;
+            }
+            indicator.setAttribute('data-state', state);
+            if (state === 'pulling' || state === 'ready') {
+                // Тянем — выдвигаем пропорционально
+                const y = Math.min(10, -110 + progress * 120);
+                indicator.style.transform = `translate(-50%, ${y}%)`;
+            } else if (state === 'refreshing') {
+                indicator.style.transform = 'translate(-50%, 10%)';
+                const label = indicator.querySelector('.ptr-label');
+                if (label) label.textContent = 'Обновляем...';
+            }
+        };
+
+        const getTargetFromEvent = (e) => {
+            // Определяем активный scroll-контейнер по ближайшему `.content-area` или известным selectors
+            const path = (e.composedPath ? e.composedPath() : (e.path || []));
+            for (const el of path) {
+                if (!el || !el.matches) continue;
+                if (el.matches(PTR_SELECTORS.join(','))) return el;
+                if (el.matches('.content-area')) {
+                    // убедиться что активный экран — не reader
+                    const parent = el.closest('.screen');
+                    if (parent && parent.id !== 'screen-reader' && parent.classList.contains('active')) {
+                        return el;
+                    }
+                }
+            }
+            return null;
+        };
+
+        const onStart = (e) => {
+            if (refreshing) return;
+            const t = e.touches && e.touches[0];
+            if (!t) return;
+            const el = getTargetFromEvent(e);
+            if (!el) return;
+            if (el.scrollTop > 0) return;
+            target = el;
+            startY = t.clientY;
+            lastY = startY;
+            active = true;
+            readyAt = 0;
+        };
+        const onMove = (e) => {
+            if (!active || refreshing || !target) return;
+            const t = e.touches && e.touches[0];
+            if (!t) return;
+            lastY = t.clientY;
+            const diff = lastY - startY;
+            if (diff <= 0) {
+                active = false;
+                setIndicator(null);
+                return;
+            }
+            if (target.scrollTop > 0) {
+                active = false;
+                setIndicator(null);
+                return;
+            }
+            const progress = Math.min(1, diff / THRESHOLD);
+            if (diff >= THRESHOLD) {
+                if (!readyAt) readyAt = Date.now();
+                setIndicator('ready', 1);
+            } else {
+                readyAt = 0;
+                setIndicator('pulling', progress);
+            }
+        };
+        const onEnd = async () => {
+            if (!active || refreshing) { active = false; setIndicator(null); return; }
+            active = false;
+            const diff = lastY - startY;
+            if (diff >= THRESHOLD && Date.now() - readyAt >= HOLD_MS) {
+                refreshing = true;
+                setIndicator('refreshing');
+                haptic('light');
+                try {
+                    if (typeof loadData === 'function') await loadData();
+                    if (typeof showToast === 'function') showToast('Обновлено', 'success');
+                } catch (err) {
+                    if (typeof showToast === 'function') showToast('Не удалось обновить', 'error');
+                } finally {
+                    setTimeout(() => {
+                        refreshing = false;
+                        setIndicator(null);
+                        const label = indicator.querySelector('.ptr-label');
+                        if (label) label.textContent = 'Потяните для обновления';
+                    }, 400);
+                }
+            } else {
+                setIndicator(null);
+            }
+        };
+
+        document.addEventListener('touchstart', onStart, { passive: true });
+        document.addEventListener('touchmove', onMove, { passive: true });
+        document.addEventListener('touchend', onEnd, { passive: true });
+        document.addEventListener('touchcancel', onEnd, { passive: true });
+    } catch (_) { /* ignore */ }
+})();
+
 // Refresh v4: blur-up effect для postеr обложек. Помечаем загруженные <img>
 // с классом `.series-poster-img` / `.series-detail-cover-img` и снимаем blur.
 (function bindImageBlurUp() {
