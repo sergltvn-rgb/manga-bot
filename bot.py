@@ -3913,7 +3913,15 @@ async def process_user_art_grid(callback: types.CallbackQuery, state: FSMContext
     if not sliced:
         return await callback.answer("Больше нет артов.", show_alert=True)
 
-    await callback.message.delete()
+    # callback.message — это control message предыдущей страницы, он уже удалён
+    # циклом выше (его message_id лежит в user_grid_photos). Ловим BadRequest,
+    # иначе exception прервёт handler до send_media_group и юзер увидит только
+    # исчезновение старого сообщения без новой сетки. На первом заходе из слайдера
+    # (user_grid_photos пуст) это сообщение существует — удалится штатно.
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logging.debug(f"user_art_grid: source message already deleted: {e}")
 
     media = [InputMediaPhoto(media=row[1]) for row in sliced]
     messages = await bot.send_media_group(chat_id=callback.message.chat.id, media=media)
