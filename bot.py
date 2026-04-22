@@ -133,6 +133,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Admin + user art-upload/suggest handlers (Фаза 3 шаг 20). Подключено на top-level
+# чтобы test_handlers_registered мог видеть команды при импорте bot.py.
+from services.admin_art_fsm import art_router, cmd_add_art  # noqa: E402,F401
+
+dp.include_router(art_router)
+
 
 # ============================================================================
 # ANTI-DOUBLE-TAP MIDDLEWARE для callback_query
@@ -442,12 +448,7 @@ class ArtView(StatesGroup):
     waiting_for_grid_art_number = State()
 
 
-class ArtUpload(StatesGroup):
-    waiting_for_photo = State()
-
-
-class ArtSuggest(StatesGroup):
-    waiting_for_photo = State()
+# ArtUpload и ArtSuggest FSM вынесены в services/admin_art_fsm.py (Фаза 3 шаг 20).
 
 
 class AIChat(StatesGroup):
@@ -1463,21 +1464,7 @@ async def process_vs_anime(callback: types.CallbackQuery):
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button())
 
 
-@dp.callback_query(F.data == "suggest_art_menu")
-async def callback_suggest_art_menu(callback: types.CallbackQuery, state: FSMContext):
-    if await check_cd_and_warn(callback, "suggest_art", 30):
-        return
-    await state.set_state(ArtSuggest.waiting_for_photo)
-    text = (
-        "🖼 <b>Предложка артов</b>\n\n"
-        "Отправьте <b>одну</b> красивую фотографию (арт), которую хотите предложить в нашу галерею.\n\n"
-        "❗️ <b>Требования:</b>\n"
-        "1. Рисовка качественная и приближена к аниме.\n"
-        "2. Без вотермарок на пол-экрана и лишнего текста.\n"
-        "3. Соответствие тематике Roshidere.\n\n"
-        "<i>Все арты проходят ручную проверку администрацией.</i>"
-    )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_back_button(text="❌ Отмена"))
+# callback_suggest_art_menu вынесен в services/admin_art_fsm.py (Фаза 3 шаг 20).
 
 
 @dp.callback_query(F.data == "tech_support_menu")
@@ -5557,142 +5544,10 @@ async def uc_delete_chapter(message: types.Message, state: FSMContext):
 # ----------------------------------------
 
 
-@dp.message(Command("add_art"))
-async def cmd_add_art(message: types.Message, state: FSMContext):
-    admins = await get_admins()
-    if message.from_user.id not in admins:
-        return
-    await state.set_state(ArtUpload.waiting_for_photo)
-    ART_CACHE[message.from_user.id] = {}
-    await message.answer(
-        "❗️ <b>ПРАВИЛА АРТОВ:</b>\n1. Сверять внешность с аниме.\n2. Цветные и чёткие.\n3. БЕЗ перевода и текста.\n\nКидайте фото, затем /finish",
-        parse_mode="HTML",
-    )
-
-
-@dp.message(ArtUpload.waiting_for_photo, F.photo)
-async def process_art_photo(message: types.Message):
-    ART_CACHE.setdefault(message.from_user.id, {})[message.message_id] = message.photo[-1].file_id
-
-
-@dp.message(ArtUpload.waiting_for_photo, Command("finish"))
-async def finish_art_upload(message: types.Message, state: FSMContext):
-    cache = ART_CACHE.pop(message.from_user.id, {})
-    if not cache:
-        return await message.answer("Пусто! Отмена.")
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        for msg_id in sorted(cache.keys()):
-            await db.execute('INSERT INTO arts (file_id) VALUES (?)', (cache[msg_id],))
-        await db.commit()
-    await message.answer(f"✅ Успешно загружено {len(cache)} качественных артов!")
-    await state.clear()
-
-
-# --- ПРЕДЛОЖКА АРТОВ ---
-@dp.message(Command("suggest_art"))
-async def cmd_suggest_art(message: types.Message, state: FSMContext):
-    if await check_cd_and_warn(message, "suggest_art", 30):
-        return
-    await state.set_state(ArtSuggest.waiting_for_photo)
-    text = (
-        "🖼 <b>Предложка артов</b>\n\n"
-        "Отправьте <b>одну</b> красивую фотографию (арт), которую хотите предложить в нашу галерею.\n\n"
-        "❗️ <b>Требования:</b>\n"
-        "1. Рисовка качественная и приближена к аниме.\n"
-        "2. Без вотермарок на пол-экрана и лишнего текста.\n"
-        "3. Соответствие тематике Roshidere.\n\n"
-        "<i>Все арты проходят ручную проверку администрацией.</i>"
-    )
-    await message.answer(text, parse_mode="HTML")
-
-
-@dp.message(ArtSuggest.waiting_for_photo, F.photo)
-async def process_suggested_art(message: types.Message, state: FSMContext):
-    file_id = message.photo[-1].file_id
-    user_id = message.from_user.id
-    safe_user_label = format_user_tag(message.from_user.username, message.from_user.first_name, user_id)
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('INSERT INTO suggested_arts (user_id, file_id) VALUES (?, ?)', (user_id, file_id))
-        suggest_id = cursor.lastrowid
-        await db.commit()
-
-    await message.answer("✅ <b>Ваш арт отправлен на модерацию!</b> Вы получите уведомление, когда его проверят.", parse_mode="HTML")
-    await state.clear()
-
-    admins = await get_admins()
-
-    builder = InlineKeyboardBuilder()
-    builder.button(text="✅ Принять", callback_data=f"artaccept_{suggest_id}")
-    builder.button(text="❌ Отклонить", callback_data=f"artreject_{suggest_id}")
-
-    for admin_id in admins:
-        try:
-            await bot.send_photo(
-                chat_id=admin_id,
-                photo=file_id,
-                caption=f"📝 <b>Новая предложка арта!</b>\nОт: {safe_user_label} (ID: <code>{user_id}</code>)\nВыберите действие:",
-                parse_mode="HTML",
-                reply_markup=builder.as_markup(),
-            )
-        except Exception as e:
-            logging.debug(f"suggested_art: failed to notify admin {admin_id}: {e}")
-
-
-@dp.callback_query(F.data.startswith("artaccept_"))
-async def process_art_accept(callback: types.CallbackQuery):
-    suggest_id = int(callback.data.split("_")[1])
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('SELECT user_id, file_id FROM suggested_arts WHERE id = ?', (suggest_id,))
-        row = await cursor.fetchone()
-
-        if not row:
-            return await callback.message.edit_caption(caption="❌ Заявка уже обработана или не существует.", reply_markup=None)
-
-        user_id, file_id = row
-        await db.execute('DELETE FROM suggested_arts WHERE id = ?', (suggest_id,))
-        await db.execute('INSERT INTO arts (file_id) VALUES (?)', (file_id,))
-        await db.commit()
-
-    await callback.message.edit_caption(caption="✅ <b>Арт принят!</b> Добавлен в базу.", parse_mode="HTML", reply_markup=None)
-
-    try:
-        await bot.send_message(
-            chat_id=user_id,
-            text="🎉 <b>Поздравляем!</b> Ваш предложенный арт прошел проверку и был добавлен в галерею бота!",
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logging.debug(f"art_accept: failed to notify user {user_id}: {e}")
-
-
-@dp.callback_query(F.data.startswith("artreject_"))
-async def process_art_reject(callback: types.CallbackQuery):
-    suggest_id = int(callback.data.split("_")[1])
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute('SELECT user_id FROM suggested_arts WHERE id = ?', (suggest_id,))
-        row = await cursor.fetchone()
-
-        if not row:
-            return await callback.message.edit_caption(caption="❌ Заявка уже обработана или не существует.", reply_markup=None)
-
-        user_id = row[0]
-        await db.execute('DELETE FROM suggested_arts WHERE id = ?', (suggest_id,))
-        await db.commit()
-
-    await callback.message.edit_caption(caption="❌ <b>Арт отклонен.</b> Заявка удалена.", parse_mode="HTML", reply_markup=None)
-
-    try:
-        await bot.send_message(
-            chat_id=user_id,
-            text="😔 <b>К сожалению</b>, ваш предложенный арт был отклонен администрацией (возможно, не подошел по качеству или стилистике).",
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logging.debug(f"art_reject: failed to notify user {user_id}: {e}")
+# Art-handlers (cmd_add_art, process_art_photo, finish_art_upload, cmd_suggest_art,
+# process_suggested_art, process_art_accept, process_art_reject) + ArtUpload/ArtSuggest FSM
+# вынесены в services/admin_art_fsm.py (Фаза 3 шаг 20). Router подключается в main()
+# через dp.include_router(art_router).
 
 
 # ==============================================================================
@@ -6927,7 +6782,7 @@ async def cmd_kick(message: types.Message):
 
 async def main():
     dp.include_router(rp_router)
-
+    # art_router подключён на top-level (см. блок рядом с импортом services/admin_art_fsm).
     await init_db()
 
     dp.message.outer_middleware(StatsMiddleware())

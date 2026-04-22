@@ -1012,3 +1012,51 @@ class TestCommentsReport:
         from services.comments_api import handle_comments_report
 
         assert inspect.iscoroutinefunction(handle_comments_report)
+
+
+# --- services.admin_art_fsm ---
+
+
+class TestAdminArtFsm:
+    def test_router_and_fsm_exported(self):
+        from aiogram import Router
+        from aiogram.fsm.state import StatesGroup
+
+        from services.admin_art_fsm import ArtSuggest, ArtUpload, art_router
+
+        assert isinstance(art_router, Router)
+        assert issubclass(ArtUpload, StatesGroup)
+        assert issubclass(ArtSuggest, StatesGroup)
+
+    def test_handlers_are_coroutines(self):
+        import inspect
+
+        from services.admin_art_fsm import (
+            callback_suggest_art_menu,
+            cmd_add_art,
+            cmd_suggest_art,
+            finish_art_upload,
+            process_art_accept,
+            process_art_photo,
+            process_art_reject,
+            process_suggested_art,
+        )
+
+        for h in (
+            cmd_add_art,
+            cmd_suggest_art,
+            finish_art_upload,
+            process_art_photo,
+            process_suggested_art,
+            process_art_accept,
+            process_art_reject,
+            callback_suggest_art_menu,
+        ):
+            assert inspect.iscoroutinefunction(h)
+
+    def test_router_has_handlers(self):
+        from services.admin_art_fsm import art_router
+
+        # 5 message handlers + 3 callback handlers.
+        assert len(art_router.message.handlers) >= 5
+        assert len(art_router.callback_query.handlers) >= 3
