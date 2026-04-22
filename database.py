@@ -402,21 +402,49 @@ async def get_user_stats(user_id: int):
                         res[i] = 0
             return tuple(res)
 
+# ---------------------------------------------------------------
+# TTL-кэш списка админов. Админы читаются на горячих путях
+# (antispam middleware, /admin callbacks, API-хендлеры), и каждый
+# вызов без кэша открывал aiosqlite.connect + SELECT — сотни
+# round-trip'ов в минуту. Кэш 5 сек + invalidate на add/remove.
+# ---------------------------------------------------------------
+import time as _admins_time
+
+_ADMINS_CACHE: tuple[float, list[int]] | None = None
+_ADMINS_CACHE_TTL = 5.0  # секунд
+
+
+def _invalidate_admins_cache() -> None:
+    global _ADMINS_CACHE
+    _ADMINS_CACHE = None
+
+
 async def get_admins():
+    global _ADMINS_CACHE
+    now = _admins_time.monotonic()
+    cached = _ADMINS_CACHE
+    if cached and now - cached[0] < _ADMINS_CACHE_TTL:
+        return list(cached[1])
     async with aiosqlite.connect('manga.db') as db:
         async with db.execute('SELECT user_id FROM admins') as cursor:
             rows = await cursor.fetchall()
-            return [row[0] for row in rows] + ADMIN_IDS
+    result = [row[0] for row in rows] + ADMIN_IDS
+    _ADMINS_CACHE = (now, result)
+    return list(result)
+
 
 async def add_admin(user_id: int):
     async with aiosqlite.connect('manga.db') as db:
         await db.execute('INSERT OR IGNORE INTO admins (user_id) VALUES (?)', (user_id,))
         await db.commit()
+    _invalidate_admins_cache()
+
 
 async def remove_admin(user_id: int):
     async with aiosqlite.connect('manga.db') as db:
         await db.execute('DELETE FROM admins WHERE user_id = ?', (user_id,))
         await db.commit()
+    _invalidate_admins_cache()
 
 async def get_chapters(lang: str):
     async with aiosqlite.connect('manga.db') as db:

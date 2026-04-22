@@ -36,6 +36,10 @@ from aiogram.types import (
 import uuid
 from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL, API_HOST
 
+# Основной путь к SQLite-базе. Раньше было 55+ хардкоженных "manga.db" в коде.
+# Если база переедет — правим в одном месте.
+DB_PATH = 'manga.db'
+
 # Кэш для коротких ссылок переименования (обход лимита 64 символа в deeplink)
 RENAME_CACHE = {}
 
@@ -988,7 +992,7 @@ async def callback_claim_drop(callback: types.CallbackQuery):
     reward = ACTIVE_DROPS.pop(chat_id)
     
     # Начисляем награду
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
         await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (reward, user_id))
         await db.commit()
@@ -1361,9 +1365,7 @@ async def process_rename_name(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
         
-        # Синхронизация JSON
-        import aiosqlite
-        import json
+        # Синхронизация JSON (json/aiosqlite уже импортированы в топ-левел)
         result, _, _ = await get_cached_reader_data(force_refresh=True)
         
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
@@ -1472,7 +1474,7 @@ async def cmd_daily(message: types.Message):
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
 
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('BEGIN IMMEDIATE')
         await db.execute(
             'INSERT OR IGNORE INTO users_stats (user_id, balance, daily_streak, last_daily) VALUES (?, 0, 0, NULL)',
@@ -1543,7 +1545,7 @@ async def roll_lootbox_reward(user_id: int) -> str:
 
     if roll < 0.80:
         coins = random.randint(300, 700)
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (coins, user_id))
             await db.commit()
         return f"📦 <b>Лутбокс!</b>\n\nВы нашли мешочек с монетами: <b>{coins}</b> монет! 💰"
@@ -1554,14 +1556,14 @@ async def roll_lootbox_reward(user_id: int) -> str:
         return f"📦 <b>Лутбокс!</b>\n\nВы получили редкий значок: <b>{badge}</b>! 🏅"
 
     title = random.choice(LOOTBOX_TITLES)
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('UPDATE users_stats SET custom_title = ? WHERE user_id = ?', (title, user_id))
         await db.commit()
     return f"📦 <b>Лутбокс!</b>\n\nЭПИЧЕСКИЙ ВЫИГРЫШ! Вы получили уникальный титул: <b>{title}</b>! 👑"
 
 
 async def purchase_and_roll_lootbox(user_id: int) -> tuple[bool, str]:
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             'UPDATE users_stats SET balance = balance - ? WHERE user_id = ? AND balance >= ?',
             (LOOTBOX_PRICE, user_id, LOOTBOX_PRICE)
@@ -1595,7 +1597,7 @@ async def cmd_feed_harem(message: types.Message):
     if not any(m[0] == target_id for m in harem):
         return await message.answer("❌ Этот пользователь не в вашем гареме!")
         
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('UPDATE users_stats SET balance = balance - 10 WHERE user_id = ? AND balance >= 10', (owner_id,))
         if cursor.rowcount == 0:
             return await message.answer("❌ Нужно 10 монет, чтобы покормить участника гарема!")
@@ -1617,7 +1619,7 @@ async def cmd_pet_harem(message: types.Message):
     if not any(m[0] == target_id for m in harem):
         return await message.answer("❌ Этот пользователь не в вашем гареме!")
         
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('UPDATE users_stats SET balance = balance - 5 WHERE user_id = ? AND balance >= 5', (owner_id,))
         if cursor.rowcount == 0:
             return await message.answer("❌ Нужно 5 монет, чтобы погладить участника гарема!")
@@ -1805,7 +1807,7 @@ async def cmd_pay(message: types.Message):
     if receive_amount <= 0:
         return await message.answer("❌ Слишком маленькая сумма перевода с учетом комиссии.")
 
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('BEGIN IMMEDIATE')
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (sender_id,))
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (target_id,))
@@ -1875,7 +1877,7 @@ async def cmd_rob(message: types.Message):
         if amount_candidate < 1:
             amount_candidate = 1
         
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('BEGIN IMMEDIATE')
             await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (target.id,))
             await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (initiator.id,))
@@ -1920,7 +1922,7 @@ async def cmd_rob(message: types.Message):
     else:
         # Провал - штраф (рандом от 50 до 150 монет)
         penalty = random.randint(50, 150)
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (initiator.id,))
             await db.execute('UPDATE users_stats SET balance = MAX(0, balance - ?) WHERE user_id = ?', (penalty, initiator.id))
             await db.commit()
@@ -2055,39 +2057,59 @@ async def cmd_stats(message: types.Message):
     if message.chat.type == "private":
         return await message.answer("Статистика чата доступна только в группах.")
     if await check_action_cooldown(message, "stats"): return
-    
-    async with aiosqlite.connect('manga.db') as db:
-        # Запрос с балансом
-        async with db.execute('SELECT user_id, messages_count, balance FROM users_stats ORDER BY messages_count DESC LIMIT 100') as cursor:
+
+    # Ранее брали top-100 и последовательно дергали get_chat_member → >10с.
+    # Теперь: top-20 из БД + параллельный asyncio.gather → обычно <500ms.
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT user_id, messages_count, balance FROM users_stats '
+            'WHERE messages_count > 0 ORDER BY messages_count DESC LIMIT 20'
+        ) as cursor:
             top_msg = await cursor.fetchall()
-            
-        async with db.execute('SELECT user_id, (hugs + kisses + bites + slaps + pats) as rp_total, balance FROM users_stats ORDER BY rp_total DESC LIMIT 100') as cursor:
+
+        async with db.execute(
+            'SELECT user_id, (hugs + kisses + bites + slaps + pats) as rp_total, balance '
+            'FROM users_stats WHERE (hugs + kisses + bites + slaps + pats) > 0 '
+            'ORDER BY rp_total DESC LIMIT 20'
+        ) as cursor:
             top_rp = await cursor.fetchall()
-            
-    # Собираем данные с фильтрацией по текущему чату
-    async def format_top(rows, unit):
-        res = []
-        rank = 1
+
+    # Общий пул id — одним gather запросим всех, кто нужен для обоих топов.
+    all_uids = {uid for uid, _, _ in top_msg} | {uid for uid, _, _ in top_rp}
+    chat_id = message.chat.id
+
+    async def _safe_member(uid: int):
+        try:
+            cm = await bot.get_chat_member(chat_id, uid)
+            if cm.status in ("left", "kicked", "banned"):
+                return None
+            return cm.user.first_name if cm.user else f"ID: {uid}"
+        except Exception:
+            return None
+
+    members = await asyncio.gather(*[_safe_member(uid) for uid in all_uids])
+    name_by_uid = dict(zip(all_uids, members))
+
+    def format_top(rows, unit: str) -> str:
+        res, rank = [], 1
         for uid, count, balance in rows:
-            if count == 0: continue
-            if rank > 5: break
-            try:
-                chat_member = await bot.get_chat_member(message.chat.id, uid)
-                if chat_member.status in ["left", "kicked", "banned"]:
-                    continue
-                name = chat_member.user.first_name if chat_member.user else f"ID: {uid}"
-            except Exception:
+            if rank > 5:
+                break
+            name = name_by_uid.get(uid)
+            if not name:
                 continue
-            
-            # Убрали лишние эмодзи, оставили только кошелек
             res.append(f"{rank}. <b>{escape_html_text(name)}</b> — {count} {unit} | {balance} 💰")
             rank += 1
         return "\n".join(res) if res else "<i>Пока пусто...</i>"
 
-    top_msg_text = await format_top(top_msg, "сообщ.")
-    top_rp_text = await format_top(top_rp, "РП")
-    
-    text = f"📊 <b>Статистика чата:</b>\n\n🗣 <b>Топ болтунов:</b>\n{top_msg_text}\n\n🎭 <b>Самые любвеобильные:</b>\n{top_rp_text}"
+    top_msg_text = format_top(top_msg, "сообщ.")
+    top_rp_text = format_top(top_rp, "РП")
+
+    text = (
+        f"📊 <b>Статистика чата:</b>\n\n"
+        f"🗣 <b>Топ болтунов:</b>\n{top_msg_text}\n\n"
+        f"🎭 <b>Самые любвеобильные:</b>\n{top_rp_text}"
+    )
     # В группах — autodelete через TTL_GROUP_PANEL (2 мин).
     await reply_group_ephemeral(message, text, ttl=TTL_GROUP_PANEL, parse_mode="HTML")
 
@@ -2145,7 +2167,7 @@ async def process_marriage_callback(callback: types.CallbackQuery):
         
     date_now = datetime.now().strftime("%d.%m.%Y")
     
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('INSERT INTO marriages (chat_id, user1_id, user1_name, user2_id, user2_name, date) VALUES (?, ?, ?, ?, ?, ?)', 
                          (chat_id, int(init_id), init_name, int(targ_id), targ_name, date_now))
         await db.commit()
@@ -2205,7 +2227,7 @@ async def handle_divorce_cb(callback: types.CallbackQuery):
     if action == "divorce_no":
         return await callback.message.answer("<i>Брак спасен! (пока что...)</i>", parse_mode="HTML")
         
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         # Get users in the marriage to update their divorce count
         async with db.execute('SELECT user1_id, user2_id FROM marriages WHERE chat_id = ? AND (user1_id = ? OR user2_id = ?)', 
                          (callback.message.chat.id, callback.from_user.id, callback.from_user.id)) as cursor:
@@ -2294,7 +2316,7 @@ async def list_marriages(message: types.Message):
     if message.chat.type == "private": return await temp_reply(message, "Только в группах!")
     if await check_cd_and_warn(message, "marriages_list", 10): return
 
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('SELECT user1_id, user2_id, user1_name, user2_name, date FROM marriages WHERE chat_id = ?', (message.chat.id,)) as cursor:
             marriages = await cursor.fetchall()
             
@@ -2505,7 +2527,7 @@ async def bottle_spin(callback: types.CallbackQuery):
 #     # Временно уберем кулдаун для теста
 #     # if await check_cd_and_warn(message, "ship", 60): return
 #     
-#     async with aiosqlite.connect('manga.db') as db:
+#     async with aiosqlite.connect(DB_PATH) as db:
 #         async with db.execute('SELECT user_id, first_name FROM users_stats WHERE chat_id = ? ORDER BY RANDOM() LIMIT 2', (message.chat.id,)) as cursor:
 #             participants = await cursor.fetchall()
 #             
@@ -2673,7 +2695,7 @@ async def shop_page_switch(callback: types.CallbackQuery):
 
 
 async def try_buy_badge(user_id: int, badge_name: str, price: int) -> tuple[bool, str]:
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('BEGIN IMMEDIATE')
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
         async with db.execute(
@@ -2740,7 +2762,7 @@ async def shop_process_title(message: types.Message, state: FSMContext):
         await state.clear()
         return await message.answer("Пока вы думали, у вас закончились монеты...")
         
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('UPDATE users_stats SET balance = balance - 500, custom_title = ? WHERE user_id = ? AND balance >= 500', (title, message.from_user.id))
         if cursor.rowcount == 0:
             await state.clear()
@@ -2767,7 +2789,7 @@ async def shop_buy_hidden_cb(callback: types.CallbackQuery):
     if balance < 1000:
         return await callback.answer("Недостаточно монет! Нужно 1000.", show_alert=True)
         
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('UPDATE users_stats SET balance = balance - 1000, is_hidden = 1 WHERE user_id = ? AND balance >= 1000', (callback.from_user.id,))
         if cursor.rowcount == 0:
             return await callback.answer("Недостаточно монет! Нужно 1000.", show_alert=True)
@@ -2792,7 +2814,7 @@ async def shop_buy_shield_cb(callback: types.CallbackQuery):
     _, page = _parse_shop_buy(callback.data)
     user_id = callback.from_user.id
     price = 800
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('BEGIN IMMEDIATE')
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
         cursor = await db.execute(
@@ -2818,7 +2840,7 @@ async def shop_buy_xp_pack_cb(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     price = 500
     xp_amount = 120
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('BEGIN IMMEDIATE')
         await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
         cursor = await db.execute(
@@ -2920,7 +2942,7 @@ async def cmd_dice_games(message: types.Message):
             )
             
         # Списываем ставку
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             cursor = await db.execute('UPDATE users_stats SET balance = balance - ?, casino_played = casino_played + 1 WHERE user_id = ? AND balance >= ?', (bet, user_id, bet))
             if cursor.rowcount == 0:
                 return await maybe_ephemeral_reply(message, "❌ <b>Недостаточно средств!</b>", parse_mode="HTML", delay=4)
@@ -2939,7 +2961,7 @@ async def cmd_dice_games(message: types.Message):
         elif val == 1: win = bet * 10 # BAR
         
         if win > 0:
-            async with aiosqlite.connect('manga.db') as db:
+            async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('UPDATE users_stats SET balance = balance + ? WHERE user_id = ?', (win, user_id))
                 await db.commit()
             msg = await message.answer(f"🎉 <b>ДЖЕКПОТ!</b>\nВы выиграли <b>{win}</b> монет! 💰", parse_mode="HTML")
@@ -3215,7 +3237,7 @@ async def process_admin_del_chapter_item(callback: types.CallbackQuery):
     lang = data[3]
     chapter_num = data[4]
 
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
          if is_ranobe:
               cursor = await db.execute('DELETE FROM ranobe_urls WHERE chapter_number = ? AND lang = ?', (chapter_num, lang))
          else:
@@ -3291,7 +3313,7 @@ async def process_admin_del_akashic_item(callback: types.CallbackQuery):
          return await callback.answer("❌ У вас нет прав!", show_alert=True)
     data = callback.data.split("_")
     volume, chapter = int(data[3]), data[4]
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
          cursor = await db.execute('DELETE FROM akashic_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter))
          await db.commit()
          deleted = cursor.rowcount > 0
@@ -3360,7 +3382,7 @@ async def process_admin_del_british_item(callback: types.CallbackQuery):
          return await callback.answer("❌ У вас нет прав!", show_alert=True)
     data = callback.data.split("_")
     volume, chapter = int(data[3]), data[4]
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
          cursor = await db.execute('DELETE FROM british_ranobe WHERE volume = ? AND chapter = ?', (volume, chapter))
          await db.commit()
          deleted = cursor.rowcount > 0
@@ -3737,7 +3759,7 @@ async def _fetch_admin_metrics() -> dict:
         "marriages": 0, "total_balance": 0,
     }
     try:
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute('SELECT COUNT(*) FROM users_stats') as c:
                 row = await c.fetchone()
                 metrics["users_total"] = row[0] if row else 0
@@ -3993,7 +4015,7 @@ async def _render_admins_section(callback: types.CallbackQuery):
     for idx, uid in enumerate(admins_list, 1):
         profile = None
         try:
-            async with aiosqlite.connect('manga.db') as db:
+            async with aiosqlite.connect(DB_PATH) as db:
                 async with db.execute(
                     'SELECT username, first_name FROM user_profiles WHERE user_id = ?', (uid,)
                 ) as c:
@@ -4238,14 +4260,11 @@ async def admin_menu_commands(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-import json
-import os
-import re
+# NOTE: json/os/re уже импортируются в БЛОК 1 наверху файла.
+# Дубликаты импортов удалены (ранее были здесь перед build_reader_data).
 
 
 async def build_reader_data() -> dict:
-    import aiosqlite
-    from aiogram import Bot
     
     # Пытаемся получить имя бота, чтобы WebApp мог генерировать правильные deeplink-и
     bot_username = "Alyamangapage_bot"
@@ -4257,7 +4276,7 @@ async def build_reader_data() -> dict:
 
     result = {"series": [], "bot_username": bot_username}
     
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         # ПРЕДЗАГРУЗКА: Читаем все кастомные имена разом (решение N+1 Query)
         custom_names = {}
         async with db.execute('SELECT id, name FROM custom_names') as c:
@@ -4941,7 +4960,7 @@ async def cmd_toggle_sync(message: types.Message):
     admins = await get_admins()
     if message.from_user.id not in admins: return
     
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('CREATE TABLE IF NOT EXISTS sync_settings (id INTEGER PRIMARY KEY, locked INTEGER DEFAULT 0)')
         async with db.execute('SELECT locked FROM sync_settings WHERE id = 1') as cursor:
             row = await cursor.fetchone()
@@ -4966,7 +4985,7 @@ async def cmd_sync_webapp(message: types.Message):
     if message.from_user.id not in admins: return
     
     # Проверка на блокировку синхронизации
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         try:
             async with db.execute('SELECT locked FROM sync_settings WHERE id = 1') as cursor:
                 row = await cursor.fetchone()
@@ -5402,7 +5421,7 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
         # Короткий текст или одна ссылка
         link = " ".join(links) if links else text_input
 
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         # Получаем текущий макс. sort_order для этого тайтла/тома
         async with db.execute(f'SELECT MAX(sort_order) FROM {ct["table"]} WHERE {ct["id_col"]} = ?', (content_id,)) as cursor:
             row = await cursor.fetchone()
@@ -5419,9 +5438,8 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
     try:
         invalidate_reader_cache("chapter_uploaded_via_bot")
         result, _, _ = await get_cached_reader_data(force_refresh=True)
-        import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            _json.dump(result, f, ensure_ascii=False, indent=2)
+            json.dump(result, f, ensure_ascii=False, indent=2)
         spawn_bg(run_git_sync(f"tg upload sync: {series_id if 'series_id' in locals() else content_id}"), name="run_git_sync:tg_upload") # type: ignore
     except Exception as e: logging.error(f"Sync error: {e}")
 
@@ -5543,7 +5561,7 @@ async def uc_delete_chapter(message: types.Message, state: FSMContext):
     content_id = data.get('content_id', '')
     chapter = message.text.strip()
 
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             f'DELETE FROM {ct["table"]} WHERE {ct["chapter_col"]} = ? AND {ct["id_col"]} = ?',
             (chapter, content_id)
@@ -5578,7 +5596,7 @@ async def finish_art_upload(message: types.Message, state: FSMContext):
     cache = ART_CACHE.pop(message.from_user.id, {})
     if not cache: return await message.answer("Пусто! Отмена.")
     
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         for msg_id in sorted(cache.keys()): await db.execute('INSERT INTO arts (file_id) VALUES (?)', (cache[msg_id],))
         await db.commit()
     await message.answer(f"✅ Успешно загружено {len(cache)} качественных артов!")
@@ -5607,7 +5625,7 @@ async def process_suggested_art(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     safe_user_label = format_user_tag(message.from_user.username, message.from_user.first_name, user_id)
     
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('INSERT INTO suggested_arts (user_id, file_id) VALUES (?, ?)', (user_id, file_id))
         suggest_id = cursor.lastrowid
         await db.commit()
@@ -5637,7 +5655,7 @@ async def process_suggested_art(message: types.Message, state: FSMContext):
 async def process_art_accept(callback: types.CallbackQuery):
     suggest_id = int(callback.data.split("_")[1])
     
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('SELECT user_id, file_id FROM suggested_arts WHERE id = ?', (suggest_id,))
         row = await cursor.fetchone()
         
@@ -5660,7 +5678,7 @@ async def process_art_accept(callback: types.CallbackQuery):
 async def process_art_reject(callback: types.CallbackQuery):
     suggest_id = int(callback.data.split("_")[1])
     
-    async with aiosqlite.connect('manga.db') as db:
+    async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute('SELECT user_id FROM suggested_arts WHERE id = ?', (suggest_id,))
         row = await cursor.fetchone()
         
@@ -5721,7 +5739,7 @@ class StatsMiddleware(BaseMiddleware):
             
             try:
                 await upsert_user_profile(user_id, event.from_user.username, event.from_user.first_name)
-                async with aiosqlite.connect('manga.db') as db:
+                async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
                     if getattr(event, 'sticker', None):
                         if is_group:
@@ -6412,14 +6430,13 @@ async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Resp
         except (ValueError, TypeError):
             return aiohttp.web.json_response({"error": "forbidden"}, status=403, headers=CORS_HEADERS)
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('DELETE FROM custom_names WHERE id = ?', (obj_id,))
             await db.commit()
         invalidate_reader_cache("custom_name_deleted")
 
         # Обновляем JSON и синхронизируем с GitHub в фоне
         result, _, _ = await get_cached_reader_data(force_refresh=True)
-        import json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         
@@ -6519,7 +6536,7 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
 
         table, _, _, _ = info
         
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             if series_id in ('akashic_records', 'british_belle'):
                 # Получаем макс sort_order если это новая запись
                 async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE volume=?", (volume,)) as cur:
@@ -6545,9 +6562,8 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
 
         # Пересобираем JSON и синхронизируем
         result, _, _ = await get_cached_reader_data(force_refresh=True)
-        import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            _json.dump(result, f, ensure_ascii=False, indent=2)
+            json.dump(result, f, ensure_ascii=False, indent=2)
         spawn_bg(run_git_sync("URL edited via webapp editor"), name="run_git_sync:url_edit")
         await _audit_admin_action(
             action="chapter_edit",
@@ -6628,7 +6644,7 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
         id_col = 'lang' if series_id.startswith(('manga_', 'ranobe_')) else 'volume'
         idx_val = series_id.split('_', 1)[1] if '_' in series_id else volume
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             # Получаем текущий макс. sort_order
             async with db.execute(f'SELECT MAX(sort_order) FROM {table} WHERE {id_col} = ?', (str(idx_val),)) as cursor:
                 row = await cursor.fetchone()
@@ -6660,9 +6676,8 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
 
         # Пересобираем JSON и синхронизируем
         result, _, _ = await get_cached_reader_data(force_refresh=True)
-        import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            _json.dump(result, f, ensure_ascii=False, indent=2)
+            json.dump(result, f, ensure_ascii=False, indent=2)
         spawn_bg(run_git_sync(f"bulk upload {added} chapters via webapp"), name="run_git_sync:bulk_upload")
         await _audit_admin_action(
             action="chapter_bulk_upload",
@@ -6740,7 +6755,7 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
 
         table, _, _, _ = info
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             # Reject if chapter already exists so callers know to use PUT /api/chapters.
             if series_id in ('akashic_records', 'british_belle'):
                 async with db.execute(
@@ -6788,9 +6803,8 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
         invalidate_reader_cache("chapter_added")
 
         result_data, _, _ = await get_cached_reader_data(force_refresh=True)
-        import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
         spawn_bg(run_git_sync(f"add chapter {chapter} via webapp"), name="run_git_sync:add_chapter")
         await _audit_admin_action(
             action="chapter_add",
@@ -6852,7 +6866,7 @@ async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
         table, _, _, _ = info
         deleted = 0
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             if series_id in ('akashic_records', 'british_belle'):
                 cursor = await db.execute(
                     f"DELETE FROM {table} WHERE volume=? AND chapter=?",
@@ -6884,9 +6898,8 @@ async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
         invalidate_reader_cache("chapter_deleted")
 
         result_data, _, _ = await get_cached_reader_data(force_refresh=True)
-        import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
         spawn_bg(run_git_sync(f"delete chapter {chapter} via webapp"), name="run_git_sync:delete_chapter")
         await _audit_admin_action(
             action="chapter_delete",
@@ -6943,7 +6956,7 @@ async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Resp
                 return aiohttp.web.json_response({"error": "invalid cover_url"}, status=400, headers=CORS_HEADERS)
 
         cover_key = f"cover_{series_id}"
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             if cover_url_clean is None:
                 await db.execute('DELETE FROM custom_names WHERE id = ?', (cover_key,))
             else:
@@ -6955,9 +6968,8 @@ async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Resp
         invalidate_reader_cache("series_cover_updated")
 
         result_data, _, _ = await get_cached_reader_data(force_refresh=True)
-        import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            _json.dump(result_data, f, ensure_ascii=False, indent=2)
+            json.dump(result_data, f, ensure_ascii=False, indent=2)
         spawn_bg(run_git_sync(f"update cover for {series_id} via webapp"), name="run_git_sync:update_cover")
         await _audit_admin_action(
             action="series_update",
@@ -7009,7 +7021,7 @@ async def handle_likes_get(request: aiohttp.web.Request) -> aiohttp.web.Response
     user = get_auth_user(request)
     user_id = str(user.get("id", "")) if user else ""
     try:
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute('SELECT COUNT(*) FROM chapter_likes WHERE chapter_key = ?', (chapter_key,)) as c:
                 count = (await c.fetchone())[0]
             liked = False
@@ -7033,7 +7045,7 @@ async def handle_likes_post(request: aiohttp.web.Request) -> aiohttp.web.Respons
         if not chapter_key:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute('SELECT 1 FROM chapter_likes WHERE chapter_key = ? AND user_id = ?', (chapter_key, user_id)) as c:
                 exists = await c.fetchone()
             if exists:
@@ -7060,7 +7072,7 @@ async def handle_comments_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
     current_user_id = str(user.get("id", "")) if user else None
     
     try:
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             query = """
                 SELECT 
                     c.id, c.user_id, c.user_name, c.text, c.created_at, c.parent_id,
@@ -7157,7 +7169,7 @@ async def handle_comments_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
         else:
             parent_id = None
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 'INSERT INTO chapter_comments (chapter_key, user_id, user_name, text, parent_id) VALUES (?, ?, ?, ?, ?)',
                 (chapter_key, user_id, user_name, text, parent_id)
@@ -7179,7 +7191,7 @@ async def handle_comments_delete(request: aiohttp.web.Request) -> aiohttp.web.Re
         data = await request.json()
         comment_id = data.get('comment_id', 0)
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             # Проверяем владельца
             async with db.execute('SELECT user_id FROM chapter_comments WHERE id = ?', (comment_id,)) as c:
                 row = await c.fetchone()
@@ -7226,7 +7238,7 @@ async def handle_comments_update(request: aiohttp.web.Request) -> aiohttp.web.Re
         if len(new_text) > MAX_COMMENT_TEXT_LENGTH:
             return aiohttp.web.json_response({"error": "too long"}, status=400, headers=CORS_HEADERS)
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             # Проверяем владельца (редактировать может только автор — админ удаляет, но не редактирует от имени)
             async with db.execute('SELECT user_id FROM chapter_comments WHERE id = ?', (comment_id,)) as c:
                 row = await c.fetchone()
@@ -7309,7 +7321,7 @@ async def handle_typo_post(request: aiohttp.web.Request) -> aiohttp.web.Response
         if len(comment) > MAX_TYPO_COMMENT_LENGTH:
             return aiohttp.web.json_response({"error": "comment too long"}, status=400, headers=CORS_HEADERS)
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 'INSERT INTO chapter_typos (chapter_key, user_id, user_name, selected_text, context_text, comment) VALUES (?, ?, ?, ?, ?, ?)',
                 (chapter_key, user_id, user_name, selected_text, context_text, comment)
@@ -7414,7 +7426,7 @@ async def handle_reactions_get(request: aiohttp.web.Request) -> aiohttp.web.Resp
     user_id = str(user.get("id", "")) if user else None
     
     try:
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             # Общее количество по каждой реакции
             async with db.execute(
                 'SELECT reaction, COUNT(*) as count FROM chapter_reactions WHERE chapter_key = ? GROUP BY reaction',
@@ -7463,7 +7475,7 @@ async def handle_reactions_post(request: aiohttp.web.Request) -> aiohttp.web.Res
         if len(reaction) > 16:
             return aiohttp.web.json_response({"error": "invalid reaction"}, status=400, headers=CORS_HEADERS)
              
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             # Если такая же реакция уже стоит - убираем (toggle)
             async with db.execute(
                 'SELECT reaction FROM chapter_reactions WHERE chapter_key = ? AND user_id = ?',
@@ -7544,7 +7556,7 @@ async def handle_progress_post(request: aiohttp.web.Request) -> aiohttp.web.Resp
         if not series_id or not chapter_key or chapter_key == "undefined":
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
 
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('''
                 INSERT INTO user_bookmarks (user_id, series_id, volume_id, chapter_key, scroll_pos, updated_at)
                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -7568,7 +7580,7 @@ async def handle_progress_get(request: aiohttp.web.Request) -> aiohttp.web.Respo
     user_id = str(user.get("id", ""))
     
     try:
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
                 'SELECT series_id, volume_id, chapter_key, scroll_pos, updated_at FROM user_bookmarks WHERE user_id = ? ORDER BY updated_at DESC',
                 (str(user_id),)
@@ -7648,7 +7660,7 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
 
         total_changes = 0
         unmatched: list[str] = []
-        async with aiosqlite.connect('manga.db') as db:
+        async with aiosqlite.connect(DB_PATH) as db:
             # Probe: how many rows exist for this (table, id_col)?
             async with db.execute(
                 f'SELECT COUNT(*) FROM {table} WHERE {id_col} = ?',
@@ -7686,9 +7698,8 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
 
         # Обновляем JSON и синхронизируем с GitHub
         result, _, _ = await get_cached_reader_data(force_refresh=True)
-        import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
-            _json.dump(result, f, ensure_ascii=False, indent=2)
+            json.dump(result, f, ensure_ascii=False, indent=2)
         spawn_bg(run_git_sync(f"chapters sorting updated for {series_id}"), name="run_git_sync:sort_chapters")
         await _audit_admin_action(
             action="sort_chapters",
