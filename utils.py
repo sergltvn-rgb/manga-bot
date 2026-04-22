@@ -30,6 +30,32 @@ _PENDING_DELETES: set[tuple[int, int]] = set()
 # Serialize git syncs to avoid concurrent commit/push races
 _GIT_SYNC_LOCK = asyncio.Lock()
 
+# ---------------------------------------------------------------------------
+# TTL presets for auto-delete (seconds). Use in reply_and_forget / temp_reply.
+# ---------------------------------------------------------------------------
+TTL_ERROR = 5            # Errors, cooldown-warnings, validation fails
+TTL_GAME = 180           # Games, RP, small-random results (3 min)
+TTL_HEAVY_GAME = 300     # Bottles, roulette, ship, lootbox (5 min)
+TTL_MENU = 600           # Menus, FSM dialog prompts (10 min)
+
+# ---------------------------------------------------------------------------
+# Background tasks registry: prevent `asyncio.create_task(...)` from being
+# garbage-collected prematurely (common aiogram pitfall).
+# ---------------------------------------------------------------------------
+_BG_TASKS: set[asyncio.Task] = set()
+
+
+def spawn_bg(coro, *, name: str | None = None) -> asyncio.Task:
+    """Create an `asyncio.Task` and keep a strong ref until it completes.
+
+    Use this everywhere instead of raw `asyncio.create_task(...)` when the
+    returned task is not awaited, to avoid GC-related cancellations.
+    """
+    task = asyncio.create_task(coro, name=name)
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return task
+
 
 def _build_user_cd_key(user_id: int, action: str) -> str:
     return f"u:{user_id}:{action}"
@@ -214,7 +240,7 @@ def schedule_delete_once(message: types.Message, delay: int):
     chat_id = getattr(getattr(message, "chat", None), "id", None)
     message_id = getattr(message, "message_id", None)
     if chat_id is None or message_id is None:
-        asyncio.create_task(delete_after(message, delay))
+        spawn_bg(delete_after(message, delay), name="delete_after:nochat")
         return
 
     key = (chat_id, message_id)
@@ -228,7 +254,7 @@ def schedule_delete_once(message: types.Message, delay: int):
         finally:
             _PENDING_DELETES.discard(key)
 
-    asyncio.create_task(_runner())
+    spawn_bg(_runner(), name=f"delete_after:{chat_id}:{message_id}")
 
 
 async def delete_after(message: types.Message, delay: int):
@@ -244,6 +270,51 @@ async def delete_after(message: types.Message, delay: int):
 async def temp_reply(message: types.Message, text: str, delay: int = 5, **kwargs):
     msg = await message.answer(text, **kwargs)
     schedule_delete_once(msg, delay)
+    return msg
+
+
+async def reply_and_forget(
+    message: types.Message,
+    text: str,
+    *,
+    ttl: int = TTL_GAME,
+    delete_source: bool = False,
+    **kwargs,
+) -> types.Message | None:
+    """Send a reply and schedule both it and (optionally) the source command
+    for auto-delete after ``ttl`` seconds.
+
+    - `ttl`: one of TTL_ERROR / TTL_GAME / TTL_HEAVY_GAME / TTL_MENU, or custom.
+    - `delete_source=True`: also schedule deletion of the original user command
+      (only effective in groups; in DMs the bot cannot clean user messages).
+    - Safe to call with optional extra aiogram `answer()` kwargs.
+    """
+    try:
+        msg = await message.answer(text, **kwargs)
+    except Exception as e:
+        logging.debug(f"reply_and_forget: answer failed: {e}")
+        return None
+    if ttl and ttl > 0:
+        schedule_delete_once(msg, ttl)
+    is_group = getattr(getattr(message, "chat", None), "type", None) in ("group", "supergroup")
+    if delete_source and is_group:
+        schedule_delete_once(message, ttl)
+    return msg
+
+
+async def cb_warn(
+    callback: types.CallbackQuery,
+    text: str,
+    *,
+    alert: bool = False,
+) -> None:
+    """Warn user via callback answer popup, without polluting the chat.
+    Use for cooldown/permission denials on inline buttons.
+    """
+    try:
+        await callback.answer(text, show_alert=alert)
+    except Exception as e:
+        logging.debug(f"cb_warn: callback.answer failed: {e}")
 
 
 async def maybe_ephemeral_reply(

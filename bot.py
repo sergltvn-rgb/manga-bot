@@ -96,6 +96,47 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+
+# ============================================================================
+# ГЛОБАЛЬНЫЙ ERROR HANDLER
+# ----------------------------------------------------------------------------
+# Логирует все необработанные исключения из хэндлеров.
+# Пользователю показывает дружелюбное сообщение (ephemeral в группе).
+# Telegram-ошибки (BadRequest/Forbidden при delete/edit) глушатся отдельно.
+# ============================================================================
+@dp.errors()
+async def global_error_handler(event: types.ErrorEvent) -> bool:
+    exc = event.exception
+    update = event.update
+
+    # Шум: сообщение не найдено/уже удалено, бот забанен, BadRequest на edit.
+    from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+    if isinstance(exc, (TelegramBadRequest, TelegramForbiddenError)):
+        logging.debug(f"global_error_handler: suppressed Telegram API error: {exc}")
+        return True
+
+    logging.exception("Unhandled handler error", exc_info=exc)
+
+    # Пытаемся уведомить пользователя дружелюбно, без подробностей стека.
+    try:
+        msg_like = None
+        if update.message is not None:
+            msg_like = update.message
+        elif update.callback_query is not None:
+            # alert без изменения чата
+            await update.callback_query.answer(
+                "⚠️ Что-то пошло не так. Попробуй ещё раз.",
+                show_alert=False,
+            )
+            return True
+        if msg_like is not None:
+            reply = await msg_like.answer("⚠️ Что-то пошло не так. Я уже записал это в логи.")
+            schedule_delete_once(reply, 10)
+    except Exception as notify_err:
+        logging.debug(f"global_error_handler: notify failed: {notify_err}")
+    return True
+
+
 # Глобальная aiohttp сессия (открывается один раз при старте)
 _http_session: aiohttp.ClientSession | None = None
 READER_CACHE_TTL_SECONDS = 30
@@ -337,6 +378,13 @@ from utils import (
     safe_edit_or_reply,
     validate_telegram_data,
     set_cooldown,
+    spawn_bg,
+    reply_and_forget,
+    cb_warn,
+    TTL_ERROR,
+    TTL_GAME,
+    TTL_HEAVY_GAME,
+    TTL_MENU,
 )
 
 
@@ -845,7 +893,7 @@ async def callback_claim_drop(callback: types.CallbackQuery):
         parse_mode="HTML"
     )
     if callback.message.chat.type in ["group", "supergroup"]:
-        asyncio.create_task(delete_after(callback.message, 30))
+        spawn_bg(delete_after(callback.message, 30), name="delete_after:coin_reward")
     await callback.answer(f"Вы получили {reward} монет!")
 
 @dp.message(Command("start", ignore_mention=True), StateFilter("*"))
@@ -3414,7 +3462,7 @@ async def process_user_art_grid(callback: types.CallbackQuery, state: FSMContext
                 await bot.delete_message(chat_id, mid)
             except Exception as e:
                 logging.debug(f"user_art_grid:auto_cleanup failed for message {mid}: {e}")
-    asyncio.create_task(auto_cleanup(callback.message.chat.id, all_ids, state))
+    spawn_bg(auto_cleanup(callback.message.chat.id, all_ids, state), name="auto_cleanup:user_art_grid")
 
 # --- Ввод номера страницы в сетке ---
 @dp.callback_query(F.data == "grid_page_input")
@@ -3809,7 +3857,7 @@ async def sync_reader_snapshot(commit_message: str) -> None:
         result = await build_reader_data()
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
-        asyncio.create_task(run_git_sync(commit_message))
+        spawn_bg(run_git_sync(commit_message), name="run_git_sync:snapshot")
     except Exception as e:
         logging.error(f"Reader sync error: {e}")
 
@@ -4638,7 +4686,7 @@ async def process_admin_art_grid(callback: types.CallbackQuery, state: FSMContex
             except Exception as e:
                 logging.debug(f"admin_art_grid:auto_cleanup failed for message {mid}: {e}")
 
-    asyncio.create_task(auto_cleanup(callback.message.chat.id, photo_ids + [control_msg.message_id], state))
+    spawn_bg(auto_cleanup(callback.message.chat.id, photo_ids + [control_msg.message_id], state), name="auto_cleanup:admin_art_grid")
 
 @dp.callback_query(F.data == "admin_art_view_back")
 async def process_admin_art_view_back(callback: types.CallbackQuery, state: FSMContext):
@@ -4838,7 +4886,7 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result, f, ensure_ascii=False, indent=2)
-        asyncio.create_task(run_git_sync(f"tg upload sync: {series_id if 'series_id' in locals() else content_id}")) # type: ignore
+        spawn_bg(run_git_sync(f"tg upload sync: {series_id if 'series_id' in locals() else content_id}"), name="run_git_sync:tg_upload") # type: ignore
     except Exception as e: logging.error(f"Sync error: {e}")
 
     # Формируем имя для уведомления
@@ -5785,7 +5833,7 @@ async def handle_reader_data(request: aiohttp.web.Request) -> aiohttp.web.Respon
         return aiohttp.web.json_response({"error": str(e), "series": []}, status=500, headers=CORS_HEADERS)
     finally:
         duration_ms = (time.perf_counter() - started_at) * 1000.0
-        asyncio.create_task(
+        spawn_bg(
             _record_server_reader_metric(
                 request,
                 duration_ms=duration_ms,
@@ -5830,7 +5878,7 @@ async def handle_rename_delete(request: aiohttp.web.Request) -> aiohttp.web.Resp
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             json.dump(result, f, ensure_ascii=False, indent=2)
         
-        asyncio.create_task(run_git_sync("reset custom name via webapp"))
+        spawn_bg(run_git_sync("reset custom name via webapp"), name="run_git_sync:reset_custom_name")
         await _audit_admin_action(
             action="rename_delete",
             actor_user_id=user_id,
@@ -5955,7 +6003,7 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result, f, ensure_ascii=False, indent=2)
-        asyncio.create_task(run_git_sync("URL edited via webapp editor"))
+        spawn_bg(run_git_sync("URL edited via webapp editor"), name="run_git_sync:url_edit")
         await _audit_admin_action(
             action="chapter_edit",
             actor_user_id=user_id,
@@ -6070,7 +6118,7 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result, f, ensure_ascii=False, indent=2)
-        asyncio.create_task(run_git_sync(f"bulk upload {added} chapters via webapp"))
+        spawn_bg(run_git_sync(f"bulk upload {added} chapters via webapp"), name="run_git_sync:bulk_upload")
         await _audit_admin_action(
             action="chapter_bulk_upload",
             actor_user_id=user_id,
@@ -6198,7 +6246,7 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result_data, f, ensure_ascii=False, indent=2)
-        asyncio.create_task(run_git_sync(f"add chapter {chapter} via webapp"))
+        spawn_bg(run_git_sync(f"add chapter {chapter} via webapp"), name="run_git_sync:add_chapter")
         await _audit_admin_action(
             action="chapter_add",
             actor_user_id=user_id,
@@ -6294,7 +6342,7 @@ async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result_data, f, ensure_ascii=False, indent=2)
-        asyncio.create_task(run_git_sync(f"delete chapter {chapter} via webapp"))
+        spawn_bg(run_git_sync(f"delete chapter {chapter} via webapp"), name="run_git_sync:delete_chapter")
         await _audit_admin_action(
             action="chapter_delete",
             actor_user_id=user_id,
@@ -6365,7 +6413,7 @@ async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Resp
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result_data, f, ensure_ascii=False, indent=2)
-        asyncio.create_task(run_git_sync(f"update cover for {series_id} via webapp"))
+        spawn_bg(run_git_sync(f"update cover for {series_id} via webapp"), name="run_git_sync:update_cover")
         await _audit_admin_action(
             action="series_update",
             actor_user_id=user_id,
@@ -7086,7 +7134,7 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
         import json as _json
         with open("webapp/chapters_data.json", "w", encoding="utf-8") as f:
             _json.dump(result, f, ensure_ascii=False, indent=2)
-        asyncio.create_task(run_git_sync(f"chapters sorting updated for {series_id}"))
+        spawn_bg(run_git_sync(f"chapters sorting updated for {series_id}"), name="run_git_sync:sort_chapters")
         await _audit_admin_action(
             action="sort_chapters",
             actor_user_id=user_id_str,
