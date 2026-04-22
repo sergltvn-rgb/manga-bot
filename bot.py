@@ -2196,9 +2196,11 @@ async def cmd_infa(message: types.Message):
     match = REGEX_INFA.search(message.text)
     if not match:
         return await temp_reply(message, "❌ Формат: /инфа [текст] или infa [text]")
-    await message.answer(
+    await reply_and_forget(
+        message,
         f"🔮 Вероятность того, что {escape_html_text(match.group(1).strip())} — <b>{chance}%</b>",
-        parse_mode="HTML"
+        ttl=TTL_GAME,
+        parse_mode="HTML",
     )
 
 @dp.message(F.text & F.text.regexp(REGEX_RANDOM))
@@ -2209,7 +2211,12 @@ async def cmd_random(message: types.Message):
         return await temp_reply(message, "❌ Формат: /рандом [число] или random [number]")
     limit = int(match.group(1))
     if limit <= 0: return await temp_reply(message, "Число должно быть больше нуля!")
-    await message.answer(f"🎲 Выпало число: <b>{random.randint(1, limit)}</b>", parse_mode="HTML")
+    await reply_and_forget(
+        message,
+        f"🎲 Выпало число: <b>{random.randint(1, limit)}</b>",
+        ttl=TTL_GAME,
+        parse_mode="HTML",
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_CHOOSE))
 async def cmd_choose(message: types.Message):
@@ -2218,7 +2225,12 @@ async def cmd_choose(message: types.Message):
     if not match:
         return await temp_reply(message, "❌ Формат: /выбери [A] или [B] / choose [A] or [B]")
     choice = random.choice([match.group(1).strip(), match.group(2).strip()])
-    await message.answer(f"🤔 Я думаю, лучше:\n👉 <b>{escape_html_text(choice)}</b>", parse_mode="HTML")
+    await reply_and_forget(
+        message,
+        f"🤔 Я думаю, лучше:\n👉 <b>{escape_html_text(choice)}</b>",
+        ttl=TTL_GAME,
+        parse_mode="HTML",
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_ALYA_CHOOSE))
 async def cmd_alya_choose(message: types.Message):
@@ -2240,13 +2252,23 @@ async def cmd_alya_choose(message: types.Message):
     )
     response = await ask_groq("Что лучше?", system_prompt)
     await wait_msg.delete()
-    await message.answer(f"🌸 <b>Выбор Али:</b>\n{escape_html_text(response)}", parse_mode="HTML")
+    await reply_and_forget(
+        message,
+        f"🌸 <b>Выбор Али:</b>\n{escape_html_text(response)}",
+        ttl=TTL_GAME,
+        parse_mode="HTML",
+    )
 
 @dp.message(F.text & F.text.regexp(REGEX_COIN))
 async def cmd_coin(message: types.Message):
     if await check_action_cooldown(message, "iris_cmd"): return
     coin = random.choice(["Орел", "Решка"])
-    await message.answer(f"🪙 Выпало: <b>{coin}</b>", parse_mode="HTML")
+    await reply_and_forget(
+        message,
+        f"🪙 Выпало: <b>{coin}</b>",
+        ttl=TTL_GAME,
+        parse_mode="HTML",
+    )
 
 # ==============================================================================
 # БЛОК: ИИ-ИГРЫ И ШИППЕРИНГ
@@ -2882,22 +2904,24 @@ async def cmd_magic_ball(message: types.Message):
                "Пока не ясно, попробуй снова", "Спроси позже", "Лучше не рассказывать", "Сейчас нельзя предсказать", 
                "Сконцентрируйся и спроси опять", "Даже не думай", "Мой ответ - нет", "По моим данным - нет", 
                "Перспективы не очень хорошие", "Весьма сомнительно"]
-    await message.answer(
+    await reply_and_forget(
+        message,
         f"🎱 <b>Вопрос:</b> <i>{escape_html_text(question)}</i>\n<b>Ответ:</b> {random.choice(answers)}",
-        parse_mode="HTML"
+        ttl=TTL_GAME,
+        parse_mode="HTML",
     )
 
 @dp.message(F.text & F.text.regexp(REGEX_COMPATIBILITY))
 async def cmd_compatibility(message: types.Message):
     if await check_action_cooldown(message, "iris_cmd"): return
     if not message.reply_to_message:
-        return await message.answer("Ответьте на сообщение пользователя, чтобы узнать вашу совместимость!")
-        
+        return await temp_reply(message, "Ответьте на сообщение пользователя, чтобы узнать вашу совместимость!", delay=TTL_ERROR)
+
     user1 = message.from_user
     user2 = message.reply_to_message.from_user
-    
+
     if user1.id == user2.id:
-        return await message.answer("Совместимость с самим собой — 100% (но это грустно) 🥲")
+        return await reply_and_forget(message, "Совместимость с самим собой — 100% (но это грустно) 🥲", ttl=TTL_GAME)
         
     base = sum([ord(c) for c in str(min(user1.id, user2.id)) + str(max(user1.id, user2.id))])
     daily_seed = datetime.now().day
@@ -2905,9 +2929,11 @@ async def cmd_compatibility(message: types.Message):
     compat = random.randint(0, 100)
     random.seed()
     
-    await message.answer(
+    await reply_and_forget(
+        message,
         f"💞 Совместимость <b>{escape_html_text(user1.first_name)}</b> и <b>{escape_html_text(user2.first_name)}</b> на сегодня — <b>{compat}%</b>",
-        parse_mode="HTML"
+        ttl=TTL_GAME,
+        parse_mode="HTML",
     )
 
 @dp.message(F.text & F.text.regexp(REGEX_ROULETTE))
@@ -2915,9 +2941,9 @@ async def cmd_roulette(message: types.Message):
     if await check_action_cooldown(message, "roulette"): return
     chance = random.randint(1, 6)
     if chance == 1:
-        await message.answer("💥 <b>БАХ!</b> Вы словили пулю. (Помянем 🕯)", parse_mode="HTML")
+        await reply_and_forget(message, "💥 <b>БАХ!</b> Вы словили пулю. (Помянем 🕯)", ttl=TTL_HEAVY_GAME, parse_mode="HTML")
     else:
-        await message.answer("🔫 <i>Щелк...</i> Вам повезло, барабан был пуст.", parse_mode="HTML")
+        await reply_and_forget(message, "🔫 <i>Щелк...</i> Вам повезло, барабан был пуст.", ttl=TTL_GAME, parse_mode="HTML")
 
 
 # ==============================================================================

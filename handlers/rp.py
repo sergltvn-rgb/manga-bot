@@ -127,7 +127,7 @@ async def get_rp_gif(action: str) -> str | None:
 keys_sorted = sorted(RP_ACTIONS.keys(), key=len, reverse=True)
 REGEX_RP = re.compile(r'(?i)^[/*\s]*(' + '|'.join(keys_sorted) + r')(?:\s+(.+))?$')
 
-from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply
+from utils import is_on_cooldown, check_cd_and_warn, delete_after, temp_reply, reply_and_forget, TTL_GAME, TTL_ERROR
 MAX_GROUP_TARGETS = 5
 
 
@@ -322,4 +322,5 @@ async def rp_commands(message: types.Message):
             reply_markup=build_rp_gif_keyboard(user1.id),
         )
     else:
-        await message.answer(caption, parse_mode="HTML")
+        # Text fallback когда не смогли получить GIF — автоудаляем через TTL_GAME.
+        await reply_and_forget(message, caption, ttl=TTL_GAME, parse_mode="HTML")
