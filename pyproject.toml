@@ -1,0 +1,49 @@
+[project]
+name = "manga-bot"
+version = "0.1.0"
+description = "Telegram bot for Roshidere manga/ranobe reader + community features"
+requires-python = ">=3.11"
+
+# --------------------------------------------------------------------------
+# Ruff — единый линтер + форматтер. Запуск:
+#   ruff check .
+# --------------------------------------------------------------------------
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+extend-exclude = [
+    ".venv",
+    "venv",
+    "__pycache__",
+    "webapp/node_modules",
+    "scratch/_audit_*.py",  # временные аудит-скрипты
+]
+
+[tool.ruff.lint]
+# Минимально-полезное ядро. Главная цель — ловить shadowing (F811),
+# из-за которого уже раз упала вся админ-панель, и bare except (E722).
+# Остальное (BLE001, B, ASYNC, SIM) — расширим ПОСЛЕ того, как пройдёмся
+# по старому коду отдельным коммитом и почистим warnings.
+select = [
+    "F",        # pyflakes: undefined names, unused imports, **F811 redefined-while-unused**
+    "E9",       # runtime SyntaxError
+    "E722",     # bare `except:`
+]
+# Осознанные исключения для текущей кодовой базы.
+ignore = [
+    "E501",     # длинные строки — у нас много HTML в f-строках
+    "F401",     # неиспользованные импорты (пока не чистили)
+    "F403",     # `from X import *` — используется в некоторых модулях
+    "F841",     # unused local variable — их немного, не блокер
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Диагностические скрипты — не линтуем.
+"scratch/*.py" = ["ALL"]
+# Тесты: fixture-override через одноимённые функции — нормальная практика.
+"tests/*.py" = ["F811"]
+
+[tool.ruff.format]
+quote-style = "preserve"
+indent-style = "space"
+line-ending = "auto"

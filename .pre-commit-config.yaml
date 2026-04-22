@@ -1,0 +1,39 @@
+# Pre-commit hooks для локальной защиты от регрессий.
+# Установка (один раз):
+#   pip install pre-commit
+#   pre-commit install
+#
+# Ручной прогон по всему репо:
+#   pre-commit run --all-files
+repos:
+  # 1) Ruff — линтер + авто-форматирование.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+
+  # 2) Кастомный чек: shadowing top-level функций.
+  #    Однажды `_is_bot_admin` был определён дважды в bot.py,
+  #    вторая перекрыла первую, вся админ-панель отвалилась.
+  - repo: local
+    hooks:
+      - id: no-shadowing
+        name: No top-level function shadowing
+        entry: python scripts/check_no_shadowing.py
+        language: system
+        types: [python]
+        pass_filenames: true
+
+  # 3) Базовые здравые проверки.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
