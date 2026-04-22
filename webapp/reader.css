@@ -475,6 +475,23 @@ body {
     height: 100%;
     object-fit: cover;
     display: block;
+    /* Refresh v4: blur-up для плавной загрузки */
+    background: var(--surface-2);
+    transition: filter 0.35s ease, opacity 0.35s ease;
+}
+img.series-poster-img {
+    filter: blur(12px);
+    opacity: 0.65;
+}
+img.series-poster-img.is-loaded {
+    filter: blur(0);
+    opacity: 1;
+}
+img.series-poster-img[src]:not([src=""]):not(.is-loaded) {
+    /* пока идёт декодирование, лёгкий shimmer-эффект */
+    background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.4s ease-in-out infinite;
 }
 div.r4-poster-placeholder.series-poster-img {
     /* Display `.series-poster-img` размеры наследуются */
@@ -608,6 +625,125 @@ div.r4-poster-placeholder.series-poster-img {
 @keyframes pulse-badge {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.7; }
+}
+
+/* Refresh v4: series detail hero — крупная обложка + метаданные + CTA */
+.series-detail-hero {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4) 0;
+}
+.series-detail-hero[hidden] { display: none; }
+
+.series-detail-top {
+    display: grid;
+    grid-template-columns: 104px 1fr;
+    gap: var(--space-4);
+    align-items: start;
+}
+
+.series-detail-cover {
+    width: 104px;
+    aspect-ratio: 2 / 3;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--surface-2);
+    border: 1px solid var(--surface-border);
+    box-shadow: var(--shadow-card);
+    position: relative;
+}
+.series-detail-cover-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: filter 0.35s ease, opacity 0.35s ease;
+}
+img.series-detail-cover-img { filter: blur(10px); opacity: 0.7; }
+img.series-detail-cover-img.is-loaded { filter: blur(0); opacity: 1; }
+div.r4-poster-placeholder.series-detail-cover-img { aspect-ratio: auto; }
+
+.series-detail-meta {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+.series-detail-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.series-detail-cta {
+    align-self: flex-start;
+    padding: 10px 20px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--accent-gradient);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(var(--accent-rgb), 0.38);
+    transition: transform 0.15s, filter 0.2s, box-shadow 0.2s;
+    -webkit-tap-highlight-color: transparent;
+}
+.series-detail-cta:hover { filter: brightness(1.05); box-shadow: 0 8px 22px rgba(var(--accent-rgb), 0.48); }
+.series-detail-cta:active { transform: scale(0.97); }
+.series-detail-cta:disabled { opacity: 0.45; pointer-events: none; box-shadow: none; }
+
+.series-detail-description {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    margin: 0;
+    background: var(--surface-1);
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-3);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.series-detail-description[data-collapsed="true"] {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.series-detail-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+/* NEW/HOT badges на poster-карточках */
+.series-poster-badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    z-index: 3;
+    padding: 3px 8px;
+    border-radius: var(--radius-pill);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    pointer-events: none;
+}
+.series-poster-badge.is-new {
+    background: linear-gradient(135deg, #10b981 0%, #34d399 100%);
+}
+.series-poster-badge.is-hot {
+    background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
 }
 
 /* === ТАБЫ ТОМОВ (Refresh v4) === */

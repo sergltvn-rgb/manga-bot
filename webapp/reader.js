@@ -1632,6 +1632,16 @@ function renderSeriesPosterCard(s, idx = 0) {
         chips.push('<span class="r4-chip r4-chip--outline">серия</span>');
     }
 
+    // Refresh v4: NEW/HOT badges — data-driven через поля серии (если есть).
+    // NEW: s.is_new === true или серия не читалась и имеет пометку s.recently_added === true.
+    // HOT: s.hot === true или s.popular === true.
+    const badges = [];
+    if (s.is_new === true || s.recently_added === true) {
+        badges.push('<span class="series-poster-badge is-new">NEW</span>');
+    } else if (s.hot === true || s.popular === true) {
+        badges.push('<span class="series-poster-badge is-hot">HOT</span>');
+    }
+
     // Админ-действия — плавающая полоска в углу обложки.
     const adminOverlay = isAdminMode ? `
         <div class="series-poster-admin" onclick="event.stopPropagation();">
@@ -1655,6 +1665,7 @@ function renderSeriesPosterCard(s, idx = 0) {
     <div class="series-card series-poster" data-series-id="${escapeHtml(String(s.id))}">
         <div class="series-poster-cover">
             ${coverInner}
+            ${badges.join('')}
             ${chips.length ? `<div class="series-poster-chips">${chips.join('')}</div>` : ''}
             ${progressBar}
             ${adminOverlay}
@@ -1664,6 +1675,66 @@ function renderSeriesPosterCard(s, idx = 0) {
             <p class="series-poster-meta">${meta}</p>
         </div>
     </div>`;
+}
+
+// Refresh v4: series detail hero над списком глав. Рендерится data-driven —
+// если в данных нет description/tags/cover_url, соответствующие блоки скрываются.
+function renderSeriesDetailHero(series) {
+    const hero = document.getElementById('series-detail-hero');
+    if (!hero) return;
+    if (!series) { hero.hidden = true; hero.innerHTML = ''; return; }
+
+    const totalCh = (series.volumes || []).reduce((sum, v) => sum + ((v.chapters || []).length), 0);
+    const readCount = (series.volumes || []).reduce((sum, v) => {
+        return sum + (v.chapters || []).filter(c => isRead(series.id, v.volume, c.chapter)).length;
+    }, 0);
+    const progress = totalCh > 0 ? Math.round((readCount / totalCh) * 100) : 0;
+    const lastRead = getLastRead(series.id);
+
+    // Обложка — используем img с blur-up если поле есть.
+    const firstLetter = (series.title || '?').trim().charAt(0).toUpperCase();
+    const coverHtml = series.cover_url
+        ? `<img src="${escapeHtml(series.cover_url)}" alt="${escapeHtml(series.title)}" loading="lazy" decoding="async" class="series-detail-cover-img">`
+        : `<div class="r4-poster-placeholder series-detail-cover-img">${escapeHtml(firstLetter)}</div>`;
+
+    const description = (typeof series.description === 'string' ? series.description.trim() : '');
+    const tags = Array.isArray(series.tags) ? series.tags.filter(Boolean) : [];
+    const author = typeof series.author === 'string' ? series.author.trim() : '';
+
+    // CTA — continue/start. Используем существующий handleSeriesSelectionAction.
+    const ctaLabel = lastRead ? '▶ Продолжить чтение' : '▶ Начать читать';
+    const ctaAction = lastRead
+        ? `onclick="handleSeriesSelectionAction('continue', '${escapeHtml(String(series.id))}', event)"`
+        : `onclick="handleSeriesSelectionAction('latest', '${escapeHtml(String(series.id))}', event)"`;
+    const ctaDisabled = totalCh === 0 ? 'disabled' : '';
+
+    const chipRow = [];
+    chipRow.push(`<span class="r4-chip r4-chip--outline">${series.volumes.length} томов</span>`);
+    chipRow.push(`<span class="r4-chip r4-chip--outline">${totalCh} глав</span>`);
+    if (author) chipRow.push(`<span class="r4-chip r4-chip--outline">${escapeHtml(author)}</span>`);
+    if (progress > 0 && progress < 100) chipRow.push(`<span class="r4-chip r4-chip--accent">${progress}%</span>`);
+    else if (progress === 100) chipRow.push('<span class="r4-chip r4-chip--accent">✓ Прочитано</span>');
+
+    const tagsHtml = tags.length
+        ? `<div class="series-detail-tags">${tags.slice(0, 8).map(t => `<span class="r4-chip r4-chip--outline">${escapeHtml(String(t))}</span>`).join('')}</div>`
+        : '';
+
+    const descHtml = description
+        ? `<p class="series-detail-description" data-collapsed="true">${escapeHtml(description)}</p>`
+        : '';
+
+    hero.innerHTML = `
+        <div class="series-detail-top">
+            <div class="series-detail-cover">${coverHtml}</div>
+            <div class="series-detail-meta">
+                <div class="series-detail-chips">${chipRow.join('')}</div>
+                <button type="button" class="series-detail-cta" ${ctaAction} ${ctaDisabled}>${ctaLabel}</button>
+            </div>
+        </div>
+        ${descHtml}
+        ${tagsHtml}
+    `;
+    hero.hidden = false;
 }
 
 function selectSeries(seriesId) {
@@ -1680,6 +1751,7 @@ function selectSeries(seriesId) {
     }));
 
     document.getElementById('chapters-title').textContent = currentSeries.title; // textContent escapes HTML
+    renderSeriesDetailHero(currentSeries);
     renderVolumeTabs();
 
     // Восстанавливаем последнюю читаемую главу или первый том
@@ -5191,6 +5263,41 @@ function haptic(style = 'light') {
         }
     } catch (e) { }
 }
+
+// Refresh v4: blur-up effect для postеr обложек. Помечаем загруженные <img>
+// с классом `.series-poster-img` / `.series-detail-cover-img` и снимаем blur.
+(function bindImageBlurUp() {
+    try {
+        const markLoaded = (img) => {
+            if (!img || !img.classList) return;
+            if (img.classList.contains('is-loaded')) return;
+            img.classList.add('is-loaded');
+        };
+        document.addEventListener('load', (e) => {
+            const t = e.target;
+            if (!t || !t.matches) return;
+            if (t.matches('img.series-poster-img, img.series-detail-cover-img')) {
+                markLoaded(t);
+            }
+        }, true);
+        // На случай если изображение уже в кэше и load не сработает — проверяем периодически
+        const checkCached = () => {
+            document.querySelectorAll('img.series-poster-img, img.series-detail-cover-img').forEach((img) => {
+                if (img.complete && img.naturalWidth > 0) markLoaded(img);
+            });
+        };
+        document.addEventListener('DOMContentLoaded', checkCached);
+        setInterval(checkCached, 1500);
+    } catch (_) { /* ignore */ }
+})();
+
+// Refresh v4: клик по description разворачивает/сворачивает её
+document.addEventListener('click', (e) => {
+    const desc = e.target && e.target.closest && e.target.closest('.series-detail-description');
+    if (!desc) return;
+    const collapsed = desc.getAttribute('data-collapsed') === 'true';
+    desc.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+});
 
 // Refresh v4: глобальный лёгкий haptic на значимые UI-тапы. Подключаем
 // capturing-режимом чтобы ловить события до их обработки конкретными handlers.
