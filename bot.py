@@ -479,6 +479,9 @@ from utils import (
     TTL_GAME,
     TTL_HEAVY_GAME,
     TTL_MENU,
+    parse_duration,
+    humanize_duration,
+    is_moderator,
 )
 
 
@@ -7543,6 +7546,360 @@ async def cmd_clean(message: types.Message):
         schedule_delete_once(note, TTL_ERROR)
     except Exception:
         pass
+
+
+# ============================================================================
+# МОДЕРАЦИЯ ГРУПП: /mute /unmute /ban /unban /kick
+# ----------------------------------------------------------------------------
+# Использование:
+#   /mute [время] [причина]   — reply на сообщение или @username / id
+#   /unmute                   — reply на сообщение
+#   /ban [причина]            — reply
+#   /unban <user_id>
+#   /kick [причина]           — reply
+#
+# Форматы времени: 30s, 5m, 2h, 7d. Голое число = минуты. По умолчанию — 1 час.
+# Права: админ чата ИЛИ глобальный админ бота (is_moderator).
+# Бот должен быть админом группы с правом can_restrict_members.
+# ============================================================================
+
+MUTED_PERMISSIONS = types.ChatPermissions(
+    can_send_messages=False,
+    can_send_audios=False,
+    can_send_documents=False,
+    can_send_photos=False,
+    can_send_videos=False,
+    can_send_video_notes=False,
+    can_send_voice_notes=False,
+    can_send_polls=False,
+    can_send_other_messages=False,
+    can_add_web_page_previews=False,
+    can_change_info=False,
+    can_invite_users=False,
+    can_pin_messages=False,
+)
+
+UNMUTED_PERMISSIONS = types.ChatPermissions(
+    can_send_messages=True,
+    can_send_audios=True,
+    can_send_documents=True,
+    can_send_photos=True,
+    can_send_videos=True,
+    can_send_video_notes=True,
+    can_send_voice_notes=True,
+    can_send_polls=True,
+    can_send_other_messages=True,
+    can_add_web_page_previews=True,
+    can_invite_users=True,
+)
+
+
+async def _resolve_mod_target(message: types.Message) -> tuple[int | None, str | None, str | None]:
+    """Return (user_id, display_name, error_reason).
+
+    Prefers reply_to_message.from_user. Fallback: numeric id as first argument.
+    text_mention and @username resolution requires a DB lookup (get_user_profile_by_username).
+    """
+    # 1) Reply target
+    if message.reply_to_message and message.reply_to_message.from_user:
+        u = message.reply_to_message.from_user
+        return u.id, (u.full_name or u.username or str(u.id)), None
+
+    # 2) Numeric user_id as argument (when no reply available)
+    parts = (message.text or "").split()
+    if len(parts) >= 2 and parts[1].lstrip("-").isdigit():
+        uid = int(parts[1])
+        return uid, str(uid), None
+
+    # 3) @username lookup
+    for ent in message.entities or []:
+        if ent.type == "mention":
+            uname = message.text[ent.offset:ent.offset + ent.length].lstrip("@")
+            profile = await get_user_profile_by_username(uname.lower())
+            if profile:
+                uid, uname_db, fname = profile
+                return uid, (fname or uname_db or str(uid)), None
+        elif ent.type == "text_mention" and ent.user:
+            u = ent.user
+            return u.id, (u.full_name or u.username or str(u.id)), None
+
+    return None, None, "Ответьте на сообщение пользователя или укажите @username / user_id."
+
+
+def _parse_mod_args(message: types.Message, *, expect_duration: bool) -> tuple[int | None, str]:
+    """Extract optional duration + reason from the command tail.
+
+    Returns (duration_seconds_or_None, reason_text).
+    """
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) <= 1:
+        return None, ""
+
+    first = parts[1]
+    # If first arg parses as duration → use it; otherwise treat as reason start.
+    if expect_duration:
+        dur = parse_duration(first)
+        if dur is not None:
+            reason = parts[2] if len(parts) > 2 else ""
+            return dur, reason.strip()
+    # Skip numeric user_id if it was passed as first arg (handled in _resolve_mod_target)
+    if first.lstrip("-").isdigit():
+        reason = parts[2] if len(parts) > 2 else ""
+        return None, reason.strip()
+    reason = " ".join(parts[1:]).strip()
+    return None, reason
+
+
+async def _guard_mod_command(message: types.Message) -> tuple[int, int, str] | None:
+    """Common prelude for mod commands. Returns (chat_id, target_user_id, target_name)
+    or None if any guard failed (reply already sent).
+    """
+    if message.chat.type not in ("group", "supergroup"):
+        await temp_reply(message, "Команда работает только в группах.", delay=TTL_ERROR)
+        return None
+
+    chat_id = message.chat.id
+    actor_id = message.from_user.id
+
+    if not await is_moderator(bot, chat_id, actor_id):
+        await temp_reply(message, "🚫 Нужны права админа чата или админа бота.", delay=TTL_ERROR)
+        return None
+
+    # Бот должен иметь can_restrict_members.
+    try:
+        me = await bot.get_me()
+        my_member = await bot.get_chat_member(chat_id, me.id)
+        can_restrict = bool(getattr(my_member, "can_restrict_members", False))
+        if my_member.status != "administrator" or not can_restrict:
+            await temp_reply(
+                message,
+                "⚠️ Бот должен быть админом чата с правом «Ограничение участников».",
+                delay=TTL_ERROR,
+            )
+            return None
+    except Exception as e:
+        logging.debug(f"_guard_mod_command: get_chat_member(me) failed: {e}")
+
+    target_id, target_name, err = await _resolve_mod_target(message)
+    if err or target_id is None:
+        await temp_reply(message, f"ℹ️ {err}", delay=TTL_ERROR)
+        return None
+
+    # Не трогаем админов чата и глобальных админов бота.
+    try:
+        if await is_moderator(bot, chat_id, target_id):
+            await temp_reply(message, "🛡 Нельзя модерировать админа.", delay=TTL_ERROR)
+            return None
+    except Exception:
+        pass
+
+    # Не трогаем самого бота.
+    try:
+        me = await bot.get_me()
+        if target_id == me.id:
+            await temp_reply(message, "🤖 Меня нельзя модерировать.", delay=TTL_ERROR)
+            return None
+    except Exception:
+        pass
+
+    return chat_id, target_id, target_name or str(target_id)
+
+
+@dp.message(Command("mute"))
+async def cmd_mute(message: types.Message):
+    guard = await _guard_mod_command(message)
+    if guard is None:
+        return
+    chat_id, target_id, target_name = guard
+
+    duration, reason = _parse_mod_args(message, expect_duration=True)
+    if duration is None:
+        duration = 3600  # 1h default
+    until = int(time.time()) + duration
+
+    try:
+        await bot.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=target_id,
+            permissions=MUTED_PERMISSIONS,
+            until_date=until,
+        )
+    except Exception as e:
+        logging.warning(f"cmd_mute: restrict failed: {e}")
+        await temp_reply(message, f"❌ Не удалось замьютить: {type(e).__name__}", delay=TTL_ERROR)
+        return
+
+    reason_part = f"\n<b>Причина:</b> {escape_html_text(reason)}" if reason else ""
+    await reply_and_forget(
+        message,
+        f"🔇 <b>{escape_html_text(target_name)}</b> замьючен на <b>{humanize_duration(duration)}</b>.{reason_part}",
+        ttl=TTL_MENU,
+        parse_mode="HTML",
+    )
+    try:
+        await write_admin_audit_log(
+            action="group_mute",
+            actor_user_id=str(message.from_user.id),
+            target=str(target_id),
+            payload_json=json.dumps({"chat_id": chat_id, "duration": duration, "reason": reason}, ensure_ascii=False),
+            result="ok",
+        )
+    except Exception as e:
+        logging.debug(f"cmd_mute: audit log failed: {e}")
+
+
+@dp.message(Command("unmute"))
+async def cmd_unmute(message: types.Message):
+    guard = await _guard_mod_command(message)
+    if guard is None:
+        return
+    chat_id, target_id, target_name = guard
+
+    try:
+        await bot.restrict_chat_member(
+            chat_id=chat_id,
+            user_id=target_id,
+            permissions=UNMUTED_PERMISSIONS,
+        )
+    except Exception as e:
+        logging.warning(f"cmd_unmute: restrict failed: {e}")
+        await temp_reply(message, f"❌ Не удалось снять мьют: {type(e).__name__}", delay=TTL_ERROR)
+        return
+
+    await reply_and_forget(
+        message,
+        f"🔊 <b>{escape_html_text(target_name)}</b> размьючен.",
+        ttl=TTL_MENU,
+        parse_mode="HTML",
+    )
+    try:
+        await write_admin_audit_log(
+            action="group_unmute",
+            actor_user_id=str(message.from_user.id),
+            target=str(target_id),
+            payload_json=json.dumps({"chat_id": chat_id}, ensure_ascii=False),
+            result="ok",
+        )
+    except Exception as e:
+        logging.debug(f"cmd_unmute: audit log failed: {e}")
+
+
+@dp.message(Command("ban"))
+async def cmd_ban(message: types.Message):
+    guard = await _guard_mod_command(message)
+    if guard is None:
+        return
+    chat_id, target_id, target_name = guard
+
+    _, reason = _parse_mod_args(message, expect_duration=False)
+
+    try:
+        await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
+    except Exception as e:
+        logging.warning(f"cmd_ban: ban failed: {e}")
+        await temp_reply(message, f"❌ Не удалось забанить: {type(e).__name__}", delay=TTL_ERROR)
+        return
+
+    reason_part = f"\n<b>Причина:</b> {escape_html_text(reason)}" if reason else ""
+    await reply_and_forget(
+        message,
+        f"⛔ <b>{escape_html_text(target_name)}</b> забанен.{reason_part}",
+        ttl=TTL_MENU,
+        parse_mode="HTML",
+    )
+    try:
+        await write_admin_audit_log(
+            action="group_ban",
+            actor_user_id=str(message.from_user.id),
+            target=str(target_id),
+            payload_json=json.dumps({"chat_id": chat_id, "reason": reason}, ensure_ascii=False),
+            result="ok",
+        )
+    except Exception as e:
+        logging.debug(f"cmd_ban: audit log failed: {e}")
+
+
+@dp.message(Command("unban"))
+async def cmd_unban(message: types.Message):
+    if message.chat.type not in ("group", "supergroup"):
+        return await temp_reply(message, "Команда работает только в группах.", delay=TTL_ERROR)
+
+    chat_id = message.chat.id
+    actor_id = message.from_user.id
+    if not await is_moderator(bot, chat_id, actor_id):
+        return await temp_reply(message, "🚫 Нужны права админа чата или админа бота.", delay=TTL_ERROR)
+
+    # /unban редко идёт по reply (пользователь не в чате). Нужен user_id.
+    parts = (message.text or "").split()
+    target_id: int | None = None
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_id = message.reply_to_message.from_user.id
+    elif len(parts) >= 2 and parts[1].lstrip("-").isdigit():
+        target_id = int(parts[1])
+
+    if target_id is None:
+        return await temp_reply(message, "Формат: /unban <user_id>", delay=TTL_ERROR)
+
+    try:
+        await bot.unban_chat_member(chat_id=chat_id, user_id=target_id, only_if_banned=True)
+    except Exception as e:
+        logging.warning(f"cmd_unban: unban failed: {e}")
+        await temp_reply(message, f"❌ Не удалось разбанить: {type(e).__name__}", delay=TTL_ERROR)
+        return
+
+    await reply_and_forget(
+        message,
+        f"✅ Пользователь <code>{target_id}</code> разбанен.",
+        ttl=TTL_MENU,
+        parse_mode="HTML",
+    )
+    try:
+        await write_admin_audit_log(
+            action="group_unban",
+            actor_user_id=str(actor_id),
+            target=str(target_id),
+            payload_json=json.dumps({"chat_id": chat_id}, ensure_ascii=False),
+            result="ok",
+        )
+    except Exception as e:
+        logging.debug(f"cmd_unban: audit log failed: {e}")
+
+
+@dp.message(Command("kick"))
+async def cmd_kick(message: types.Message):
+    guard = await _guard_mod_command(message)
+    if guard is None:
+        return
+    chat_id, target_id, target_name = guard
+
+    _, reason = _parse_mod_args(message, expect_duration=False)
+
+    # Kick = ban + immediate unban, so the user can rejoin by invite link.
+    try:
+        await bot.ban_chat_member(chat_id=chat_id, user_id=target_id)
+        await bot.unban_chat_member(chat_id=chat_id, user_id=target_id, only_if_banned=True)
+    except Exception as e:
+        logging.warning(f"cmd_kick: kick failed: {e}")
+        await temp_reply(message, f"❌ Не удалось кикнуть: {type(e).__name__}", delay=TTL_ERROR)
+        return
+
+    reason_part = f"\n<b>Причина:</b> {escape_html_text(reason)}" if reason else ""
+    await reply_and_forget(
+        message,
+        f"👢 <b>{escape_html_text(target_name)}</b> кикнут.{reason_part}",
+        ttl=TTL_MENU,
+        parse_mode="HTML",
+    )
+    try:
+        await write_admin_audit_log(
+            action="group_kick",
+            actor_user_id=str(message.from_user.id),
+            target=str(target_id),
+            payload_json=json.dumps({"chat_id": chat_id, "reason": reason}, ensure_ascii=False),
+            result="ok",
+        )
+    except Exception as e:
+        logging.debug(f"cmd_kick: audit log failed: {e}")
 
 
 async def main():

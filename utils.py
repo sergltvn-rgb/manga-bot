@@ -418,6 +418,68 @@ async def run_git_sync(commit_message: str = "sync webapp db") -> tuple[bool, st
         return rc == 0, output
 
 
+def parse_duration(text: str) -> int | None:
+    """Parse duration like '30s', '5m', '2h', '7d' into seconds. Returns None on invalid.
+
+    Supported suffixes: s(seconds), m(minutes), h(hours), d(days).
+    Plain number = minutes for convenience: '15' → 15 minutes.
+    """
+    if not text:
+        return None
+    text = text.strip().lower()
+    if not text:
+        return None
+    # pure number → minutes
+    if text.isdigit():
+        return int(text) * 60
+    suffix = text[-1]
+    try:
+        value = int(text[:-1])
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    if suffix not in multipliers:
+        return None
+    return value * multipliers[suffix]
+
+
+def humanize_duration(seconds: int) -> str:
+    """Render seconds as '5м', '2ч 30м', '1д 4ч' for user-facing messages."""
+    if seconds <= 0:
+        return "0с"
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}д")
+    if hours:
+        parts.append(f"{hours}ч")
+    if minutes:
+        parts.append(f"{minutes}м")
+    if secs and not parts:
+        parts.append(f"{secs}с")
+    return " ".join(parts) or f"{seconds}с"
+
+
+async def is_moderator(
+    bot,
+    chat_id: int,
+    user_id: int,
+) -> bool:
+    """True if user is creator/administrator in this chat, OR a global bot admin."""
+    # Global bot admins bypass chat admin requirement.
+    if user_id in await _get_admins_cached():
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        return member.status in ("creator", "administrator")
+    except Exception:
+        return False
+
+
 async def safe_edit_or_reply(
     target: Union[types.Message, types.CallbackQuery],
     text: str,
