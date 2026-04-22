@@ -7918,7 +7918,12 @@ async def _is_chat_admin(chat_id: int, user_id: int) -> bool:
         return False
 
 
-async def _is_bot_admin(chat_id: int) -> bool:
+async def _bot_is_chat_admin(chat_id: int) -> bool:
+    """True если САМ БОТ админ в данном чате (не путать с _is_bot_admin,
+    который проверяет, является ли юзер админом бота).
+    Раньше обе функции назывались _is_bot_admin — вторая перекрывала первую
+    при импорте и ломала всю админ-панель (см. cmd_admin/_require_admin).
+    """
     try:
         me = await bot.get_me()
         member = await bot.get_chat_member(chat_id, me.id)
@@ -7942,7 +7947,7 @@ async def cmd_cleanup_service(message: types.Message):
     current = (await get_setting(key)) or "off"
 
     if arg in ("on", "вкл"):
-        if not await _is_bot_admin(message.chat.id):
+        if not await _bot_is_chat_admin(message.chat.id):
             return await temp_reply(
                 message,
                 "⚠️ Бот должен быть админом чата с правом удаления сообщений, чтобы чистить сервисные.",
