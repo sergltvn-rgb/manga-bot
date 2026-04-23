@@ -99,8 +99,10 @@ async def init_db():
             first_name TEXT DEFAULT '',
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )''')
-        # Таблица для выбора провайдера ИИ (groq / gemma) для каждого чата
-        await db.execute('CREATE TABLE IF NOT EXISTS chat_ai_provider (chat_id INTEGER PRIMARY KEY, provider TEXT DEFAULT "groq")')
+        # Таблица для выбора провайдера ИИ (gemma / groq) для каждого чата.
+        # Default = gemma (локальная без цензуры). Groq используется как
+        # автофоллбек в `ask_ai`, если Gemma недоступна.
+        await db.execute('CREATE TABLE IF NOT EXISTS chat_ai_provider (chat_id INTEGER PRIMARY KEY, provider TEXT DEFAULT "gemma")')
 
         # Миграция: добавляем колонку для Drag-and-Drop сортировки
         for tbl in ['chapters_urls', 'ranobe_urls', 'akashic_ranobe', 'british_ranobe']:
@@ -245,11 +247,11 @@ async def toggle_alya_mode() -> str:
 
 
 async def get_chat_ai_provider(chat_id: int) -> str:
-    """Возвращает провайдера ИИ для чата: 'groq' или 'gemma'."""
+    """Возвращает провайдера ИИ для чата: 'gemma' или 'groq'. Default: 'gemma'."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('SELECT provider FROM chat_ai_provider WHERE chat_id = ?', (chat_id,)) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else "groq"
+            return row[0] if row else "gemma"
 
 
 async def get_users_with_bookmark(series_id: str):

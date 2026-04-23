@@ -31,7 +31,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InputMediaPhoto, Message, CallbackQuery, WebAppInfo, BotCommand, BotCommandScopeDefault
 
 import uuid
-from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL, API_HOST
+from config import BOT_TOKEN, GROQ_API_KEY, ADMIN_IDS, WEBAPP_URL, API_HOST, GEMMA_URL, GEMMA_MODEL, GEMMA_TIMEOUT
 
 # Основной путь к SQLite-базе. Раньше было 55+ хардкоженных "manga.db" в коде.
 # Если база переедет — правим в одном месте.
@@ -203,6 +203,7 @@ from services.admin_rename import AdminRename, rename_router  # noqa: E402,F401
 # dispatcher + admin_menu_sync_webapp. Re-export cmd-функций для
 # обратной совместимости (тесты EXPECTED_COMMANDS).
 from services.admin_settings import (  # noqa: E402,F401
+    cmd_ai_provider,
     cmd_alya_mode,
     cmd_blacklist_ai,
     cmd_blacklist_view,
@@ -594,7 +595,14 @@ from utils import (
 # ==============================================================================
 
 # --- Провайдеры ИИ ---
+# Primary: Gemma (abliterated) на домашнем ПК через Cloudflare Tunnel.
+# Fallback: Groq Cloud — используется автоматически, если Gemma недоступна
+# (GEMMA_URL пустой, timeout, HTTP-ошибка, network error).
 AI_PROVIDERS = {
+    "gemma": {
+        "name": "🏠 Gemma (Локальная)",
+        "model": GEMMA_MODEL,
+    },
     "groq": {
         "name": "☁️ Groq (Облако)",
         "model": "llama-3.3-70b-versatile",
@@ -602,7 +610,40 @@ AI_PROVIDERS = {
 }
 
 
-async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider: str = "groq") -> str:
+async def _ask_gemma(prompt: str, system_prompt: str, history: list | None) -> str:
+    """POST на Ollama OpenAI-compat API через Cloudflare Tunnel.
+
+    Raise'ит исключение при любой проблеме — ловится в `ask_ai` для фоллбека
+    на Groq. НЕ ловим исключения тут, чтобы fallback-логика была явной.
+    """
+    if not GEMMA_URL:
+        raise RuntimeError("GEMMA_URL is not configured")
+
+    url = f"{GEMMA_URL}/v1/chat/completions"
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": prompt})
+
+    payload = {
+        "model": GEMMA_MODEL,
+        "messages": messages,
+        "temperature": 0.85,  # повыше для живого гопника
+        "max_tokens": 400,
+    }
+    session = await get_http_session()
+    timeout = aiohttp.ClientTimeout(total=GEMMA_TIMEOUT)
+    async with session.post(url, json=payload, timeout=timeout) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"Gemma HTTP {resp.status}")
+        data = await resp.json()
+        try:
+            return data['choices'][0]['message']['content']
+        except (KeyError, IndexError, TypeError) as e:
+            raise RuntimeError(f"Gemma malformed response: {e}") from e
+
+
+async def _ask_groq(prompt: str, system_prompt: str, history: list | None) -> str:
     """Функция запроса к ИИ через Groq Cloud API."""
     if not GROQ_API_KEY:
         return "<i>❌ Ошибка: Нет ключа Groq.</i>"
@@ -616,7 +657,7 @@ async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider
     messages.append({"role": "user", "content": prompt})
 
     payload = {
-        "model": AI_PROVIDERS.get(provider, AI_PROVIDERS["groq"])["model"],
+        "model": AI_PROVIDERS["groq"]["model"],
         "messages": messages,
         "temperature": 0.65,
         "max_tokens": 300,
@@ -633,9 +674,35 @@ async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider
         return "<i>Ошибка соединения с ИИ.</i>"
 
 
+async def ask_ai(prompt: str, system_prompt: str, history: list = None, provider: str = "gemma") -> str:
+    """Unified AI-запрос с автофоллбеком Gemma → Groq.
+
+    - `provider="gemma"` (default): primary — локальная Gemma. При любой
+      ошибке (нет URL, timeout, HTTP ≠ 200, network) → прозрачный фоллбек
+      на Groq с warning в логах.
+    - `provider="groq"`: форсируем Groq, без попытки Gemma.
+    - Unknown provider → трактуем как "gemma" (safe default).
+    """
+    if provider == "groq":
+        return await _ask_groq(prompt, system_prompt, history)
+
+    # provider == "gemma" (или неизвестно — считаем gemma'ой):
+    # если URL не задан вообще — сразу на Groq без warning'а, это штатный
+    # режим "Gemma отключена". А вот runtime-ошибки при живой конфигурации
+    # должны попадать в логи как warning, чтобы видеть деградации.
+    if not GEMMA_URL:
+        return await _ask_groq(prompt, system_prompt, history)
+
+    try:
+        return await _ask_gemma(prompt, system_prompt, history)
+    except Exception as e:
+        logging.warning(f"Gemma failed ({e!r}) → fallback to Groq")
+        return await _ask_groq(prompt, system_prompt, history)
+
+
 # Обратная совместимость
 async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str:
-    return await ask_ai(prompt, system_prompt, history, provider="groq")
+    return await _ask_groq(prompt, system_prompt, history)
 
 
 # --- СИСТЕМА TELEGRAPH ---

@@ -40,7 +40,9 @@ from database import (
     delete_commands_link,
     get_admins,
     get_blacklist,
+    get_chat_ai_provider,
     remove_from_blacklist,
+    set_chat_ai_provider,
     set_commands_link,
     toggle_alya_mode,
     toggle_group_ai,
@@ -206,6 +208,31 @@ async def cmd_alya_mode(message: types.Message):
         return
     new_mode = await toggle_alya_mode()
     await message.answer(f"✅ Режим Али изменен на: <b>{new_mode}</b>", parse_mode="HTML")
+
+
+@settings_router.message(Command("ai_provider"))
+async def cmd_ai_provider(message: types.Message):
+    """`/ai_provider [gemma|groq]` — показать/сменить AI-провайдера для этого чата.
+
+    Без аргумента — покажет текущего. С аргументом — переключит.
+    Gemma = локальная abliterated Gemma (дефолт), Groq = облако-фоллбек.
+    """
+    admins = await get_admins()
+    if message.from_user.id not in admins:
+        return
+    parts = (message.text or "").split()
+    if len(parts) < 2:
+        current = await get_chat_ai_provider(message.chat.id)
+        return await message.answer(
+            f"🤖 Текущий провайдер ИИ в этом чате: <b>{current}</b>\n"
+            "Формат: <code>/ai_provider gemma</code> или <code>/ai_provider groq</code>",
+            parse_mode="HTML",
+        )
+    new_provider = parts[1].strip().lower()
+    if new_provider not in ("gemma", "groq"):
+        return await message.answer("❌ Допустимые значения: <code>gemma</code> или <code>groq</code>.", parse_mode="HTML")
+    await set_chat_ai_provider(message.chat.id, new_provider)
+    await message.answer(f"✅ Провайдер ИИ для этого чата: <b>{new_provider}</b>", parse_mode="HTML")
 
 
 # ===========================================================================

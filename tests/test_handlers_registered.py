@@ -140,6 +140,7 @@ EXPECTED_COMMANDS = {
     "sync_webapp",
     "toggle_sync",
     "alya_mode",
+    "ai_provider",
     "toggle_ai",
     "blacklist_ai",
     "unblacklist_ai",
