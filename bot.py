@@ -721,7 +721,9 @@ async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str
 
 # --- Мультимодальные AI-функции (Vision + Speech-to-Text) ---
 
-GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview"
+# Llama 4 Scout — актуальная vision-модель Groq (2025).
+# Llama 3.2 vision (11B/90B) — deprecated.
+GROQ_VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
 GROQ_WHISPER_MODEL = "whisper-large-v3-turbo"
 
 
@@ -767,6 +769,10 @@ async def _ask_groq_vision(
             if resp.status == 200:
                 data = await resp.json()
                 return data["choices"][0]["message"]["content"]
+            # Логируем тело ошибки, чтобы видеть реальную причину (модель deprecated,
+            # неверный формат payload, превышение лимитов и т.д.).
+            err_body = await resp.text()
+            logging.error(f"Groq Vision HTTP {resp.status}: {err_body[:500]}")
             return f"<i>Ошибка Vision ИИ: {resp.status}</i>"
     except Exception as e:
         logging.error(f"Groq Vision Error: {e}")
