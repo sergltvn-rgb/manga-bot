@@ -18,6 +18,7 @@ import aiohttp.web
 import base64
 import io
 import html
+from PIL import Image
 from datetime import datetime
 from html.parser import HTMLParser
 from typing import Union
@@ -1058,11 +1059,21 @@ async def process_ai_chat_photo(message: types.Message, state: FSMContext):
     alya_mode = await get_alya_mode()
     char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
 
-    # Скачиваем фото (самое большое разрешение — последний элемент)
+    # Скачиваем фото (самое большое разрешение — последний элемент) и
+    # ресайзим через Pillow, чтобы не превысить лимит Groq Vision.
     photo = message.photo[-1]
     file_info = await message.bot.get_file(photo.file_id)
     bio = await message.bot.download_file(file_info.file_path)
-    image_b64 = base64.b64encode(bio.read()).decode()
+    raw_bytes = bio.read()
+
+    # Resize до 1024×1024 (Groq Vision лимит ~4.5 MB base64 на JPEG)
+    img = Image.open(io.BytesIO(raw_bytes))
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    out_buf = io.BytesIO()
+    img.save(out_buf, format="JPEG", quality=85)
+    image_b64 = base64.b64encode(out_buf.getvalue()).decode()
 
     prompt = message.caption or "Что на этом изображении?"
     chat_history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
@@ -1249,6 +1260,117 @@ async def process_group_ai_chat(message: types.Message):
         logging.warning(f"ai_memory append failed: {e!r}")
 
     await message.reply(f"{emoji} <b>{char_name}:</b>\n{escape_html_text(response)}", parse_mode="HTML")
+
+
+def _char_id_from_reply(message: types.Message) -> str:
+    """Определяет персонажа по реплаю на сообщение бота в группе."""
+    reply = message.reply_to_message
+    if reply and reply.text and "Масачика:" in reply.text:
+        return "masachika"
+    return "alya"
+
+
+@dp.message(StateFilter(None), F.photo, F.reply_to_message)
+async def process_group_ai_chat_photo(message: types.Message):
+    """Фото в группе — только если реплай на сообщение бота."""
+    if not message.reply_to_message or message.reply_to_message.from_user.id != message.bot.id:
+        return
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not await is_ai_enabled(chat_id):
+        return
+    if await is_blacklisted(user_id):
+        return
+    if await check_cd_and_warn(message, "ai_chat_group", COOLDOWN_TIME):
+        return
+
+    char_id = _char_id_from_reply(message)
+    alya_mode = await get_alya_mode()
+    char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
+
+    photo = message.photo[-1]
+    file_info = await message.bot.get_file(photo.file_id)
+    bio = await message.bot.download_file(file_info.file_path)
+    raw_bytes = bio.read()
+
+    img = Image.open(io.BytesIO(raw_bytes))
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+    out_buf = io.BytesIO()
+    img.save(out_buf, format="JPEG", quality=85)
+    image_b64 = base64.b64encode(out_buf.getvalue()).decode()
+
+    prompt = message.caption or "Что на этом изображении?"
+    history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
+
+    wait_msg = await message.reply(f"<i>{char_name} смотрит на фото... (☁️ Groq Vision)</i>", parse_mode="HTML")
+    response = await ask_ai_vision(prompt, system_prompt, history=history, image_b64=image_b64)
+
+    try:
+        await append_ai_memory(chat_id, user_id, char_id, "user", f"[фото] {prompt}")
+        await append_ai_memory(chat_id, user_id, char_id, "assistant", response)
+    except Exception as e:
+        logging.warning(f"ai_memory append failed: {e!r}")
+
+    await wait_msg.delete()
+    await message.reply(f"{emoji} <b>{char_name}:</b>\n{escape_html_text(response)}", parse_mode="HTML")
+
+
+@dp.message(StateFilter(None), F.voice, F.reply_to_message)
+async def process_group_ai_chat_voice(message: types.Message):
+    """Голосовое в группе — только если реплай на сообщение бота."""
+    if not message.reply_to_message or message.reply_to_message.from_user.id != message.bot.id:
+        return
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not await is_ai_enabled(chat_id):
+        return
+    if await is_blacklisted(user_id):
+        return
+    if await check_cd_and_warn(message, "ai_chat_group", COOLDOWN_TIME):
+        return
+
+    char_id = _char_id_from_reply(message)
+    alya_mode = await get_alya_mode()
+    char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
+
+    file_info = await message.bot.get_file(message.voice.file_id)
+    bio = await message.bot.download_file(file_info.file_path)
+    audio_bytes = bio.read()
+
+    wait_msg = await message.reply(f"<i>{char_name} слушает голосовое...</i>", parse_mode="HTML")
+    transcript = await _transcribe_voice_groq(audio_bytes)
+    if not transcript:
+        await wait_msg.delete()
+        return await message.reply("❌ Не удалось распознать голосовое сообщение.")
+
+    provider = await get_chat_ai_provider(chat_id)
+    provider_badge = AI_PROVIDERS.get(provider, {}).get("name", provider)
+
+    await wait_msg.edit_text(
+        f"<i>{char_name} печатает... ({provider_badge})\n🎤 «{escape_html_text(transcript[:100])}»</i>",
+        parse_mode="HTML",
+    )
+
+    history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
+    response = await ask_ai(transcript, system_prompt, history=history, provider=provider)
+
+    try:
+        await append_ai_memory(chat_id, user_id, char_id, "user", f"[голосовое] {transcript}")
+        await append_ai_memory(chat_id, user_id, char_id, "assistant", response)
+    except Exception as e:
+        logging.warning(f"ai_memory append failed: {e!r}")
+
+    await wait_msg.delete()
+    await message.reply(
+        f"{emoji} <b>{char_name}:</b>\n🎤 <i>«{escape_html_text(transcript[:100])}»</i>\n\n{escape_html_text(response)}",
+        parse_mode="HTML",
+    )
 
 
 @dp.message(Command("ai_forget"))
