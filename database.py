@@ -2,7 +2,7 @@
 import aiosqlite
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from config import ADMIN_IDS
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'manga.db')
@@ -103,6 +103,22 @@ async def init_db():
         # Default = gemma (локальная без цензуры). Groq используется как
         # автофоллбек в `ask_ai`, если Gemma недоступна.
         await db.execute('CREATE TABLE IF NOT EXISTS chat_ai_provider (chat_id INTEGER PRIMARY KEY, provider TEXT DEFAULT "gemma")')
+
+        # Персистентная память ИИ-диалогов. Сохраняется между рестартами бота.
+        # Ключ хранения — (chat_id, user_id, char_id), т.е. у каждого юзера
+        # своя отдельная память по каждому персонажу в каждом чате.
+        # Role: "user" | "assistant". ts — unix timestamp.
+        await db.execute(
+            '''CREATE TABLE IF NOT EXISTS ai_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                char_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                ts INTEGER NOT NULL)'''
+        )
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_ai_memory_lookup ON ai_memory(chat_id, user_id, char_id, ts)')
 
         # Миграция: добавляем колонку для Drag-and-Drop сортировки
         for tbl in ['chapters_urls', 'ranobe_urls', 'akashic_ranobe', 'british_ranobe']:
@@ -267,6 +283,69 @@ async def set_chat_ai_provider(chat_id: int, provider: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('INSERT OR REPLACE INTO chat_ai_provider (chat_id, provider) VALUES (?, ?)', (chat_id, provider))
         await db.commit()
+
+
+# --- Персистентная память ИИ-диалогов ---
+
+# Максимальная длина сообщения, которое сохраняем в память. Защита от аномально
+# больших payload'ов (напр., юзер вставил портянку текста). Обрезаем перед записью.
+_AI_MEMORY_MAX_CONTENT_LEN = 2000
+
+
+async def get_ai_memory(chat_id: int, user_id: int, char_id: str, limit: int = 20) -> list:
+    """Возвращает последние `limit` сообщений диалога в хронологическом порядке
+    как список {"role": "user"|"assistant", "content": "..."}.
+
+    Ключ памяти — (chat_id, user_id, char_id). У каждого юзера своя отдельная
+    память с каждым персонажем в каждом чате.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Берём последние `limit` по ts DESC, затем разворачиваем в ASC
+        # чтобы на выходе был хронологический порядок.
+        async with db.execute(
+            'SELECT role, content FROM ai_memory ' 'WHERE chat_id = ? AND user_id = ? AND char_id = ? ' 'ORDER BY ts DESC, id DESC LIMIT ?',
+            (chat_id, user_id, char_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    # rows сейчас в обратном порядке (свежие сверху) — разворачиваем
+    return [{"role": role, "content": content} for role, content in reversed(rows)]
+
+
+async def append_ai_memory(chat_id: int, user_id: int, char_id: str, role: str, content: str) -> None:
+    """Добавляет одно сообщение в память. Обрезает content до `_AI_MEMORY_MAX_CONTENT_LEN`."""
+    if role not in ("user", "assistant"):
+        # защита от опечаток в коде — молча игнорим некорректную роль
+        return
+    if not content:
+        return
+    if len(content) > _AI_MEMORY_MAX_CONTENT_LEN:
+        content = content[:_AI_MEMORY_MAX_CONTENT_LEN]
+    ts = int(datetime.now(timezone.utc).timestamp())
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            'INSERT INTO ai_memory (chat_id, user_id, char_id, role, content, ts) ' 'VALUES (?, ?, ?, ?, ?, ?)',
+            (chat_id, user_id, char_id, role, content, ts),
+        )
+        await db.commit()
+
+
+async def clear_ai_memory(chat_id: int, user_id: int, char_id: str | None = None) -> int:
+    """Удаляет память юзера. Если `char_id=None` — удаляет по всем персонажам
+    (полное забывание). Возвращает количество удалённых строк."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        if char_id is None:
+            cursor = await db.execute(
+                'DELETE FROM ai_memory WHERE chat_id = ? AND user_id = ?',
+                (chat_id, user_id),
+            )
+        else:
+            cursor = await db.execute(
+                'DELETE FROM ai_memory WHERE chat_id = ? AND user_id = ? AND char_id = ?',
+                (chat_id, user_id, char_id),
+            )
+        deleted = cursor.rowcount or 0
+        await db.commit()
+        return deleted
 
 
 async def get_all_arts() -> list:

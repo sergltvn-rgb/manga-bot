@@ -15,6 +15,7 @@ import random
 import aiosqlite
 import aiohttp
 import aiohttp.web
+import base64
 import io
 import html
 from datetime import datetime
@@ -109,6 +110,9 @@ from database import (
     get_british_chapter_link,
     get_chat_ai_provider,
     set_chat_ai_provider,
+    get_ai_memory,
+    append_ai_memory,
+    clear_ai_memory,
     add_to_harem,
     remove_from_harem,
     get_user_harem,
@@ -714,6 +718,98 @@ async def ask_groq(prompt: str, system_prompt: str, history: list = None) -> str
     return await _ask_groq(prompt, system_prompt, history)
 
 
+# --- Мультимодальные AI-функции (Vision + Speech-to-Text) ---
+
+GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview"
+GROQ_WHISPER_MODEL = "whisper-large-v3-turbo"
+
+
+async def _ask_groq_vision(
+    prompt: str,
+    system_prompt: str,
+    history: list | None,
+    image_b64: str,
+) -> str:
+    """Groq Vision API — отправляет картинку + текст на vision-модель.
+
+    Формат content — массив из text + image_url (OpenAI-compat).
+    """
+    if not GROQ_API_KEY:
+        return "<i>❌ Ошибка: Нет ключа Groq.</i>"
+
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        messages.extend(history)
+
+    # Мультимодальный user-message: текст + base64-картинка
+    user_content = [
+        {"type": "text", "text": prompt},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+        },
+    ]
+    messages.append({"role": "user", "content": user_content})
+
+    payload = {
+        "model": GROQ_VISION_MODEL,
+        "messages": messages,
+        "temperature": 0.65,
+        "max_tokens": 400,
+    }
+    try:
+        session = await get_http_session()
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data["choices"][0]["message"]["content"]
+            return f"<i>Ошибка Vision ИИ: {resp.status}</i>"
+    except Exception as e:
+        logging.error(f"Groq Vision Error: {e}")
+        return "<i>Ошибка соединения с Vision ИИ.</i>"
+
+
+async def ask_ai_vision(
+    prompt: str,
+    system_prompt: str,
+    history: list | None,
+    image_b64: str,
+    provider: str = "gemma",
+) -> str:
+    """Unified vision-запрос. Gemma 3 4B не поддерживает изображения,
+    поэтому всегда идём на Groq Vision, вне зависимости от provider."""
+    return await _ask_groq_vision(prompt, system_prompt, history, image_b64)
+
+
+async def _transcribe_voice_groq(audio_bytes: bytes, filename: str = "voice.ogg") -> str | None:
+    """Транскрибирует аудио через Groq Whisper. Возвращает текст или None при ошибке."""
+    if not GROQ_API_KEY:
+        return None
+
+    url = "https://api.groq.com/openai/v1/audio/transcriptions"
+    headers = {"Authorization": f"Bearer {GROQ_API_KEY}"}
+
+    form = aiohttp.FormData()
+    form.add_field("file", audio_bytes, filename=filename, content_type="audio/ogg")
+    form.add_field("model", GROQ_WHISPER_MODEL)
+    form.add_field("language", "ru")
+
+    try:
+        session = await get_http_session()
+        async with session.post(url, headers=headers, data=form) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data.get("text", "").strip() or None
+            logging.warning(f"Groq Whisper HTTP {resp.status}")
+            return None
+    except Exception as e:
+        logging.error(f"Groq Whisper Error: {e}")
+        return None
+
+
 # --- СИСТЕМА TELEGRAPH ---
 # Вынесена в services/telegraph.py (Фаза 3 шаг 5).
 from services.telegraph import get_telegraph_token, upload_to_telegraph  # noqa: E402,F401
@@ -907,15 +1003,15 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
         return
 
     user_id = message.from_user.id
+    chat_id = message.chat.id
     if await check_cd_and_warn(message, "ai_chat", COOLDOWN_TIME):
         return
 
-    if message.chat.type in ["group", "supergroup"] and not await is_ai_enabled(message.chat.id):
+    if message.chat.type in ["group", "supergroup"] and not await is_ai_enabled(chat_id):
         return
 
     data = await state.get_data()
     char_id = data.get("ai_character", "alya")
-    chat_history = data.get("chat_history", [])
 
     if await is_blacklisted(user_id):
         return await message.answer("🚫 Вы находитесь в черном списке и не можете использовать ИИ.")
@@ -923,22 +1019,120 @@ async def process_ai_chat(message: types.Message, state: FSMContext):
     alya_mode = await get_alya_mode()
     char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
 
+    # Персистентная память: последние 20 сообщений из БД (хронологически).
+    # Сохраняется между рестартами бота и между сессиями AIChat.
+    chat_history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
+
     # Определяем провайдера для этого чата
-    provider = await get_chat_ai_provider(message.chat.id)
+    provider = await get_chat_ai_provider(chat_id)
     provider_badge = AI_PROVIDERS.get(provider, {}).get('name', provider)
 
     wait_msg = await message.answer(f"<i>{char_name} печатает... ({provider_badge})</i>", parse_mode="HTML")
     response = await ask_ai(message.text, system_prompt, history=chat_history, provider=provider)
 
-    chat_history.append({"role": "user", "content": message.text})
-    chat_history.append({"role": "assistant", "content": response})
-    if len(chat_history) > 15:
-        chat_history = chat_history[-15:]
-    await state.update_data(chat_history=chat_history)
+    # Пишем в память user+assistant пару. Если запись упадёт (например,
+    # БД временно недоступна) — ответ пользователю всё равно отдаём.
+    try:
+        await append_ai_memory(chat_id, user_id, char_id, "user", message.text)
+        await append_ai_memory(chat_id, user_id, char_id, "assistant", response)
+    except Exception as e:
+        logging.warning(f"ai_memory append failed: {e!r}")
 
     await wait_msg.delete()
     builder = InlineKeyboardBuilder().row(types.InlineKeyboardButton(text="🚪 Выйти из чата", callback_data="main_menu"))
     await message.answer(f"{emoji} <b>{char_name}:</b>\n{escape_html_text(response)}", parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+@dp.message(AIChat.chatting, F.photo)
+async def process_ai_chat_photo(message: types.Message, state: FSMContext):
+    """Обработка фото в приватном AIChat — отправляем на Groq Vision."""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    if await check_cd_and_warn(message, "ai_chat", COOLDOWN_TIME):
+        return
+    if await is_blacklisted(user_id):
+        return await message.answer("🚫 Вы находитесь в черном списке и не можете использовать ИИ.")
+
+    data = await state.get_data()
+    char_id = data.get("ai_character", "alya")
+    alya_mode = await get_alya_mode()
+    char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
+
+    # Скачиваем фото (самое большое разрешение — последний элемент)
+    photo = message.photo[-1]
+    file_info = await message.bot.get_file(photo.file_id)
+    bio = await message.bot.download_file(file_info.file_path)
+    image_b64 = base64.b64encode(bio.read()).decode()
+
+    prompt = message.caption or "Что на этом изображении?"
+    chat_history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
+
+    wait_msg = await message.answer(f"<i>{char_name} смотрит на фото... (☁️ Groq Vision)</i>", parse_mode="HTML")
+    response = await ask_ai_vision(prompt, system_prompt, history=chat_history, image_b64=image_b64)
+
+    try:
+        await append_ai_memory(chat_id, user_id, char_id, "user", f"[фото] {prompt}")
+        await append_ai_memory(chat_id, user_id, char_id, "assistant", response)
+    except Exception as e:
+        logging.warning(f"ai_memory append failed: {e!r}")
+
+    await wait_msg.delete()
+    builder = InlineKeyboardBuilder().row(types.InlineKeyboardButton(text="🚪 Выйти из чата", callback_data="main_menu"))
+    await message.answer(f"{emoji} <b>{char_name}:</b>\n{escape_html_text(response)}", parse_mode="HTML", reply_markup=builder.as_markup())
+
+
+@dp.message(AIChat.chatting, F.voice)
+async def process_ai_chat_voice(message: types.Message, state: FSMContext):
+    """Обработка голосового сообщения — Groq Whisper STT → обычный текстовый пайплайн."""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    if await check_cd_and_warn(message, "ai_chat", COOLDOWN_TIME):
+        return
+    if await is_blacklisted(user_id):
+        return await message.answer("🚫 Вы находитесь в черном списке и не можете использовать ИИ.")
+
+    data = await state.get_data()
+    char_id = data.get("ai_character", "alya")
+    alya_mode = await get_alya_mode()
+    char_name, emoji, system_prompt = get_ai_setup(char_id, alya_mode=alya_mode)
+
+    # Скачиваем голосовое сообщение
+    file_info = await message.bot.get_file(message.voice.file_id)
+    bio = await message.bot.download_file(file_info.file_path)
+    audio_bytes = bio.read()
+
+    wait_msg = await message.answer(f"<i>{char_name} слушает голосовое...</i>", parse_mode="HTML")
+
+    # Транскрибируем через Groq Whisper
+    transcript = await _transcribe_voice_groq(audio_bytes)
+    if not transcript:
+        await wait_msg.delete()
+        return await message.answer("❌ Не удалось распознать голосовое сообщение.")
+
+    chat_history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
+    provider = await get_chat_ai_provider(chat_id)
+    provider_badge = AI_PROVIDERS.get(provider, {}).get("name", provider)
+
+    await wait_msg.edit_text(
+        f"<i>{char_name} печатает... ({provider_badge})\n🎤 «{escape_html_text(transcript[:100])}»</i>",
+        parse_mode="HTML",
+    )
+
+    response = await ask_ai(transcript, system_prompt, history=chat_history, provider=provider)
+
+    try:
+        await append_ai_memory(chat_id, user_id, char_id, "user", f"[голосовое] {transcript}")
+        await append_ai_memory(chat_id, user_id, char_id, "assistant", response)
+    except Exception as e:
+        logging.warning(f"ai_memory append failed: {e!r}")
+
+    await wait_msg.delete()
+    builder = InlineKeyboardBuilder().row(types.InlineKeyboardButton(text="🚪 Выйти из чата", callback_data="main_menu"))
+    await message.answer(
+        f"{emoji} <b>{char_name}:</b>\n🎤 <i>«{escape_html_text(transcript[:100])}»</i>\n\n{escape_html_text(response)}",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
 
 
 _REPLY_KB_TEXTS = {"📖 Читать", "🎨 Арты", "🤖 ИИ чаты", "ℹ️ Проект", "📋 Меню"}
@@ -1038,16 +1232,44 @@ async def process_group_ai_chat(message: types.Message):
     # Определяем провайдера для этого чата
     provider = await get_chat_ai_provider(chat_id)
 
-    history = []
-    if is_reply_to_bot and message.reply_to_message.text:
-        bot_text = re.sub(r'^[🌸🎧].*?:\n', '', message.reply_to_message.text)
-        history.append({"role": "assistant", "content": bot_text})
+    # Персистентная память из БД (ключ: chat_id + user_id + char_id).
+    # У каждого юзера своя отдельная история диалога с персонажем в группе.
+    history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
 
     wait_msg = await message.reply(f"<i>{char_name} печатает...</i>", parse_mode="HTML")
     response = await ask_ai(message.text, system_prompt, history=history, provider=provider)
     await wait_msg.delete()
 
+    # Сохраняем пару (user+assistant) в память; ошибка записи не должна
+    # ломать ответ пользователю.
+    try:
+        await append_ai_memory(chat_id, user_id, char_id, "user", message.text)
+        await append_ai_memory(chat_id, user_id, char_id, "assistant", response)
+    except Exception as e:
+        logging.warning(f"ai_memory append failed: {e!r}")
+
     await message.reply(f"{emoji} <b>{char_name}:</b>\n{escape_html_text(response)}", parse_mode="HTML")
+
+
+@dp.message(Command("ai_forget"))
+async def cmd_ai_forget(message: types.Message):
+    """Очищает персистентную память ИИ для пользователя в текущем чате
+    по всем персонажам. Юзер-команда, не админская — каждый может забыть
+    свой собственный контекст."""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    try:
+        deleted = await clear_ai_memory(chat_id, user_id, char_id=None)
+    except Exception as e:
+        logging.warning(f"ai_memory clear failed: {e!r}")
+        return await temp_reply(message, "❌ Не удалось очистить память. Попробуй позже.", TTL_ERROR)
+    if deleted == 0:
+        return await temp_reply(message, "🧠 Памяти с ИИ у тебя и так не было.", TTL_MENU)
+    await temp_reply(
+        message,
+        f"🧠 Память ИИ очищена. Удалено сообщений: <b>{deleted}</b>. " "Теперь Аля и Масачика начнут общение с чистого листа.",
+        TTL_MENU,
+    )
 
 
 # ==============================================================================
