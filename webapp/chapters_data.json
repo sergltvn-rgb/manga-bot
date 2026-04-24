@@ -10,6 +10,12 @@
           "custom_name": "Том 11",
           "chapters": [
             {
+              "chapter": "Иллюстрации",
+              "custom_name": "Цветные Иллюстрации",
+              "url": "",
+              "urls": []
+            },
+            {
               "chapter": "0",
               "custom_name": "Пролог",
               "url": "",
@@ -17,12 +23,6 @@
                 "https://teletype.in/@slitvin/y5hEFW8_Puf",
                 "https://telegra.ph/Hroniki-Akashi--11-tom-Prolog-04-13"
               ]
-            },
-            {
-              "chapter": "Иллюстрации",
-              "custom_name": "Цветные Иллюстрации",
-              "url": "",
-              "urls": []
             },
             {
               "chapter": "Эпилог",
