@@ -232,6 +232,9 @@ from services.art_view import (  # noqa: E402,F401
     send_user_art_item,
 )
 
+# giveaway_router: channel giveaways with subscription-gated participation.
+from services.giveaways import giveaway_router, run_giveaway_scheduler  # noqa: E402,F401
+
 
 # ============================================================================
 # ANTI-DOUBLE-TAP MIDDLEWARE для callback_query
@@ -5863,6 +5866,7 @@ async def main():
     dp.include_router(rename_router)
     dp.include_router(settings_router)
     dp.include_router(art_view_router)
+    dp.include_router(giveaway_router)
     await init_db()
 
     dp.message.outer_middleware(StatsMiddleware())
@@ -5890,6 +5894,7 @@ async def main():
     )
 
     runner = await start_webapp_api_server("0.0.0.0", 8080)
+    spawn_bg(run_giveaway_scheduler(bot), name="giveaway_scheduler")
 
     logging.info("Бот запущен. База данных готова.")
     await bot.delete_webhook(drop_pending_updates=True)

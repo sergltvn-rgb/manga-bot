@@ -242,6 +242,34 @@ async def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (comment_id, user_id))''')
 
+        await db.execute('''CREATE TABLE IF NOT EXISTS giveaways (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            status TEXT NOT NULL DEFAULT 'draft',
+            channel_id TEXT NOT NULL,
+            message_id INTEGER DEFAULT NULL,
+            prize TEXT NOT NULL,
+            post_text TEXT NOT NULL,
+            media_type TEXT DEFAULT NULL,
+            media_file_id TEXT DEFAULT NULL,
+            winners_count INTEGER NOT NULL DEFAULT 1,
+            ends_at_utc TEXT NOT NULL,
+            created_by INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            published_at TEXT DEFAULT NULL,
+            finished_at TEXT DEFAULT NULL,
+            replacements_count INTEGER NOT NULL DEFAULT 0
+        )''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS giveaway_entries (
+            giveaway_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            username TEXT DEFAULT NULL,
+            first_name TEXT DEFAULT NULL,
+            joined_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'joined',
+            is_winner INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (giveaway_id, user_id)
+        )''')
+
         await db.execute('''CREATE TABLE IF NOT EXISTS webapp_telemetry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_type TEXT NOT NULL,
@@ -274,6 +302,8 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_user_profiles_username ON user_profiles(username)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaways_status_ends ON giveaways(status, ends_at_utc)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_entries_giveaway ON giveaway_entries(giveaway_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_webapp_telemetry_event_time ON webapp_telemetry(event_type, created_at)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_admin_audit_actor_time ON admin_audit_log(actor_user_id, created_at)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_admin_audit_action_time ON admin_audit_log(action, created_at)')

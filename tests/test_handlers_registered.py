@@ -76,6 +76,12 @@ def _iter_message_handlers(bot_module):
         stack.append(art_view_router)
     except ImportError:
         pass
+    try:
+        from services.giveaways import giveaway_router
+
+        stack.append(giveaway_router)
+    except ImportError:
+        pass
     while stack:
         router = stack.pop()
         for h in router.message.handlers:
@@ -119,6 +125,7 @@ EXPECTED_COMMANDS = {
     "pet",
     "suggest_art",
     "arts_list",
+    "giveaway_create",
     # Админ-панель (эти должны работать после shadowing-фикса `_is_bot_admin`)
     "admin",
     "add_admin",
