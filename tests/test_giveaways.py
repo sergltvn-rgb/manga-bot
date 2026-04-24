@@ -11,7 +11,7 @@ def run(coro):
 
 
 class TestGiveawayTimeParsing:
-    def test_parse_absolute_kyiv_time_to_utc(self):
+    def test_parse_absolute_moscow_time_to_utc(self):
         from services.giveaways import parse_giveaway_end
 
         now = datetime(2026, 4, 24, 12, 0, tzinfo=timezone.utc)
@@ -61,6 +61,19 @@ class TestGiveawayTimeParsing:
         assert winners_count == 3
         assert prize == "VIP"
         assert post_text == "Участвуем"
+
+    def test_quick_create_derives_winners_from_place_prizes(self):
+        from services.giveaways import _parse_quick_create_with_channel, split_place_prizes
+
+        channel_id, ends_at, winners_count, prize, post_text = _parse_quick_create_with_channel(
+            "/giveaway_create @test_channel | 27.04.2026 20:00 | 1 место: VIP; 2 место: 500 монет | Текст"
+        )
+
+        assert channel_id == "@test_channel"
+        assert ends_at == datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc)
+        assert winners_count == 2
+        assert split_place_prizes(prize) == ["VIP", "500 монет"]
+        assert post_text == "Текст"
 
 
 class TestGiveawayDb:
@@ -157,6 +170,21 @@ class TestGiveawayWinnerSelection:
         assert [entry.user_id for entry in result.winners] == [20]
         assert result.replaced_count == 0
 
+    def test_winner_lines_include_place_specific_prizes(self):
+        from services.giveaways import GiveawayEntry, format_winner_lines
+
+        winners = [
+            GiveawayEntry(1, 20, "u20", "Twenty", "joined", True),
+            GiveawayEntry(1, 21, "u21", "Twenty One", "joined", True),
+        ]
+
+        lines = format_winner_lines(winners, "VIP; 500 монет")
+
+        assert "1 место" in lines
+        assert "VIP" in lines
+        assert "2 место" in lines
+        assert "500 монет" in lines
+
     def test_subscription_check_accepts_enum_value_status(self):
         from services.giveaways import is_channel_subscriber
 
@@ -206,6 +234,8 @@ class TestGiveawayPublishing:
         assert bot.calls[0][0] == "send_message"
         assert bot.calls[0][1]["chat_id"] == "@alya_novel"
         assert "Участвовать" in bot.calls[0][1]["reply_markup"].inline_keyboard[0][0].text
+        assert "МСК" in bot.calls[0][1]["text"]
+        assert "Призы" in bot.calls[0][1]["text"]
 
     def test_publish_photo_giveaway_uses_send_photo(self):
         from services.giveaways import Giveaway, publish_giveaway_post

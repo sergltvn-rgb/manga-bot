@@ -28,16 +28,16 @@ from services.admin_helpers import _is_bot_admin, _require_admin
 from services.telegram_helpers import escape_html_text
 
 
-def _load_kyiv_tz():
-    for key in ("Europe/Kyiv", "Europe/Kiev"):
+def _load_moscow_tz():
+    for key in ("Europe/Moscow",):
         try:
             return ZoneInfo(key)
         except ZoneInfoNotFoundError:
             continue
-    return timezone(timedelta(hours=3), name="Europe/Kyiv")
+    return timezone(timedelta(hours=3), name="Europe/Moscow")
 
 
-KYIV_TZ = _load_kyiv_tz()
+MSK_TZ = _load_moscow_tz()
 GIVEAWAY_STATUS_DRAFT = "draft"
 GIVEAWAY_STATUS_ACTIVE = "active"
 GIVEAWAY_STATUS_FINISHING = "finishing"
@@ -125,7 +125,7 @@ def parse_giveaway_end(raw: str, *, now: datetime | None = None) -> datetime:
         return (now_utc + delta).astimezone(timezone.utc)
 
     try:
-        local_dt = datetime.strptime(text, "%d.%m.%Y %H:%M").replace(tzinfo=KYIV_TZ)
+        local_dt = datetime.strptime(text, "%d.%m.%Y %H:%M").replace(tzinfo=MSK_TZ)
     except ValueError as exc:
         raise GiveawayValidationError("Use DD.MM.YYYY HH:MM or duration like 12h / 3d.") from exc
 
@@ -136,7 +136,7 @@ def parse_giveaway_end(raw: str, *, now: datetime | None = None) -> datetime:
 
 
 def format_giveaway_end(ends_at_utc: datetime) -> str:
-    return ends_at_utc.astimezone(KYIV_TZ).strftime("%d.%m.%Y %H:%M")
+    return ends_at_utc.astimezone(MSK_TZ).strftime("%d.%m.%Y %H:%M")
 
 
 def _channel_url(channel_id: str) -> str:
@@ -145,6 +145,34 @@ def _channel_url(channel_id: str) -> str:
     if channel_id == GIVEAWAY_CHANNEL_ID:
         return GIVEAWAY_CHANNEL_URL
     return str(channel_id)
+
+
+def split_place_prizes(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    parts = [part.strip() for part in re.split(r"[;\n]+", text) if part.strip()]
+    prizes: list[str] = []
+    for idx, part in enumerate(parts, 1):
+        cleaned = re.sub(rf"^\s*{idx}\s*(?:место|м\.|[).:-])\s*", "", part, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"^\s*\d+\s*(?:место|м\.|[).:-])\s*", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"^\s*\d+\s*[^:;\n]{0,24}:\s*", "", cleaned).strip()
+        cleaned = re.sub(r"^[:\s-]+", "", cleaned).strip()
+        prizes.append(cleaned or part)
+    return prizes or [text]
+
+
+def _format_prizes_block(raw: str, winners_count: int) -> str:
+    prizes = split_place_prizes(raw)
+    if not prizes:
+        return "Приз уточняется"
+    if len(prizes) == 1 and winners_count <= 1:
+        return prizes[0]
+    lines = []
+    for idx in range(max(winners_count, len(prizes))):
+        prize = prizes[idx] if idx < len(prizes) else prizes[-1]
+        lines.append(f"{idx + 1} место — {prize}")
+    return "\n".join(lines)
 
 
 def _row_to_giveaway(row) -> Giveaway:
@@ -407,12 +435,15 @@ async def is_channel_subscriber(bot, channel_id: str, user_id: int) -> bool:
 
 
 def _giveaway_post_text(giveaway: Giveaway) -> str:
-    footer = (
-        f"\n\nПриз: {giveaway.prize}"
-        f"\nПобедителей: {giveaway.winners_count}"
-        f"\nИтоги: {format_giveaway_end(giveaway.ends_at_utc)} по Киеву"
+    prizes = _format_prizes_block(giveaway.prize, giveaway.winners_count)
+    return (
+        f"🎁 <b>Розыгрыш</b>\n\n"
+        f"{escape_html_text(giveaway.post_text)}\n\n"
+        f"🏆 <b>Призы:</b>\n{escape_html_text(prizes)}\n\n"
+        f"👥 <b>Победителей:</b> {giveaway.winners_count}\n"
+        f"⏰ <b>Итоги:</b> {format_giveaway_end(giveaway.ends_at_utc)} МСК\n\n"
+        "Нажмите кнопку ниже, чтобы участвовать."
     )
-    return f"{giveaway.post_text}{footer}"
 
 
 def _participation_markup(giveaway_id: int) -> types.InlineKeyboardMarkup:
@@ -426,15 +457,31 @@ async def publish_giveaway_post(bot, giveaway: Giveaway) -> int:
     text = _giveaway_post_text(giveaway)
     markup = _participation_markup(giveaway.id)
     if giveaway.media_type == "photo":
-        msg = await bot.send_photo(chat_id=giveaway.channel_id, photo=giveaway.media_file_id, caption=text, reply_markup=markup)
+        msg = await bot.send_photo(
+            chat_id=giveaway.channel_id, photo=giveaway.media_file_id, caption=text, parse_mode="HTML", reply_markup=markup
+        )
     elif giveaway.media_type == "video":
-        msg = await bot.send_video(chat_id=giveaway.channel_id, video=giveaway.media_file_id, caption=text, reply_markup=markup)
+        msg = await bot.send_video(
+            chat_id=giveaway.channel_id, video=giveaway.media_file_id, caption=text, parse_mode="HTML", reply_markup=markup
+        )
     elif giveaway.media_type == "document":
-        msg = await bot.send_document(chat_id=giveaway.channel_id, document=giveaway.media_file_id, caption=text, reply_markup=markup)
+        msg = await bot.send_document(
+            chat_id=giveaway.channel_id,
+            document=giveaway.media_file_id,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
     elif giveaway.media_type == "animation":
-        msg = await bot.send_animation(chat_id=giveaway.channel_id, animation=giveaway.media_file_id, caption=text, reply_markup=markup)
+        msg = await bot.send_animation(
+            chat_id=giveaway.channel_id,
+            animation=giveaway.media_file_id,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
     else:
-        msg = await bot.send_message(chat_id=giveaway.channel_id, text=text, reply_markup=markup)
+        msg = await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", reply_markup=markup)
     return int(msg.message_id)
 
 
@@ -467,17 +514,22 @@ def _parse_quick_create_with_channel(text: str) -> tuple[str, datetime, int, str
     if raw.startswith("|"):
         raw = raw[1:].strip()
     parts = [part.strip() for part in raw.split("|")]
-    if len(parts) != 4:
-        raise GiveawayValidationError("Формат: /giveaway_create [@channel] | 3d | 1 | Приз | Текст поста")
-    ends_at = parse_giveaway_end(parts[0])
-    try:
-        winners_count = int(parts[1])
-    except ValueError as exc:
-        raise GiveawayValidationError("Количество победителей должно быть числом.") from exc
+    if len(parts) == 3:
+        ends_raw, prize, post_text = parts
+        winners_count = len(split_place_prizes(prize))
+    elif len(parts) == 4:
+        ends_raw, winners_raw, prize, post_text = parts
+        try:
+            winners_count = int(winners_raw)
+        except ValueError as exc:
+            raise GiveawayValidationError("Количество победителей должно быть числом.") from exc
+    else:
+        raise GiveawayValidationError("Формат: /giveaway_create [@channel] | 3d | Приз 1; Приз 2 | Текст поста")
+    ends_at = parse_giveaway_end(ends_raw)
     if winners_count < 1:
         raise GiveawayValidationError("Нужен хотя бы один победитель.")
-    prize = parts[2].strip()
-    post_text = parts[3].strip()
+    prize = prize.strip()
+    post_text = post_text.strip()
     if not prize or not post_text:
         raise GiveawayValidationError("Приз и текст поста обязательны.")
     return channel_id, ends_at, winners_count, prize, post_text
@@ -524,6 +576,15 @@ def _format_winner(entry: GiveawayEntry) -> str:
     return f'<a href="tg://user?id={entry.user_id}">{name}</a>'
 
 
+def format_winner_lines(winners: list[GiveawayEntry], prize_text: str) -> str:
+    prizes = split_place_prizes(prize_text)
+    lines = []
+    for idx, entry in enumerate(winners, 1):
+        prize = prizes[idx - 1] if idx - 1 < len(prizes) else (prizes[-1] if prizes else "Приз")
+        lines.append(f"{idx} место — {_format_winner(entry)}\n🏆 {escape_html_text(prize)}")
+    return "\n\n".join(lines)
+
+
 async def finalize_giveaway(bot, giveaway: Giveaway) -> bool:
     if not await claim_giveaway_finishing(giveaway.id):
         return False
@@ -538,20 +599,20 @@ async def finalize_giveaway(bot, giveaway: Giveaway) -> bool:
 
     participants_count = len(entries)
     if result.winners:
-        winners_text = "\n".join(f"{idx}. {_format_winner(entry)}" for idx, entry in enumerate(result.winners, 1))
+        winners_text = format_winner_lines(result.winners, giveaway.prize)
         shortage = ""
         if len(result.winners) < giveaway.winners_count:
             shortage = f"\n\nПодходящих участников было меньше, чем мест: выбрано {len(result.winners)} из {giveaway.winners_count}."
         replaced = f"\nЗамен из-за отписки: {result.replaced_count}." if result.replaced_count else ""
         text = (
-            f"Итоги розыгрыша: <b>{escape_html_text(giveaway.prize)}</b>\n\n"
-            f"Участников: <b>{participants_count}</b>\n"
+            "🎉 <b>Итоги розыгрыша</b>\n\n"
+            f"👥 Участников: <b>{participants_count}</b>\n\n"
             f"Победители:\n{winners_text}{replaced}{shortage}"
         )
     else:
         text = (
-            f"Итоги розыгрыша: <b>{escape_html_text(giveaway.prize)}</b>\n\n"
-            f"Участников: <b>{participants_count}</b>\n"
+            "🎉 <b>Итоги розыгрыша</b>\n\n"
+            f"👥 Участников: <b>{participants_count}</b>\n"
             "Победителей нет: не нашлось участников с актуальной подпиской."
         )
     await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML")
@@ -643,8 +704,8 @@ async def giveaway_create_skip(message: types.Message, state: FSMContext):
     if current_state == GiveawayCreate.waiting_for_media.state:
         return await _finish_giveaway_wizard(message, state, None, None)
     await state.update_data(channel_id=GIVEAWAY_CHANNEL_ID)
-    await state.set_state(GiveawayCreate.waiting_for_prize)
-    await message.answer("Введите приз розыгрыша.")
+    await state.set_state(GiveawayCreate.waiting_for_end)
+    await message.answer("Когда завершить розыгрыш? Время указывайте по МСК. Например: 27.04.2026 20:00, 12h или 3d.")
 
 
 @giveaway_router.message(StateFilter(GiveawayCreate.waiting_for_channel))
@@ -655,8 +716,8 @@ async def giveaway_create_channel(message: types.Message, state: FSMContext):
     if not (channel_id.startswith("@") or channel_id.startswith("-100")):
         return await message.answer("Канал должен быть в формате @channel или -100... Можно отправить /skip.")
     await state.update_data(channel_id=channel_id)
-    await state.set_state(GiveawayCreate.waiting_for_prize)
-    await message.answer("Введите приз розыгрыша.")
+    await state.set_state(GiveawayCreate.waiting_for_end)
+    await message.answer("Когда завершить розыгрыш? Время указывайте по МСК. Например: 27.04.2026 20:00, 12h или 3d.")
 
 
 @giveaway_router.message(StateFilter(GiveawayCreate.waiting_for_prize))
@@ -667,8 +728,8 @@ async def giveaway_create_prize(message: types.Message, state: FSMContext):
     if not prize or prize.startswith("/"):
         return await message.answer("Введите приз текстом или отмените через /cancel.")
     await state.update_data(prize=prize)
-    await state.set_state(GiveawayCreate.waiting_for_end)
-    await message.answer("Когда завершить розыгрыш? Например: 27.04.2026 20:00, 12h или 3d.")
+    await state.set_state(GiveawayCreate.waiting_for_text)
+    await message.answer("Отправьте текст поста для канала.")
 
 
 @giveaway_router.message(StateFilter(GiveawayCreate.waiting_for_end))
@@ -695,8 +756,10 @@ async def giveaway_create_winners(message: types.Message, state: FSMContext):
     if winners_count < 1:
         return await message.answer("Нужен хотя бы один победитель.")
     await state.update_data(winners_count=winners_count)
-    await state.set_state(GiveawayCreate.waiting_for_text)
-    await message.answer("Отправьте текст поста для канала.")
+    await state.set_state(GiveawayCreate.waiting_for_prize)
+    await message.answer(
+        "Введите призы по местам. Можно одной строкой через ;\n" "Например: 1 место: VIP; 2 место: 500 монет; 3 место: роль"
+    )
 
 
 @giveaway_router.message(StateFilter(GiveawayCreate.waiting_for_text))
