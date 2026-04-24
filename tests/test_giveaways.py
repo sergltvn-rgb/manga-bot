@@ -138,6 +138,24 @@ class TestGiveawayDb:
         assert first_finish is True
         assert second_finish is False
 
+    def test_verification_challenge_passes_only_correct_answer(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        run(database.init_db())
+        challenge = run(giveaways.create_giveaway_verification_challenge(1, 1001, answer_factory=lambda: ("2 + 2", "4", ["3", "4", "5"])))
+
+        assert challenge.question == "2 + 2"
+        assert challenge.options == ["3", "4", "5"]
+        assert run(giveaways.is_giveaway_verified(1, 1001)) is False
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "3")) is False
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "4")) is True
+        assert run(giveaways.is_giveaway_verified(1, 1001)) is True
+
 
 class TestGiveawayWinnerSelection:
     def test_selects_only_current_subscribers_and_counts_replacements(self):

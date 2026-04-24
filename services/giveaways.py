@@ -7,6 +7,7 @@ the aiogram router. It intentionally does not import ``bot.py``.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import re
@@ -87,6 +88,13 @@ class GiveawayEntry:
 class WinnerSelectionResult:
     winners: list[GiveawayEntry]
     replaced_count: int
+
+
+@dataclass(frozen=True)
+class GiveawayVerificationChallenge:
+    question: str
+    answer: str
+    options: list[str]
 
 
 class GiveawayCreate(StatesGroup):
@@ -384,11 +392,80 @@ async def get_giveaway_entries(giveaway_id: int) -> list[GiveawayEntry]:
     ]
 
 
+async def has_giveaway_entry(giveaway_id: int, user_id: int) -> bool:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM giveaway_entries WHERE giveaway_id = ? AND user_id = ?",
+            (giveaway_id, user_id),
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
+
 async def count_giveaway_entries(giveaway_id: int) -> int:
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute("SELECT COUNT(*) FROM giveaway_entries WHERE giveaway_id = ?", (giveaway_id,)) as cursor:
             row = await cursor.fetchone()
             return int(row[0] if row else 0)
+
+
+def _make_verification_answer() -> tuple[str, str, list[str]]:
+    left = random.randint(2, 9)
+    right = random.randint(2, 9)
+    answer = left + right
+    options = {answer, answer + random.choice([-2, -1, 1, 2]), answer + random.choice([3, 4, -3, -4])}
+    while len(options) < 3:
+        options.add(answer + random.randint(-5, 5))
+    ordered = [str(value) for value in options]
+    random.shuffle(ordered)
+    return f"{left} + {right}", str(answer), ordered
+
+
+async def create_giveaway_verification_challenge(
+    giveaway_id: int,
+    user_id: int,
+    *,
+    answer_factory: Callable[[], tuple[str, str, list[str]]] | None = None,
+) -> GiveawayVerificationChallenge:
+    question, answer, options = (answer_factory or _make_verification_answer)()
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO giveaway_verifications (
+                giveaway_id, user_id, question, answer, options_json, verified, created_at, verified_at
+            )
+            VALUES (?, ?, ?, ?, ?, 0, ?, NULL)
+            """,
+            (giveaway_id, user_id, question, answer, json.dumps(options, ensure_ascii=False), _dt_to_db(_utcnow())),
+        )
+        await db.commit()
+    return GiveawayVerificationChallenge(question=question, answer=answer, options=list(options))
+
+
+async def is_giveaway_verified(giveaway_id: int, user_id: int) -> bool:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            "SELECT verified FROM giveaway_verifications WHERE giveaway_id = ? AND user_id = ?",
+            (giveaway_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return bool(row and row[0])
+
+
+async def verify_giveaway_answer(giveaway_id: int, user_id: int, answer: str) -> bool:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            "SELECT answer FROM giveaway_verifications WHERE giveaway_id = ? AND user_id = ?",
+            (giveaway_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row or str(row[0]) != str(answer).strip():
+            return False
+        await db.execute(
+            "UPDATE giveaway_verifications SET verified = 1, verified_at = ? WHERE giveaway_id = ? AND user_id = ?",
+            (_dt_to_db(_utcnow()), giveaway_id, user_id),
+        )
+        await db.commit()
+        return True
 
 
 async def mark_winners(giveaway_id: int, winners: list[GiveawayEntry]) -> None:
@@ -507,6 +584,14 @@ def _preview_markup() -> types.InlineKeyboardMarkup:
     builder.button(text="Изменить медиа", callback_data="giveaway_preview_edit_media")
     builder.button(text="Отменить", callback_data="giveaway_preview_cancel")
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def _verification_markup(giveaway_id: int, options: list[str]) -> types.InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for option in options:
+        builder.button(text=option, callback_data=f"giveaway_verify:{giveaway_id}:{option}")
+    builder.adjust(3)
     return builder.as_markup()
 
 
@@ -1001,11 +1086,29 @@ async def giveaway_join(callback: types.CallbackQuery):
     giveaway = await get_giveaway(giveaway_id)
     if giveaway is None or giveaway.status != GIVEAWAY_STATUS_ACTIVE:
         return await callback.answer("Розыгрыш уже завершён.", show_alert=True)
+    if await has_giveaway_entry(giveaway_id, callback.from_user.id):
+        return await callback.answer("Вы уже участвуете.", show_alert=False)
     if not await is_channel_subscriber(callback.bot, giveaway.channel_id, callback.from_user.id):
         return await callback.answer(
             f"Участвовать могут только подписчики канала {_channel_url(giveaway.channel_id)}",
             show_alert=True,
         )
+    if not await is_giveaway_verified(giveaway_id, callback.from_user.id):
+        challenge = await create_giveaway_verification_challenge(giveaway_id, callback.from_user.id)
+        try:
+            await callback.bot.send_message(
+                chat_id=callback.from_user.id,
+                text=(
+                    f"Проверка участия в розыгрыше #{giveaway_id}\n\n" f"Ответьте на простой вопрос: сколько будет {challenge.question}?"
+                ),
+                reply_markup=_verification_markup(giveaway_id, challenge.options),
+            )
+        except TelegramAPIError:
+            return await callback.answer(
+                "Для защиты от ботов нужно пройти проверку в ЛС. Откройте личный чат с ботом, нажмите Start и затем нажмите участвовать ещё раз.",
+                show_alert=True,
+            )
+        return await callback.answer("Я отправил проверку в личные сообщения. Ответьте там, и я добавлю вас в участники.", show_alert=True)
     added = await add_giveaway_entry(
         giveaway_id,
         callback.from_user.id,
@@ -1013,3 +1116,33 @@ async def giveaway_join(callback: types.CallbackQuery):
         callback.from_user.first_name,
     )
     await callback.answer("Вы участвуете!" if added else "Вы уже участвуете.", show_alert=False)
+
+
+@giveaway_router.callback_query(F.data.startswith("giveaway_verify:"))
+async def giveaway_verify(callback: types.CallbackQuery):
+    try:
+        _, giveaway_id_raw, answer = callback.data.split(":", 2)
+        giveaway_id = int(giveaway_id_raw)
+    except (ValueError, AttributeError):
+        return await callback.answer("Некорректная проверка.", show_alert=True)
+    if not await verify_giveaway_answer(giveaway_id, callback.from_user.id, answer):
+        return await callback.answer(
+            "Неверный ответ. Нажмите кнопку участия в канале ещё раз, чтобы получить новую проверку.", show_alert=True
+        )
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None or giveaway.status != GIVEAWAY_STATUS_ACTIVE:
+        return await callback.answer("Розыгрыш уже завершён.", show_alert=True)
+    if not await is_channel_subscriber(callback.bot, giveaway.channel_id, callback.from_user.id):
+        return await callback.answer("Подписка на канал больше не найдена.", show_alert=True)
+    added = await add_giveaway_entry(
+        giveaway_id,
+        callback.from_user.id,
+        callback.from_user.username,
+        callback.from_user.first_name,
+    )
+    text = "Проверка пройдена, вы добавлены в участники." if added else "Проверка пройдена, вы уже участвуете."
+    try:
+        await callback.message.edit_text(text)
+    except Exception:  # noqa: BLE001 - callback answer is enough if DM message can't be edited.
+        pass
+    await callback.answer(text, show_alert=True)
