@@ -915,6 +915,8 @@ test.describe("Reader E2E smoke", () => {
 
     await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=public-mode");
     await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    await expect(page.locator("#global-telegram-login-widget")).toBeVisible();
+    await expect(page.locator("#global-telegram-login-widget script[data-telegram-login='AlyaTestBot']")).toHaveCount(1);
 
     await page.locator("#series-list .series-card").first().click();
     await page.locator("#chapters-list .chapter-item").first().click();

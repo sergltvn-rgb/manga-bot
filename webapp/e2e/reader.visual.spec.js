@@ -151,6 +151,13 @@ async function installVisualMocks(page, state) {
       body: "/* mocked telegram web app script */"
     });
   });
+  await page.route("https://telegram.org/js/telegram-widget.js**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: "/* mocked telegram login widget */"
+    });
+  });
 
   await page.route("https://fonts.googleapis.com/**", (route) => route.abort());
   await page.route("https://fonts.gstatic.com/**", (route) => route.abort());

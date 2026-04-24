@@ -91,6 +91,7 @@ function syncPublicReadModeUI() {
     const likeBtn = document.getElementById('like-btn');
     const reactionBar = document.getElementById('reaction-bar');
     const loginWidget = document.getElementById('telegram-login-widget');
+    const globalLoginWidget = document.getElementById('global-telegram-login-widget');
     const authUser = document.getElementById('comment-auth-user');
 
     if (form) {
@@ -105,7 +106,13 @@ function syncPublicReadModeUI() {
         authUser.classList.toggle('hidden', !webAuthUser);
     }
     if (loginWidget && publicMode) {
-        renderTelegramLoginWidget();
+        renderTelegramLoginWidget(loginWidget);
+    }
+    if (globalLoginWidget) {
+        globalLoginWidget.classList.toggle('hidden', !publicMode);
+        if (publicMode) {
+            renderTelegramLoginWidget(globalLoginWidget);
+        }
     }
     [input, sendBtn, formatBtn].forEach((el) => {
         if (!el) return;
@@ -122,8 +129,7 @@ function syncPublicReadModeUI() {
     }
 }
 
-function renderTelegramLoginWidget() {
-    const mount = document.getElementById('telegram-login-widget');
+function renderTelegramLoginWidget(mount = document.getElementById('telegram-login-widget')) {
     if (!mount || mount.dataset.botUsername === getBotUsername()) return;
     mount.dataset.botUsername = getBotUsername();
     mount.innerHTML = '';

@@ -4793,6 +4793,16 @@ input[type=range]:active::-webkit-slider-thumb {
     justify-content: flex-end;
 }
 
+.telegram-login-widget.hidden {
+    display: none;
+}
+
+.global-login-widget {
+    margin-left: auto;
+    margin-right: var(--space-2);
+    min-width: 112px;
+}
+
 .comment-auth-cta-btn {
     min-height: var(--ui-hit-target);
     flex: 0 0 auto;
