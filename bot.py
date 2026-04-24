@@ -3388,6 +3388,32 @@ async def shop_page_switch(callback: types.CallbackQuery):
     await callback.answer()
 
 
+def calculate_level_from_xp(xp: int) -> int:
+    return max(1, int(xp) // 100 + 1)
+
+
+async def apply_shop_xp_pack_purchase(db: aiosqlite.Connection, user_id: int, *, price: int, xp_amount: int) -> tuple[bool, int, int]:
+    await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
+    cursor = await db.execute(
+        'UPDATE users_stats SET balance = balance - ?, xp = xp + ? WHERE user_id = ? AND balance >= ?',
+        (price, xp_amount, user_id, price),
+    )
+    if cursor.rowcount == 0:
+        return False, 0, 0
+
+    async with db.execute('SELECT xp, level FROM users_stats WHERE user_id = ?', (user_id,)) as cursor:
+        row = await cursor.fetchone()
+
+    new_xp = int(row[0] if row else xp_amount)
+    current_level = int(row[1] if row else 1)
+    target_level = calculate_level_from_xp(new_xp)
+    if target_level > current_level:
+        await db.execute('UPDATE users_stats SET level = ? WHERE user_id = ?', (target_level, user_id))
+        current_level = target_level
+
+    return True, new_xp, current_level
+
+
 async def try_buy_badge(user_id: int, badge_name: str, price: int) -> tuple[bool, str]:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('BEGIN IMMEDIATE')
@@ -3548,12 +3574,8 @@ async def shop_buy_xp_pack_cb(callback: types.CallbackQuery):
     xp_amount = 120
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('BEGIN IMMEDIATE')
-        await db.execute('INSERT OR IGNORE INTO users_stats (user_id) VALUES (?)', (user_id,))
-        cursor = await db.execute(
-            'UPDATE users_stats SET balance = balance - ?, xp = xp + ? WHERE user_id = ? AND balance >= ?',
-            (price, xp_amount, user_id, price),
-        )
-        if cursor.rowcount == 0:
+        ok, _new_xp, _new_level = await apply_shop_xp_pack_purchase(db, user_id, price=price, xp_amount=xp_amount)
+        if not ok:
             await db.rollback()
             return await callback.answer(f"Недостаточно монет! Нужно {price}.", show_alert=True)
         await db.commit()
@@ -4652,7 +4674,7 @@ class StatsMiddleware(BaseMiddleware):
                                             curr_xp = m_count + s_count * 2
                                             await db.execute('UPDATE users_stats SET xp = ? WHERE user_id = ?', (curr_xp, user_id))
 
-                                        target_level = (curr_xp // 100) + 1
+                                        target_level = calculate_level_from_xp(curr_xp)
                                         if target_level > curr_level:
                                             reward = (target_level - curr_level) * 500
                                             await db.execute(
