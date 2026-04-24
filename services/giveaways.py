@@ -91,6 +91,7 @@ class GiveawayCreate(StatesGroup):
     waiting_for_winners = State()
     waiting_for_text = State()
     waiting_for_media = State()
+    waiting_for_preview = State()
 
 
 giveaway_router = Router()
@@ -453,6 +454,17 @@ def _participation_markup(giveaway_id: int) -> types.InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def _preview_markup() -> types.InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Опубликовать", callback_data="giveaway_preview_publish")
+    builder.button(text="Изменить текст", callback_data="giveaway_preview_edit_text")
+    builder.button(text="Изменить призы", callback_data="giveaway_preview_edit_prizes")
+    builder.button(text="Изменить медиа", callback_data="giveaway_preview_edit_media")
+    builder.button(text="Отменить", callback_data="giveaway_preview_cancel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 async def publish_giveaway_post(bot, giveaway: Giveaway) -> int:
     text = _giveaway_post_text(giveaway)
     markup = _participation_markup(giveaway.id)
@@ -481,7 +493,13 @@ async def publish_giveaway_post(bot, giveaway: Giveaway) -> int:
             reply_markup=markup,
         )
     else:
-        msg = await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", reply_markup=markup)
+        msg = await bot.send_message(
+            chat_id=giveaway.channel_id,
+            text=text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=markup,
+        )
     return int(msg.message_id)
 
 
@@ -571,8 +589,6 @@ async def create_and_publish_giveaway(
 
 def _format_winner(entry: GiveawayEntry) -> str:
     name = escape_html_text(entry.first_name or entry.username or f"user#{entry.user_id}")
-    if entry.username:
-        return f'<a href="https://t.me/{escape_html_text(entry.username)}">{name}</a>'
     return f'<a href="tg://user?id={entry.user_id}">{name}</a>'
 
 
@@ -615,7 +631,7 @@ async def finalize_giveaway(bot, giveaway: Giveaway) -> bool:
             f"👥 Участников: <b>{participants_count}</b>\n"
             "Победителей нет: не нашлось участников с актуальной подпиской."
         )
-    await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML")
+    await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
     if giveaway.message_id:
         try:
             await bot.edit_message_reply_markup(chat_id=giveaway.channel_id, message_id=giveaway.message_id, reply_markup=None)
@@ -728,6 +744,10 @@ async def giveaway_create_prize(message: types.Message, state: FSMContext):
     if not prize or prize.startswith("/"):
         return await message.answer("Введите приз текстом или отмените через /cancel.")
     await state.update_data(prize=prize)
+    data = await state.get_data()
+    if data.get("preview_edit") == "prizes":
+        await state.update_data(preview_edit=None)
+        return await _show_giveaway_preview(message, state)
     await state.set_state(GiveawayCreate.waiting_for_text)
     await message.answer("Отправьте текст поста для канала.")
 
@@ -770,6 +790,10 @@ async def giveaway_create_text(message: types.Message, state: FSMContext):
     if not post_text:
         return await message.answer("Текст поста обязателен.")
     await state.update_data(post_text=post_text)
+    data = await state.get_data()
+    if data.get("preview_edit") == "text":
+        await state.update_data(preview_edit=None)
+        return await _show_giveaway_preview(message, state)
     await state.set_state(GiveawayCreate.waiting_for_media)
     await message.answer("Отправьте фото/видео/документ/GIF для поста или /skip, если медиа не нужно.")
 
@@ -785,8 +809,37 @@ async def giveaway_create_media(message: types.Message, state: FSMContext):
 async def _finish_giveaway_wizard(message: types.Message, state: FSMContext, media_type: str | None, media_file_id: str | None):
     if not await _is_bot_admin(message.from_user.id):
         return await state.clear()
+    await state.update_data(media_type=media_type, media_file_id=media_file_id)
+    await _show_giveaway_preview(message, state)
+
+
+async def _show_giveaway_preview(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    await state.clear()
+    giveaway = Giveaway(
+        id=0,
+        status=GIVEAWAY_STATUS_DRAFT,
+        channel_id=str(data.get("channel_id") or GIVEAWAY_CHANNEL_ID),
+        message_id=None,
+        prize=str(data["prize"]),
+        post_text=str(data["post_text"]),
+        winners_count=int(data["winners_count"]),
+        ends_at_utc=_dt_from_db(data["ends_at_utc"]),
+        created_by=message.from_user.id,
+        media_type=data.get("media_type"),
+        media_file_id=data.get("media_file_id"),
+    )
+    media_note = f"\n\nМедиа: {giveaway.media_type}" if giveaway.media_type else "\n\nМедиа: нет"
+    await state.set_state(GiveawayCreate.waiting_for_preview)
+    await message.answer(
+        "Предпросмотр перед публикацией:\n\n" + _giveaway_post_text(giveaway) + media_note,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=_preview_markup(),
+    )
+
+
+async def _publish_giveaway_from_state(message: types.Message, state: FSMContext):
+    data = await state.get_data()
     try:
         giveaway_id = await create_and_publish_giveaway(
             message.bot,
@@ -796,13 +849,60 @@ async def _finish_giveaway_wizard(message: types.Message, state: FSMContext, med
             winners_count=int(data["winners_count"]),
             prize=str(data["prize"]),
             post_text=str(data["post_text"]),
-            media_type=media_type,
-            media_file_id=media_file_id,
+            media_type=data.get("media_type"),
+            media_file_id=data.get("media_file_id"),
         )
     except Exception as exc:  # noqa: BLE001 - show admin the publication failure.
         logging.exception("giveaway wizard failed")
         return await message.answer(f"Не удалось опубликовать розыгрыш: {type(exc).__name__}")
+    await state.clear()
     await message.answer(f"Розыгрыш #{giveaway_id} опубликован в {data.get('channel_id') or GIVEAWAY_CHANNEL_ID}.")
+
+
+@giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_publish")
+async def giveaway_preview_publish(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await _publish_giveaway_from_state(callback.message, state)
+    await callback.answer()
+
+
+@giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_edit_text")
+async def giveaway_preview_edit_text(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await state.update_data(preview_edit="text")
+    await state.set_state(GiveawayCreate.waiting_for_text)
+    await callback.message.answer("Отправьте новый текст поста.")
+    await callback.answer()
+
+
+@giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_edit_prizes")
+async def giveaway_preview_edit_prizes(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await state.update_data(preview_edit="prizes")
+    await state.set_state(GiveawayCreate.waiting_for_prize)
+    await callback.message.answer("Отправьте новый список призов по местам.")
+    await callback.answer()
+
+
+@giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_edit_media")
+async def giveaway_preview_edit_media(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await state.set_state(GiveawayCreate.waiting_for_media)
+    await callback.message.answer("Отправьте новое медиа или /skip, чтобы убрать медиа.")
+    await callback.answer()
+
+
+@giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_cancel")
+async def giveaway_preview_cancel(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await state.clear()
+    await callback.message.answer("Розыгрыш отменён.")
+    await callback.answer()
 
 
 @giveaway_router.callback_query(F.data == "admin_giveaway_active")

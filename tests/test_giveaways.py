@@ -185,6 +185,16 @@ class TestGiveawayWinnerSelection:
         assert "2 место" in lines
         assert "500 монет" in lines
 
+    def test_winner_links_do_not_use_t_me_previews(self):
+        from services.giveaways import GiveawayEntry, format_winner_lines
+
+        winners = [GiveawayEntry(1, 20, "u20", "Twenty", "joined", True)]
+
+        lines = format_winner_lines(winners, "VIP")
+
+        assert "tg://user?id=20" in lines
+        assert "https://t.me/" not in lines
+
     def test_subscription_check_accepts_enum_value_status(self):
         from services.giveaways import is_channel_subscriber
 
@@ -236,6 +246,7 @@ class TestGiveawayPublishing:
         assert "Участвовать" in bot.calls[0][1]["reply_markup"].inline_keyboard[0][0].text
         assert "МСК" in bot.calls[0][1]["text"]
         assert "Призы" in bot.calls[0][1]["text"]
+        assert bot.calls[0][1]["disable_web_page_preview"] is True
 
     def test_publish_photo_giveaway_uses_send_photo(self):
         from services.giveaways import Giveaway, publish_giveaway_post
@@ -268,3 +279,14 @@ class TestGiveawayPublishing:
         assert message_id == 56
         assert bot.calls[0][0] == "send_photo"
         assert bot.calls[0][1]["photo"] == "photo-file"
+
+    def test_preview_markup_has_publish_and_edit_buttons(self):
+        from services.giveaways import _preview_markup
+
+        markup = _preview_markup()
+        buttons = [button.text for row in markup.inline_keyboard for button in row]
+
+        assert "Опубликовать" in buttons
+        assert "Изменить текст" in buttons
+        assert "Изменить призы" in buttons
+        assert "Отменить" in buttons
