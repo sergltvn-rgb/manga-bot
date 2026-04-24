@@ -112,6 +112,7 @@ def _build_cors_headers(request: aiohttp.web.Request) -> dict:
     allowed_origin = _resolve_allowed_origin(request)
     if allowed_origin:
         headers["Access-Control-Allow-Origin"] = allowed_origin
+        headers["Access-Control-Allow-Credentials"] = "true"
     return headers
 
 

@@ -56,6 +56,19 @@ class TestWebappCors:
         # Повторный токен не дублируется.
         assert _merge_vary_header("Origin, Accept", "Origin") == "Origin, Accept"
 
+    def test_cors_headers_allow_credentials_for_allowed_origin(self):
+        from aiohttp.test_utils import make_mocked_request
+        from multidict import CIMultiDict
+
+        from services.webapp_cors import _build_cors_headers
+
+        req = make_mocked_request("OPTIONS", "/api/comments", headers=CIMultiDict({"Origin": "https://web.telegram.org"}))
+
+        headers = _build_cors_headers(req)
+
+        assert headers["Access-Control-Allow-Origin"] == "https://web.telegram.org"
+        assert headers["Access-Control-Allow-Credentials"] == "true"
+
 
 # --- services.validators ---
 

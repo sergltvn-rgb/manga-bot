@@ -157,6 +157,32 @@ async function refreshAfterAuthChange() {
     }
 }
 
+async function verifySiteAuthSession(expectedUser = null) {
+    if (!API_URL || hasTelegramAuth()) return false;
+    const resp = await apiFetch(`${API_URL}/api/auth/me`, { cache: 'no-store' });
+    if (!resp.ok) return false;
+    const data = await resp.json().catch(() => ({}));
+    const user = data.authenticated ? data.user : null;
+    applyAuthUser(user);
+    if (!user || !user.id) return false;
+    if (expectedUser && expectedUser.id && String(user.id) !== String(expectedUser.id)) {
+        applyAuthUser(null);
+        return false;
+    }
+    return true;
+}
+
+function handleAuthRejected(message = 'Сессия Telegram не активна. Войдите ещё раз.') {
+    if (!hasTelegramAuth()) {
+        applyAuthUser(null);
+        syncAdminModeControls();
+        syncPublicReadModeUI();
+        renderComments(allCommentsCache);
+        renderReactions(chapterReactionsState);
+    }
+    showToast(message);
+}
+
 async function loadSiteAuthState() {
     if (!API_URL || hasTelegramAuth()) {
         webAuthLoaded = true;
@@ -191,11 +217,16 @@ window.onTelegramLogin = async function onTelegramLogin(user) {
         if (!resp.ok || !data.authenticated) {
             throw new Error(data.error || 'Не удалось войти');
         }
-        applyAuthUser(data.user);
+        const verified = await verifySiteAuthSession(data.user);
+        if (!verified) {
+            throw new Error('браузер не сохранил сессию Telegram');
+        }
         await refreshAfterAuthChange();
         showToast('Вы вошли через Telegram.');
         return true;
     } catch (e) {
+        applyAuthUser(null);
+        syncPublicReadModeUI();
         console.warn('Telegram site login failed:', e);
         showToast(`Вход не удался: ${e.message}`);
         return false;
@@ -3040,6 +3071,13 @@ async function toggleLike() {
             body: JSON.stringify({ chapter_key: key })
         });
         const data = await resp.json();
+        if (!resp.ok) {
+            if (resp.status === 401) {
+                handleAuthRejected('Сессия Telegram не активна. Войдите ещё раз, чтобы ставить лайки.');
+                return;
+            }
+            throw new Error(data.error || `HTTP ${resp.status}`);
+        }
 
         const btn = document.getElementById('like-btn');
         if (data.liked) {
@@ -3051,6 +3089,7 @@ async function toggleLike() {
         updateLikeUI(data.count, data.liked);
     } catch (e) {
         console.warn('Like toggle error:', e);
+        showToast(`Не удалось поставить лайк: ${e.message || 'ошибка сети'}`);
     }
 }
 
@@ -3447,6 +3486,17 @@ async function reactToComment(commentId, type) {
             body: JSON.stringify({ comment_id: commentId, type: type })
         });
         const data = await resp.json();
+        if (!resp.ok) {
+            if (resp.status === 401) {
+                comment.user_reaction = prevReaction;
+                comment.likes = prevLikes;
+                delete comment._reactionPending;
+                renderComments(allCommentsCache);
+                handleAuthRejected('Сессия Telegram не активна. Войдите ещё раз, чтобы реагировать.');
+                return;
+            }
+            throw new Error(data.error || `HTTP ${resp.status}`);
+        }
         if (data.ok) {
             await loadComments();
         } else {
@@ -3655,6 +3705,16 @@ async function postComment() {
 
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({}));
+            if (resp.status === 401) {
+                pendingCommentSends.delete(String(tempId));
+                allCommentsCache = allCommentsCache.filter(c => String(c.id) !== String(tempId));
+                input.value = text;
+                updateCommentPreview();
+                renderComments(allCommentsCache);
+                setCommentSendState('idle');
+                handleAuthRejected('Сессия Telegram не активна. Войдите ещё раз, чтобы отправлять комментарии.');
+                return;
+            }
             throw new Error(err.error || 'Ошибка сервера при отправке');
         }
 
@@ -6339,6 +6399,15 @@ async function toggleReaction(type) {
             })
         });
         const data = await resp.json();
+        if (!resp.ok) {
+            if (resp.status === 401) {
+                chapterReactionsState = prevState;
+                renderReactions(chapterReactionsState);
+                handleAuthRejected('Сессия Telegram не активна. Войдите ещё раз, чтобы ставить реакции.');
+                return;
+            }
+            throw new Error(data.error || `HTTP ${resp.status}`);
+        }
         if (!data.ok) {
             throw new Error(data.error || 'Ошибка реакции');
         }

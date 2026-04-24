@@ -16,6 +16,7 @@ function createMockState() {
     likesByChapter: {},
     sortFailure: null,
     webAuthUser: null,
+    loginPersistsSession: true,
     calls: {
       reader: 0,
       authMe: 0,
@@ -683,16 +684,19 @@ async function installPublicApiMocks(page, state) {
     if (pathname === "/api/auth/telegram-login" && method === "POST") {
       state.calls.authLogin += 1;
       const body = safeJson(request);
-      state.webAuthUser = {
+      const loggedInUser = {
         id: Number(body.id || ADMIN_USER_ID),
         first_name: String(body.first_name || "SiteUser"),
         username: body.username || "site_user",
       };
+      if (state.loginPersistsSession !== false) {
+        state.webAuthUser = loggedInUser;
+      }
       await fulfillJson(route, {
         ok: true,
         authenticated: true,
-        user: state.webAuthUser,
-        is_admin: state.readerData.admin_ids.includes(Number(state.webAuthUser.id)),
+        user: loggedInUser,
+        is_admin: state.readerData.admin_ids.includes(Number(loggedInUser.id)),
       });
       return;
     }
@@ -977,6 +981,73 @@ test.describe("Reader E2E smoke", () => {
     await page.click("#reaction-bar .reaction-item.type-heart");
     await expect.poll(() => state.calls.reactionsPost).toBe(1);
     await expect(page.locator("#reaction-bar .reaction-item.type-heart")).toHaveClass(/active/);
+  });
+
+  test("public site login stays read-only when the session cookie is not confirmed", async ({ page }) => {
+    const state = createMockState();
+    state.loginPersistsSession = false;
+    await installPublicApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=site-login-no-cookie");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#comment-form")).toHaveClass(/auth-required/);
+
+    const loginResult = await page.evaluate(({ id }) => {
+      return window.onTelegramLogin({
+        id,
+        first_name: "SiteUser",
+        username: "site_user",
+        auth_date: "1700000000",
+        hash: "mocked",
+      });
+    }, { id: 987654 });
+
+    expect(loginResult).toBe(false);
+    await expect.poll(() => state.calls.authLogin).toBe(1);
+    await expect.poll(() => state.calls.authMe).toBeGreaterThanOrEqual(2);
+    await expect(page.locator("#comment-form")).toHaveClass(/auth-required/);
+    await expect(page.locator("#comment-auth-cta")).toBeVisible();
+
+    await page.locator("#like-btn").dispatchEvent("click");
+    await page.click("#reaction-bar .reaction-item.type-heart");
+
+    expect(state.calls.likesPost).toBe(0);
+    expect(state.calls.reactionsPost).toBe(0);
+    expect(state.calls.commentsPost).toBe(0);
+  });
+
+  test("site write auth rejection disables composer and restores comment draft", async ({ page }) => {
+    const state = createMockState();
+    await installPublicApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=site-session-rejected");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await page.evaluate(({ id }) => {
+      return window.onTelegramLogin({
+        id,
+        first_name: "SiteUser",
+        username: "site_user",
+        auth_date: "1700000000",
+        hash: "mocked",
+      });
+    }, { id: 987654 });
+    await expect(page.locator("#comment-form")).not.toHaveClass(/auth-required/);
+
+    state.webAuthUser = null;
+    await page.fill("#comment-input", "draft survives rejected auth");
+    await page.click("#comment-form .comment-send-btn");
+
+    await expect.poll(() => state.calls.commentsPost).toBe(1);
+    await expect(page.locator("#comment-form")).toHaveClass(/auth-required/);
+    await expect(page.locator("#comment-input")).toHaveValue("draft survives rejected auth");
+    await expect(page.locator("#comment-auth-cta")).toBeVisible();
+    await expect(page.locator("#comments-list")).not.toContainText("draft survives rejected auth");
   });
 
   test("admin site login unlocks editor add and move actions", async ({ page }) => {

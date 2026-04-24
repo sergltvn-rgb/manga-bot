@@ -117,8 +117,10 @@ async def apply_webapp_response_headers(
         response.headers["Access-Control-Expose-Headers"] = CORS_BASE_HEADERS["Access-Control-Expose-Headers"]
         if "Access-Control-Allow-Origin" in cors_headers:
             response.headers["Access-Control-Allow-Origin"] = cors_headers["Access-Control-Allow-Origin"]
+            response.headers["Access-Control-Allow-Credentials"] = cors_headers["Access-Control-Allow-Credentials"]
         elif "Access-Control-Allow-Origin" in response.headers:
             del response.headers["Access-Control-Allow-Origin"]
+            response.headers.pop("Access-Control-Allow-Credentials", None)
         response.headers["Vary"] = _merge_vary_header(response.headers.get("Vary", ""), "Origin")
 
 
