@@ -85,6 +85,16 @@ class GiveawayEntry:
 
 
 @dataclass(frozen=True)
+class GiveawayParticipantStats:
+    giveaway_id: int
+    channel_id: str
+    prize: str
+    winners_count: int
+    ends_at_utc: datetime
+    entries_count: int
+
+
+@dataclass(frozen=True)
 class WinnerSelectionResult:
     winners: list[GiveawayEntry]
     replaced_count: int
@@ -406,6 +416,33 @@ async def count_giveaway_entries(giveaway_id: int) -> int:
         async with db.execute("SELECT COUNT(*) FROM giveaway_entries WHERE giveaway_id = ?", (giveaway_id,)) as cursor:
             row = await cursor.fetchone()
             return int(row[0] if row else 0)
+
+
+async def list_giveaway_participant_stats() -> list[GiveawayParticipantStats]:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT g.id, g.channel_id, g.prize, g.winners_count, g.ends_at_utc, COUNT(e.user_id)
+            FROM giveaways g
+            LEFT JOIN giveaway_entries e ON e.giveaway_id = g.id
+            WHERE g.status IN (?, ?)
+            GROUP BY g.id, g.channel_id, g.prize, g.winners_count, g.ends_at_utc
+            ORDER BY g.ends_at_utc, g.id
+            """,
+            (GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [
+        GiveawayParticipantStats(
+            giveaway_id=int(row[0]),
+            channel_id=str(row[1]),
+            prize=str(row[2]),
+            winners_count=int(row[3]),
+            ends_at_utc=_dt_from_db(str(row[4])),
+            entries_count=int(row[5]),
+        )
+        for row in rows
+    ]
 
 
 def _make_verification_answer() -> tuple[str, str, list[str]]:
@@ -788,6 +825,7 @@ def _admin_giveaway_menu() -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Создать розыгрыш", callback_data="admin_giveaway_create")
     builder.button(text="Активные розыгрыши", callback_data="admin_giveaway_active")
+    builder.button(text="Участники", callback_data="admin_giveaway_participants")
     builder.button(text="Назад", callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -1052,7 +1090,39 @@ async def admin_giveaway_active(callback: types.CallbackQuery):
         builder.button(text=f"Отменить #{item.id}", callback_data=f"giveaway_cancel:{item.id}")
     builder.button(text="Назад", callback_data="admin_giveaways")
     builder.adjust(2, 1)
-    await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    except TelegramAPIError as exc:
+        if "message is not modified" not in _telegram_error_text(exc).lower():
+            raise
+    await callback.answer()
+
+
+@giveaway_router.callback_query(F.data == "admin_giveaway_participants")
+async def admin_giveaway_participants(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    stats = await list_giveaway_participant_stats()
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Обновить", callback_data="admin_giveaway_participants")
+    builder.button(text="Назад", callback_data="admin_giveaways")
+    builder.adjust(1)
+    if not stats:
+        text = "Активных розыгрышей нет."
+    else:
+        total = sum(item.entries_count for item in stats)
+        lines = ["Участники активных розыгрышей:", f"Всего участников: {total}", ""]
+        for item in stats:
+            lines.append(
+                f"#{item.giveaway_id}: {item.prize} · участников {item.entries_count} · "
+                f"мест {item.winners_count} · до {format_giveaway_end(item.ends_at_utc)} · {item.channel_id}"
+            )
+        text = "\n".join(lines)
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    except TelegramAPIError as exc:
+        if "message is not modified" not in _telegram_error_text(exc).lower():
+            raise
     await callback.answer()
 
 

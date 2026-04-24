@@ -138,6 +138,44 @@ class TestGiveawayDb:
         assert first_finish is True
         assert second_finish is False
 
+    def test_admin_participant_stats_include_active_giveaways_with_counts(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        run(database.init_db())
+        first_id = run(
+            giveaways.create_giveaway(
+                channel_id="@test_channel",
+                prize="First prize",
+                post_text="First post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        second_id = run(
+            giveaways.create_giveaway(
+                channel_id="@test_channel",
+                prize="Second prize",
+                post_text="Second post",
+                winners_count=2,
+                ends_at_utc=datetime(2026, 4, 28, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(first_id, 101))
+        run(giveaways.set_giveaway_published(second_id, 102))
+        run(giveaways.add_giveaway_entry(first_id, 1001, "alice", "Alice"))
+        run(giveaways.add_giveaway_entry(first_id, 1002, "bob", "Bob"))
+
+        stats = run(giveaways.list_giveaway_participant_stats())
+
+        assert [(item.giveaway_id, item.entries_count) for item in stats] == [(first_id, 2), (second_id, 0)]
+
     def test_verification_challenge_passes_only_correct_answer(self, tmp_path, monkeypatch):
         import database
 
@@ -308,6 +346,14 @@ class TestGiveawayPublishing:
         assert "Изменить текст" in buttons
         assert "Изменить призы" in buttons
         assert "Отменить" in buttons
+
+    def test_admin_giveaway_menu_has_participants_button(self):
+        from services.giveaways import _admin_giveaway_menu
+
+        markup = _admin_giveaway_menu()
+        buttons = [button.text for row in markup.inline_keyboard for button in row]
+
+        assert "Участники" in buttons
 
     def test_publish_error_formats_chat_not_found_hint(self):
         from services.giveaways import _format_publish_error
