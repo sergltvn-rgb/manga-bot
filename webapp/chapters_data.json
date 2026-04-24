@@ -35,15 +35,6 @@
               ]
             },
             {
-              "chapter": "Послесловие",
-              "custom_name": "Послесловие",
-              "url": "",
-              "urls": [
-                "https://teletype.in/@slitvin/01KagD2X-bQ",
-                "https://telegra.ph/Hroniki-Akashi--11-tom-04-15"
-              ]
-            },
-            {
               "chapter": "2",
               "custom_name": "Глава 2",
               "url": "",
@@ -52,6 +43,15 @@
                 "https://telegra.ph/Hroniki-Akashi--11-tom-2-glava-1-chast-04-13",
                 "https://telegra.ph/Hroniki-Akashi--11-tom-2-glava-2-chast-04-13",
                 "https://telegra.ph/Hroniki-Akashi--11-tom-2-glava-3-chast-04-13"
+              ]
+            },
+            {
+              "chapter": "Послесловие",
+              "custom_name": "Послесловие",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/01KagD2X-bQ",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-04-15"
               ]
             },
             {
