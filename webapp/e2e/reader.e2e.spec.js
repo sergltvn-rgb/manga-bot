@@ -292,6 +292,14 @@ async function installTelegramAndApiMocks(page, state) {
     });
   });
 
+  await page.route("https://example.org/manga-75.png", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200"><rect width="800" height="1200" fill="#d8d8d8"/></svg>',
+    });
+  });
+
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -1238,6 +1246,13 @@ test.describe("Reader E2E smoke", () => {
     await page.locator("#chapters-list .chapter-item").first().click();
     await expect(page.locator("#screen-reader")).toHaveClass(/active/);
     await expect(page.locator("#reader-text img")).toHaveCount(1);
+    const imageWidthBeforeTextNarrow = await page.locator("#reader-text img").first().evaluate((img) => img.getBoundingClientRect().width);
+    await page.evaluate(() => {
+      setTextWidth(50);
+    });
+    await expect
+      .poll(() => page.locator("#reader-text img").first().evaluate((img) => img.getBoundingClientRect().width))
+      .toBeGreaterThanOrEqual(imageWidthBeforeTextNarrow - 2);
     await expect(page.locator("#reader-text")).not.toContainText("Не удалось загрузить главу");
 
     await page.locator("#screen-reader .back-btn").click();

@@ -3425,9 +3425,33 @@ input:checked + .slider:before { transform: translateX(20px); }
 .reader-text img {
     opacity: 1;
     filter: none;
-    max-width: 100%;
+    display: block;
+    width: min(calc(100vw - 32px), 900px) !important;
+    max-width: none !important;
+    height: auto;
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
     border-radius: 8px;
-    margin: 12px 0;
+    margin: 18px 0 !important;
+}
+
+.reader-text figure {
+    display: block;
+    width: min(calc(100vw - 32px), 900px);
+    max-width: none;
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
+    margin: 18px 0;
+}
+
+.reader-text figure img {
+    width: 100% !important;
+    max-width: 100% !important;
+    position: static;
+    transform: none;
+    margin: 0 auto !important;
 }
 .reader-text img.img-loading {
     background: var(--card-hover);
