@@ -18,7 +18,7 @@ import aiohttp.web
 import base64
 import io
 import html
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from datetime import datetime
 from html.parser import HTMLParser
 from typing import Union
@@ -791,6 +791,21 @@ async def ask_ai_vision(
     return await _ask_groq_vision(prompt, system_prompt, history, image_b64)
 
 
+def _encode_image_for_vision(raw_bytes: bytes) -> str:
+    """Convert user image bytes to a bounded JPEG base64 payload for Groq Vision."""
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as img:
+            img.load()
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+            out_buf = io.BytesIO()
+            img.save(out_buf, format="JPEG", quality=85)
+    except (UnidentifiedImageError, OSError, ValueError) as e:
+        raise ValueError("Invalid image") from e
+    return base64.b64encode(out_buf.getvalue()).decode()
+
+
 async def _transcribe_voice_groq(audio_bytes: bytes, filename: str = "voice.ogg") -> str | None:
     """Транскрибирует аудио через Groq Whisper. Возвращает текст или None при ошибке."""
     if not GROQ_API_KEY:
@@ -1072,14 +1087,11 @@ async def process_ai_chat_photo(message: types.Message, state: FSMContext):
     bio = await message.bot.download_file(file_info.file_path)
     raw_bytes = bio.read()
 
-    # Resize до 1024×1024 (Groq Vision лимит ~4.5 MB base64 на JPEG)
-    img = Image.open(io.BytesIO(raw_bytes))
-    if img.mode in ("RGBA", "P"):
-        img = img.convert("RGB")
-    img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-    out_buf = io.BytesIO()
-    img.save(out_buf, format="JPEG", quality=85)
-    image_b64 = base64.b64encode(out_buf.getvalue()).decode()
+    try:
+        image_b64 = _encode_image_for_vision(raw_bytes)
+    except ValueError as e:
+        logging.warning(f"ai_chat_photo: image encode failed: {e}")
+        return await message.answer("❌ Не удалось обработать изображение. Попробуйте другое фото.")
 
     prompt = message.caption or "Что на этом изображении?"
     chat_history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
@@ -1301,13 +1313,11 @@ async def process_group_ai_chat_photo(message: types.Message):
     bio = await message.bot.download_file(file_info.file_path)
     raw_bytes = bio.read()
 
-    img = Image.open(io.BytesIO(raw_bytes))
-    if img.mode in ("RGBA", "P"):
-        img = img.convert("RGB")
-    img.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
-    out_buf = io.BytesIO()
-    img.save(out_buf, format="JPEG", quality=85)
-    image_b64 = base64.b64encode(out_buf.getvalue()).decode()
+    try:
+        image_b64 = _encode_image_for_vision(raw_bytes)
+    except ValueError as e:
+        logging.warning(f"group_ai_chat_photo: image encode failed: {e}")
+        return await message.reply("❌ Не удалось обработать изображение. Попробуйте другое фото.")
 
     prompt = message.caption or "Что на этом изображении?"
     history = await get_ai_memory(chat_id, user_id, char_id, limit=20)
