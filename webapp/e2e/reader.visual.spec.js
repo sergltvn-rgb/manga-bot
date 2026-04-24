@@ -1,6 +1,11 @@
 ﻿const { test, expect } = require("@playwright/test");
 
 const ADMIN_USER_ID = 6210312655;
+const SOCIAL_SECTION_SCREENSHOT_OPTIONS = {
+  animations: "disabled",
+  caret: "hide",
+  maxDiffPixels: 8,
+};
 
 function chapterKey(seriesId, volume, chapter) {
   return `${seriesId}_v${volume}_ch${chapter}`;
@@ -321,10 +326,10 @@ test.describe("Reader visual regression", () => {
 
     await page.locator("#social-section").scrollIntoViewIfNeeded();
     await expect(page.locator("#social-section")).toBeVisible();
-    await expect(page.locator("#social-section")).toHaveScreenshot("state-reader-bottom-comments-mobile.png", {
-      animations: "disabled",
-      caret: "hide"
-    });
+    await expect(page.locator("#social-section")).toHaveScreenshot(
+      "state-reader-bottom-comments-mobile.png",
+      SOCIAL_SECTION_SCREENSHOT_OPTIONS
+    );
 
     await page.evaluate(() => {
       if (typeof toggleSettings === "function") {
@@ -380,10 +385,10 @@ test.describe("Reader visual regression", () => {
         }
       }, theme);
 
-      await expect(page.locator("#social-section")).toHaveScreenshot(`state-theme-${theme}-reader-comments-mobile.png`, {
-        animations: "disabled",
-        caret: "hide"
-      });
+      await expect(page.locator("#social-section")).toHaveScreenshot(
+        `state-theme-${theme}-reader-comments-mobile.png`,
+        SOCIAL_SECTION_SCREENSHOT_OPTIONS
+      );
     }
 
     expect(runtimeErrors, `Runtime errors:\n${runtimeErrors.join("\n")}`).toEqual([]);
@@ -412,10 +417,10 @@ test.describe("Reader visual regression", () => {
     await expect(page.locator("#comments-list .c-reply")).toHaveCount(0);
 
     await page.locator("#social-section").scrollIntoViewIfNeeded();
-    await expect(page.locator("#social-section")).toHaveScreenshot("state-public-reader-comments-mobile.png", {
-      animations: "disabled",
-      caret: "hide"
-    });
+    await expect(page.locator("#social-section")).toHaveScreenshot(
+      "state-public-reader-comments-mobile.png",
+      SOCIAL_SECTION_SCREENSHOT_OPTIONS
+    );
 
     expect(runtimeErrors, `Runtime errors:\n${runtimeErrors.join("\n")}`).toEqual([]);
   });

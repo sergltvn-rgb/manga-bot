@@ -14,6 +14,7 @@ function createMockState() {
     chapterReactionsByChapter: {},
     userReactionByChapter: {},
     likesByChapter: {},
+    sortFailure: null,
     calls: {
       reader: 0,
       chapterContent: 0,
@@ -509,6 +510,10 @@ async function installTelegramAndApiMocks(page, state) {
 
     if (pathname === "/api/sort" && method === "PUT") {
       state.calls.sortPut += 1;
+      if (state.sortFailure) {
+        await fulfillJson(route, state.sortFailure.payload, state.sortFailure.status);
+        return;
+      }
       const body = safeJson(request);
       const volume = findVolume(state, body.series_id, body.volume);
       if (volume && Array.isArray(body.order)) {
@@ -1130,6 +1135,44 @@ test.describe("Reader E2E smoke", () => {
     // The "up" button on the first item must be disabled, and "down" on the last item must be disabled.
     await expect(page.locator('#chapters-list [data-move-chapter="up"][data-chapter-idx="0"]')).toBeDisabled();
     await expect(page.locator('#chapters-list [data-move-chapter="down"][data-chapter-idx="2"]')).toBeDisabled();
+  });
+
+  test("admin move chapter: 409 from /api/sort rolls back and explains missing DB chapter", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.series[0].volumes[0].chapters.push({
+      chapter: "Иллюстрации",
+      custom_name: "Иллюстрации",
+      text: "",
+      url: "",
+    });
+    state.sortFailure = {
+      status: 409,
+      payload: {
+        error: "Missing chapters in database",
+        unmatched: ["Иллюстрации"],
+      },
+    };
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=move-conflict");
+    await page.evaluate(() => toggleAdminMode(true));
+
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(3);
+
+    const names = async () =>
+      page.$$eval("#chapters-list .chapter-item .chapter-name", (els) =>
+        els.map((el) => (el.childNodes[0]?.textContent || "").trim())
+      );
+
+    expect(await names()).toEqual(["Chapter 1", "Chapter 2", "Иллюстрации"]);
+
+    await page.locator('#chapters-list [data-move-chapter="up"][data-chapter-idx="2"]').click();
+
+    await expect.poll(() => state.calls.sortPut).toBe(1);
+    await expect(page.locator(".toast").last()).toContainText("Порядок не сохранён: глава отсутствует в БД");
+    await expect.poll(names).toEqual(["Chapter 1", "Chapter 2", "Иллюстрации"]);
+    await expect(page.locator(".toast").last()).not.toContainText("Порядок сохранён");
   });
 
   test("series selection: chapters never bleed between different series", async ({ browser }) => {

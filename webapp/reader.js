@@ -5288,6 +5288,8 @@ async function reorderChapters(fromIdx, toIdx) {
     if (fromIdx >= currentChapters.length || toIdx >= currentChapters.length) return;
     if (fromIdx === toIdx) return;
 
+    const previousChapters = currentChapters.slice();
+
     // Reorder locally
     const [moved] = currentChapters.splice(fromIdx, 1);
     currentChapters.splice(toIdx, 0, moved);
@@ -5312,16 +5314,28 @@ async function reorderChapters(fromIdx, toIdx) {
         if (!resp || !resp.ok) {
             const status = resp?.status || 0;
             let detail = '';
-            try { detail = await resp.text(); } catch (_) {}
+            let payload = null;
+            try {
+                detail = await resp.text();
+                payload = detail ? JSON.parse(detail) : null;
+            } catch (_) {}
             console.warn('sort PUT failed', status, detail);
             let msg;
             if (status === 401 || status === 403) {
                 msg = 'Недостаточно прав для изменения порядка.';
             } else if (status === 409) {
-                msg = 'Порядок не сохранён: сервер не нашёл главы (диагностика в логе).';
+                const missing = Array.isArray(payload?.unmatched) && payload.unmatched.length
+                    ? ` (${payload.unmatched.slice(0, 3).join(', ')})`
+                    : '';
+                msg = `Порядок не сохранён: глава отсутствует в БД${missing}.`;
             } else {
                 msg = `Не удалось сохранить порядок (HTTP ${status}).`;
             }
+            currentChapters = previousChapters;
+            if (currentVolume) currentVolume.chapters = previousChapters;
+            renderChaptersList();
+            try { safeSetLocal(getReaderApiCacheKey(), null); } catch (_) {}
+            refreshReaderDataInBackground();
             showToast(msg);
         } else {
             haptic('success');
@@ -5331,6 +5345,9 @@ async function reorderChapters(fromIdx, toIdx) {
         }
     } catch (e) {
         console.warn('Sort sync error:', e);
+        currentChapters = previousChapters;
+        if (currentVolume) currentVolume.chapters = previousChapters;
+        renderChaptersList();
         showToast('Ошибка сети при сохранении порядка.');
     }
 }

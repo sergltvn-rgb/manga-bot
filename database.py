@@ -10,6 +10,43 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'manga.db')
 # Белый список допустимых колонок для update_rp_stat
 _VALID_STAT_COLUMNS = frozenset({"hugs", "kisses", "bites", "slaps", "pats"})
 
+AKASHIC_VOLUME_11_REPAIR_KEY = "repair_akashic_v11_illustrations_done"
+AKASHIC_VOLUME_11_ORDER = ["0", "Эпилог", "Послесловие", "Иллюстрации", "1", "2", "3", "4", "5", "6"]
+
+
+async def repair_akashic_volume_11_illustrations(db):
+    """One-time repair for the Akashic volume 11 chapter list."""
+    async with db.execute(
+        "SELECT 1 FROM akashic_ranobe WHERE volume = ? AND chapter = ?",
+        (11, "Иллюстрации"),
+    ) as cursor:
+        illustration_exists = await cursor.fetchone() is not None
+    async with db.execute(
+        "SELECT value FROM bot_settings WHERE key = ?",
+        (AKASHIC_VOLUME_11_REPAIR_KEY,),
+    ) as cursor:
+        repair_done = await cursor.fetchone() is not None
+
+    if illustration_exists and repair_done:
+        return
+
+    await db.execute(
+        """
+        INSERT OR IGNORE INTO akashic_ranobe (volume, chapter, url, sort_order)
+        VALUES (?, ?, ?, ?)
+        """,
+        (11, "Иллюстрации", "", AKASHIC_VOLUME_11_ORDER.index("Иллюстрации")),
+    )
+    for sort_order, chapter in enumerate(AKASHIC_VOLUME_11_ORDER):
+        await db.execute(
+            "UPDATE akashic_ranobe SET sort_order = ? WHERE volume = ? AND chapter = ?",
+            (sort_order, 11, chapter),
+        )
+    await db.execute(
+        "INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)",
+        (AKASHIC_VOLUME_11_REPAIR_KEY, "1"),
+    )
+
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -126,6 +163,8 @@ async def init_db():
                 columns = [row[1] for row in await cursor.fetchall()]
                 if 'sort_order' not in columns:
                     await db.execute(f'ALTER TABLE {tbl} ADD COLUMN sort_order INTEGER DEFAULT 0')
+
+        await repair_akashic_volume_11_illustrations(db)
 
         # Таблица для кастомных названий тайтлов/томов/глав в WebApp
         await db.execute('CREATE TABLE IF NOT EXISTS custom_names (id TEXT PRIMARY KEY, name TEXT)')

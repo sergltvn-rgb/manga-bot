@@ -5099,26 +5099,90 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
         if not table:
             return aiohttp.web.json_response({"error": "unknown series type"}, status=400, headers=CORS_HEADERS)
 
-        total_changes = 0
-        unmatched: list[str] = []
         async with aiosqlite.connect(DB_PATH) as db:
-            # Probe: how many rows exist for this (table, id_col)?
             async with db.execute(
-                f'SELECT COUNT(*) FROM {table} WHERE {id_col} = ?',
+                f'SELECT {chapter_col} FROM {table} WHERE {id_col} = ?',
                 (str(idx_val),),
             ) as cur:
-                row = await cur.fetchone()
-                existing_rows = int(row[0]) if row else 0
+                existing_chapters = {str(row[0]) for row in await cur.fetchall()}
+            existing_rows = len(existing_chapters)
+            unmatched = [chapter_id for chapter_id in normalized_order if chapter_id not in existing_chapters]
 
-            # Update sort_order for each chapter
+            if unmatched:
+                logging.warning(
+                    "sort_chapters rejected: series=%s vol=%r table=%s id_col=%s idx_val=%r sent=%d existing=%d unmatched=%s",
+                    series_id,
+                    volume,
+                    table,
+                    id_col,
+                    idx_val,
+                    len(normalized_order),
+                    existing_rows,
+                    unmatched[:5],
+                )
+                await _audit_admin_action(
+                    action="sort_chapters",
+                    actor_user_id=user_id_str,
+                    target=series_id,
+                    payload={
+                        "series_id": series_id,
+                        "volume": volume,
+                        "order_size": len(normalized_order),
+                        "unmatched": unmatched[:20],
+                    },
+                    result="conflict",
+                )
+                return aiohttp.web.json_response(
+                    {
+                        "error": "Missing chapters in database",
+                        "unmatched": unmatched[:20],
+                        "debug": {
+                            "table": table,
+                            "id_col": id_col,
+                            "idx_val": str(idx_val),
+                            "sent": len(normalized_order),
+                            "existing": existing_rows,
+                        },
+                    },
+                    status=409,
+                    headers=CORS_HEADERS,
+                )
+
+            total_changes = 0
             for idx, chapter_id in enumerate(normalized_order):
                 cursor = await db.execute(
                     f'UPDATE {table} SET sort_order = ? WHERE {id_col} = ? AND {chapter_col} = ?', (idx, str(idx_val), str(chapter_id))
                 )
                 changed = cursor.rowcount or 0
                 total_changes += changed
-                if changed == 0:
-                    unmatched.append(str(chapter_id))
+            if total_changes != len(normalized_order):
+                await db.rollback()
+                logging.warning(
+                    "sort_chapters rollback: series=%s vol=%r table=%s id_col=%s idx_val=%r sent=%d existing=%d updated=%d",
+                    series_id,
+                    volume,
+                    table,
+                    id_col,
+                    idx_val,
+                    len(normalized_order),
+                    existing_rows,
+                    total_changes,
+                )
+                return aiohttp.web.json_response(
+                    {
+                        "error": "Sort update mismatch. No changes committed.",
+                        "debug": {
+                            "table": table,
+                            "id_col": id_col,
+                            "idx_val": str(idx_val),
+                            "sent": len(normalized_order),
+                            "existing": existing_rows,
+                            "updated": total_changes,
+                        },
+                    },
+                    status=409,
+                    headers=CORS_HEADERS,
+                )
             await db.commit()
         logging.info(
             "sort_chapters: series=%s vol=%r table=%s id_col=%s idx_val=%r sent=%d existing=%d updated=%d unmatched=%s",
@@ -5130,24 +5194,8 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
             len(normalized_order),
             existing_rows,
             total_changes,
-            unmatched[:5],
+            [],
         )
-        if total_changes == 0 and existing_rows > 0:
-            return aiohttp.web.json_response(
-                {
-                    "error": "No rows updated. Check series_id/volume mapping.",
-                    "debug": {
-                        "table": table,
-                        "id_col": id_col,
-                        "idx_val": str(idx_val),
-                        "sent": len(normalized_order),
-                        "existing": existing_rows,
-                        "unmatched_sample": unmatched[:5],
-                    },
-                },
-                status=409,
-                headers=CORS_HEADERS,
-            )
         invalidate_reader_cache("chapters_sorted")
 
         # Обновляем JSON и синхронизируем с GitHub
