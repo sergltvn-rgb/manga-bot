@@ -34,15 +34,6 @@
               ]
             },
             {
-              "chapter": "Эпилог",
-              "custom_name": "Эпилог",
-              "url": "",
-              "urls": [
-                "https://teletype.in/@slitvin/x1Et8QwzmS2",
-                "https://telegra.ph/Hroniki-Akashi--11-tom-ehpilog-04-15"
-              ]
-            },
-            {
               "chapter": "1",
               "custom_name": "Глава 1",
               "url": "",
@@ -50,6 +41,15 @@
                 "https://teletype.in/@slitvin/zRWN1C2g0pc",
                 "https://telegra.ph/Hroniki-Akashi--11-tom-1-glava-1-chast-04-13",
                 "https://telegra.ph/Hroniki-Akashi--11-tom-1-glava-2-chast-04-13"
+              ]
+            },
+            {
+              "chapter": "Эпилог",
+              "custom_name": "Эпилог",
+              "url": "",
+              "urls": [
+                "https://teletype.in/@slitvin/x1Et8QwzmS2",
+                "https://telegra.ph/Hroniki-Akashi--11-tom-ehpilog-04-15"
               ]
             },
             {
