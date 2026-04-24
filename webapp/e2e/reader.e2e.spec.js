@@ -15,8 +15,12 @@ function createMockState() {
     userReactionByChapter: {},
     likesByChapter: {},
     sortFailure: null,
+    webAuthUser: null,
     calls: {
       reader: 0,
+      authMe: 0,
+      authLogin: 0,
+      authLogout: 0,
       chapterContent: 0,
       commentsPost: 0,
       commentsReact: 0,
@@ -80,8 +84,12 @@ function createMobileSelectionState() {
     chapterReactionsByChapter: {},
     userReactionByChapter: {},
     likesByChapter: {},
+    webAuthUser: null,
     calls: {
       reader: 0,
+      authMe: 0,
+      authLogin: 0,
+      authLogout: 0,
       chapterContent: 0,
       commentsPost: 0,
       reactionsPost: 0,
@@ -629,6 +637,13 @@ async function installPublicApiMocks(page, state) {
       body: "/* public browser mode: Telegram WebApp is absent */",
     });
   });
+  await page.route("https://telegram.org/js/telegram-widget.js**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: "/* mocked telegram login widget */",
+    });
+  });
 
   await page.route("**/api/**", async (route) => {
     const request = route.request();
@@ -652,6 +667,40 @@ async function installPublicApiMocks(page, state) {
     if (pathname === "/api/reader" && method === "GET") {
       state.calls.reader += 1;
       await fulfillJson(route, state.readerData);
+      return;
+    }
+
+    if (pathname === "/api/auth/me" && method === "GET") {
+      state.calls.authMe += 1;
+      await fulfillJson(route, {
+        authenticated: Boolean(state.webAuthUser),
+        user: state.webAuthUser,
+        is_admin: Boolean(state.webAuthUser && state.readerData.admin_ids.includes(Number(state.webAuthUser.id))),
+      });
+      return;
+    }
+
+    if (pathname === "/api/auth/telegram-login" && method === "POST") {
+      state.calls.authLogin += 1;
+      const body = safeJson(request);
+      state.webAuthUser = {
+        id: Number(body.id || ADMIN_USER_ID),
+        first_name: String(body.first_name || "SiteUser"),
+        username: body.username || "site_user",
+      };
+      await fulfillJson(route, {
+        ok: true,
+        authenticated: true,
+        user: state.webAuthUser,
+        is_admin: state.readerData.admin_ids.includes(Number(state.webAuthUser.id)),
+      });
+      return;
+    }
+
+    if (pathname === "/api/auth/logout" && method === "POST") {
+      state.calls.authLogout += 1;
+      state.webAuthUser = null;
+      await fulfillJson(route, { ok: true, authenticated: false });
       return;
     }
 
@@ -681,9 +730,18 @@ async function installPublicApiMocks(page, state) {
       return;
     }
 
+    if (pathname === "/api/progress" && method === "POST") {
+      await fulfillJson(route, state.webAuthUser ? { ok: true } : { error: "auth required" }, state.webAuthUser ? 200 : 401);
+      return;
+    }
+
     if (pathname === "/api/likes" && method === "GET") {
       const key = url.searchParams.get("chapter_key") || "";
-      await fulfillJson(route, state.likesByChapter[key] || { count: 0, liked: false });
+      const payload = state.likesByChapter[key] || { count: 0, liked: false };
+      await fulfillJson(route, {
+        count: payload.count,
+        liked: Boolean(state.webAuthUser && payload.liked),
+      });
       return;
     }
 
@@ -697,38 +755,125 @@ async function installPublicApiMocks(page, state) {
       const key = url.searchParams.get("chapter_key") || "";
       await fulfillJson(route, {
         reactions: state.chapterReactionsByChapter[key] || {},
-        user_reaction: null,
+        user_reaction: state.webAuthUser ? (state.userReactionByChapter[key] || null) : null,
       });
       return;
     }
 
     if (pathname === "/api/likes" && method === "POST") {
       state.calls.likesPost += 1;
-      await fulfillJson(route, { error: "auth required" }, 401);
+      if (!state.webAuthUser) {
+        await fulfillJson(route, { error: "auth required" }, 401);
+        return;
+      }
+      const body = safeJson(request);
+      const key = String(body.chapter_key || "");
+      const prev = state.likesByChapter[key] || { count: 0, liked: false };
+      const nextLiked = !prev.liked;
+      state.likesByChapter[key] = {
+        count: Math.max(0, Number(prev.count || 0) + (nextLiked ? 1 : -1)),
+        liked: nextLiked,
+      };
+      await fulfillJson(route, state.likesByChapter[key]);
       return;
     }
 
     if (pathname === "/api/comments" && method === "POST") {
       state.calls.commentsPost += 1;
-      await fulfillJson(route, { error: "auth required" }, 401);
+      if (!state.webAuthUser) {
+        await fulfillJson(route, { error: "auth required" }, 401);
+        return;
+      }
+      const body = safeJson(request);
+      const key = String(body.chapter_key || "");
+      const comments = state.commentsByChapter[key] || [];
+      comments.unshift({
+        id: state.nextCommentId++,
+        chapter_key: key,
+        user_id: String(state.webAuthUser.id),
+        user_name: state.webAuthUser.first_name || "SiteUser",
+        text: String(body.text || ""),
+        parent_id: body.parent_id || null,
+        likes: 0,
+        user_reaction: null,
+        created_at: nowSql(),
+      });
+      state.commentsByChapter[key] = comments;
+      await fulfillJson(route, { ok: true });
       return;
     }
 
     if (pathname === "/api/comments/react" && method === "POST") {
       state.calls.commentsReact += 1;
-      await fulfillJson(route, { error: "auth required" }, 401);
+      await fulfillJson(route, state.webAuthUser ? { ok: true } : { error: "auth required" }, state.webAuthUser ? 200 : 401);
       return;
     }
 
     if (pathname === "/api/comments/report" && method === "POST") {
       state.calls.commentsReport += 1;
-      await fulfillJson(route, { error: "auth required" }, 401);
+      await fulfillJson(route, state.webAuthUser ? { ok: true } : { error: "auth required" }, state.webAuthUser ? 200 : 401);
       return;
     }
 
     if (pathname === "/api/reactions" && method === "POST") {
       state.calls.reactionsPost += 1;
-      await fulfillJson(route, { error: "auth required" }, 401);
+      if (!state.webAuthUser) {
+        await fulfillJson(route, { error: "auth required" }, 401);
+        return;
+      }
+      const body = safeJson(request);
+      const key = String(body.chapter_key || "");
+      const type = String(body.reaction || "");
+      const reactionBucket = state.chapterReactionsByChapter[key] || {};
+      const previousType = state.userReactionByChapter[key] || null;
+      if (previousType === type) {
+        reactionBucket[type] = Math.max(0, Number(reactionBucket[type] || 0) - 1);
+        state.userReactionByChapter[key] = null;
+      } else {
+        if (previousType) reactionBucket[previousType] = Math.max(0, Number(reactionBucket[previousType] || 0) - 1);
+        reactionBucket[type] = Number(reactionBucket[type] || 0) + 1;
+        state.userReactionByChapter[key] = type;
+      }
+      state.chapterReactionsByChapter[key] = reactionBucket;
+      await fulfillJson(route, { ok: true });
+      return;
+    }
+
+    if (pathname === "/api/chapters" && method === "POST") {
+      state.calls.chapterAdd += 1;
+      if (!state.webAuthUser || !state.readerData.admin_ids.includes(Number(state.webAuthUser.id))) {
+        await fulfillJson(route, { error: "forbidden" }, state.webAuthUser ? 403 : 401);
+        return;
+      }
+      const body = safeJson(request);
+      const volume = findVolume(state, body.series_id, body.volume);
+      if (!volume) {
+        await fulfillJson(route, { error: "unknown volume" }, 400);
+        return;
+      }
+      volume.chapters.push({
+        chapter: String(body.chapter || ""),
+        custom_name: String(body.name || "") || `Chapter ${body.chapter}`,
+        text: "Added through site login.",
+        url: String(body.url || ""),
+      });
+      await fulfillJson(route, { ok: true, chapter: body.chapter });
+      return;
+    }
+
+    if (pathname === "/api/sort" && method === "PUT") {
+      state.calls.sortPut += 1;
+      if (!state.webAuthUser || !state.readerData.admin_ids.includes(Number(state.webAuthUser.id))) {
+        await fulfillJson(route, { error: "forbidden" }, state.webAuthUser ? 403 : 401);
+        return;
+      }
+      const body = safeJson(request);
+      const volume = findVolume(state, body.series_id, body.volume);
+      if (volume && Array.isArray(body.order)) {
+        const byId = new Map(volume.chapters.map((ch) => [String(ch.chapter), ch]));
+        volume.chapters = body.order.map((id) => byId.get(String(id))).filter(Boolean);
+      }
+      await fulfillJson(route, { ok: true });
       return;
     }
 
@@ -792,6 +937,80 @@ test.describe("Reader E2E smoke", () => {
     expect(state.calls.commentsPost).toBe(0);
     expect(state.calls.commentsReact).toBe(0);
     expect(state.calls.commentsReport).toBe(0);
+  });
+
+  test("public site login enables comments, likes, and reactions", async ({ page }) => {
+    const state = createMockState();
+    await installPublicApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=site-login");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#comment-form")).toHaveClass(/auth-required/);
+
+    await page.evaluate(({ id }) => {
+      return window.onTelegramLogin({
+        id,
+        first_name: "SiteUser",
+        username: "site_user",
+        auth_date: "1700000000",
+        hash: "mocked",
+      });
+    }, { id: 987654 });
+
+    await expect.poll(() => state.calls.authLogin).toBe(1);
+    await expect(page.locator("#comment-form")).not.toHaveClass(/auth-required/);
+    await expect(page.locator("#comment-auth-cta")).toBeHidden();
+
+    await page.fill("#comment-input", "site login comment");
+    await page.click("#comment-form .comment-send-btn");
+    await expect.poll(() => state.calls.commentsPost).toBe(1);
+    await expect(page.locator("#comments-list .comment-text").first()).toContainText("site login comment");
+
+    await page.locator("#like-btn").click();
+    await expect.poll(() => state.calls.likesPost).toBe(1);
+
+    await page.click("#reaction-bar .reaction-item.type-heart");
+    await expect.poll(() => state.calls.reactionsPost).toBe(1);
+    await expect(page.locator("#reaction-bar .reaction-item.type-heart")).toHaveClass(/active/);
+  });
+
+  test("admin site login unlocks editor add and move actions", async ({ page }) => {
+    const state = createMockState();
+    await installPublicApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=site-admin");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    await page.evaluate(({ id }) => {
+      return window.onTelegramLogin({
+        id,
+        first_name: "Admin",
+        username: "admin_site",
+        auth_date: "1700000000",
+        hash: "mocked",
+      });
+    }, { id: ADMIN_USER_ID });
+    await expect.poll(() => state.calls.authLogin).toBe(1);
+
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#screen-chapters")).toHaveClass(/admin-enabled/);
+
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await page.evaluate(() => openAddChapterModal());
+    await page.fill("#add-chapter-url", "https://example.org/site-admin-added");
+    await page.fill("#add-chapter-name", "Site admin added chapter");
+    await page.click("#add-chapter-save");
+    await expect.poll(() => state.calls.chapterAdd).toBe(1);
+
+    await page.locator("#screen-reader .back-btn").click();
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(3);
+    await page.locator('#chapters-list [data-move-chapter="up"][data-chapter-idx="2"]').click();
+    await expect.poll(() => state.calls.sortPut).toBe(1);
   });
 
   test("user flow: open chapter, navigate, comment, react, typo report", async ({ page }) => {

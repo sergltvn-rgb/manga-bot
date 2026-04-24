@@ -4758,6 +4758,7 @@ from services.telemetry import (  # noqa: E402,F401
 
 # Telegram WebApp auth вынесен в services/auth.py (Фаза 3 шаг 11).
 from services.auth import get_auth_user  # noqa: E402,F401
+from services.auth_api import handle_auth_logout, handle_auth_me, handle_auth_telegram_login  # noqa: E402,F401
 
 
 # --- ИИ-чат (серверный прокси для WebApp) ---
@@ -5254,6 +5255,13 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_get("/api/likes", handle_likes_get)
     app.router.add_post("/api/likes", handle_likes_post)
     app.router.add_options("/api/likes", handle_cors_preflight)
+
+    app.router.add_get("/api/auth/me", handle_auth_me)
+    app.router.add_post("/api/auth/telegram-login", handle_auth_telegram_login)
+    app.router.add_post("/api/auth/logout", handle_auth_logout)
+    app.router.add_options("/api/auth/me", handle_cors_preflight)
+    app.router.add_options("/api/auth/telegram-login", handle_cors_preflight)
+    app.router.add_options("/api/auth/logout", handle_cors_preflight)
 
     app.router.add_get("/api/comments", handle_comments_get)
     app.router.add_post("/api/comments", handle_comments_post)

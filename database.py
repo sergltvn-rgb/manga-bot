@@ -136,6 +136,13 @@ async def init_db():
             first_name TEXT DEFAULT '',
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS web_sessions (
+            session_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            user_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL
+        )''')
         # Таблица для выбора провайдера ИИ (gemma / groq) для каждого чата.
         # Default = gemma (локальная без цензуры). Groq используется как
         # автофоллбек в `ask_ai`, если Gemma недоступна.
@@ -265,6 +272,8 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_bookmarks_user ON user_bookmarks(user_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_reactions_chapter ON chapter_reactions(chapter_key)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_user_profiles_username ON user_profiles(username)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_webapp_telemetry_event_time ON webapp_telemetry(event_type, created_at)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_admin_audit_actor_time ON admin_audit_log(actor_user_id, created_at)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_admin_audit_action_time ON admin_audit_log(action, created_at)')

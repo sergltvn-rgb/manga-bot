@@ -17,15 +17,41 @@ function openChannel() {
 
 // === Telegram User ===
 const tgUser = tg.initDataUnsafe?.user || {};
-const userId = String(tgUser.id || '');
-const userName = tgUser.first_name || 'Аноним';
+let userId = String(tgUser.id || '');
+let userName = tgUser.first_name || 'Аноним';
+let webAuthUser = null;
+let webAuthLoaded = false;
 
 function hasTelegramAuth() {
     return Boolean(userId && tg && tg.initData);
 }
 
+function hasSiteAuth() {
+    return Boolean(!hasTelegramAuth() && webAuthUser && webAuthUser.id);
+}
+
+function hasWriteAuth() {
+    return hasTelegramAuth() || hasSiteAuth();
+}
+
 function isPublicReadMode() {
-    return !hasTelegramAuth();
+    return !hasWriteAuth();
+}
+
+function applyAuthUser(user) {
+    webAuthUser = user && user.id ? user : null;
+    if (hasTelegramAuth()) {
+        userId = String(tgUser.id || '');
+        userName = tgUser.first_name || 'Аноним';
+        return;
+    }
+    if (webAuthUser) {
+        userId = String(webAuthUser.id || '');
+        userName = webAuthUser.first_name || webAuthUser.username || 'Читатель';
+    } else {
+        userId = '';
+        userName = 'Аноним';
+    }
 }
 
 function getBotUsername() {
@@ -47,7 +73,7 @@ function openTelegramReaderAuth() {
 
 function requireTelegramAuth(actionText = 'выполнить действие') {
     syncPublicReadModeUI();
-    showToast(`Откройте читалку через Telegram, чтобы ${actionText}.`);
+    showToast(`Войдите через Telegram, чтобы ${actionText}.`);
     return false;
 }
 
@@ -64,6 +90,8 @@ function syncPublicReadModeUI() {
     const formatBtn = document.getElementById('comment-format-toggle');
     const likeBtn = document.getElementById('like-btn');
     const reactionBar = document.getElementById('reaction-bar');
+    const loginWidget = document.getElementById('telegram-login-widget');
+    const authUser = document.getElementById('comment-auth-user');
 
     if (form) {
         form.classList.toggle('auth-required', publicMode);
@@ -71,6 +99,13 @@ function syncPublicReadModeUI() {
     }
     if (cta) {
         cta.classList.toggle('hidden', !publicMode);
+    }
+    if (authUser) {
+        authUser.textContent = webAuthUser ? `Вы вошли как ${webAuthUser.first_name || webAuthUser.username || userName}` : '';
+        authUser.classList.toggle('hidden', !webAuthUser);
+    }
+    if (loginWidget && publicMode) {
+        renderTelegramLoginWidget();
     }
     [input, sendBtn, formatBtn].forEach((el) => {
         if (!el) return;
@@ -80,12 +115,86 @@ function syncPublicReadModeUI() {
     if (likeBtn) {
         likeBtn.classList.toggle('auth-required', publicMode);
         likeBtn.setAttribute('aria-disabled', publicMode ? 'true' : 'false');
-        likeBtn.title = publicMode ? 'Откройте через Telegram, чтобы поставить лайк' : '';
+        likeBtn.title = publicMode ? 'Войдите через Telegram, чтобы поставить лайк' : '';
     }
     if (reactionBar) {
         reactionBar.classList.toggle('auth-required', publicMode);
     }
 }
+
+function renderTelegramLoginWidget() {
+    const mount = document.getElementById('telegram-login-widget');
+    if (!mount || mount.dataset.botUsername === getBotUsername()) return;
+    mount.dataset.botUsername = getBotUsername();
+    mount.innerHTML = '';
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = 'https://telegram.org/js/telegram-widget.js?22';
+    script.setAttribute('data-telegram-login', getBotUsername());
+    script.setAttribute('data-size', 'medium');
+    script.setAttribute('data-userpic', 'false');
+    script.setAttribute('data-request-access', 'write');
+    script.setAttribute('data-onauth', 'onTelegramLogin(user)');
+    mount.appendChild(script);
+}
+
+async function refreshAfterAuthChange() {
+    syncAdminModeControls();
+    syncPublicReadModeUI();
+    if (document.getElementById('screen-chapters')?.classList.contains('active')) {
+        renderChaptersList();
+    }
+    if (document.getElementById('screen-reader')?.classList.contains('active')) {
+        renderComments(allCommentsCache);
+        renderReactions(chapterReactionsState);
+        await Promise.allSettled([loadLikes(), loadComments(), loadReactions()]);
+    }
+}
+
+async function loadSiteAuthState() {
+    if (!API_URL || hasTelegramAuth()) {
+        webAuthLoaded = true;
+        return;
+    }
+    try {
+        const resp = await apiFetch(`${API_URL}/api/auth/me`);
+        if (resp.ok) {
+            const data = await resp.json();
+            applyAuthUser(data.authenticated ? data.user : null);
+        }
+    } catch (e) {
+        console.warn('Site auth state load failed:', e);
+    } finally {
+        webAuthLoaded = true;
+        syncPublicReadModeUI();
+    }
+}
+
+window.onTelegramLogin = async function onTelegramLogin(user) {
+    if (!API_URL) {
+        showToast('Вход доступен только на сайте с API.');
+        return false;
+    }
+    try {
+        const resp = await apiFetch(`${API_URL}/api/auth/telegram-login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(user || {})
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.authenticated) {
+            throw new Error(data.error || 'Не удалось войти');
+        }
+        applyAuthUser(data.user);
+        await refreshAfterAuthChange();
+        showToast('Вы вошли через Telegram.');
+        return true;
+    } catch (e) {
+        console.warn('Telegram site login failed:', e);
+        showToast(`Вход не удался: ${e.message}`);
+        return false;
+    }
+};
 
 // === Состояние ===
 let allData = { series: [] };
@@ -1091,6 +1200,7 @@ async function apiFetch(url, options = {}) {
         throw new Error('Offline');
     }
     options.headers = options.headers || {};
+    options.credentials = options.credentials || 'include';
     if (typeof tg !== 'undefined' && tg.initData) {
         options.headers['Authorization'] = 'tma ' + tg.initData;
     }
@@ -1388,7 +1498,7 @@ function saveScrollPosition() {
     saveLastRead();
 
     // Синхронизация с сервером (debounced — не чаще 1 раз в 3 секунды)
-    if (API_URL && hasTelegramAuth() && currentSeries && currentVolume && currentChapters[currentChapterIdx]) {
+    if (API_URL && hasWriteAuth() && currentSeries && currentVolume && currentChapters[currentChapterIdx]) {
         clearTimeout(_progressSyncTimer);
         _progressSyncTimer = setTimeout(() => {
             apiFetch(API_URL + '/api/progress', {
@@ -1560,7 +1670,7 @@ async function loadData() {
     };
 
     // 1. Пытаемся загрузить прогресс (если есть API)
-    if (API_URL && hasTelegramAuth()) {
+    if (API_URL && hasWriteAuth()) {
         console.log("Fetching progress from API...");
         try {
             const bResp = await apiFetch(API_URL + '/api/progress', { signal: getTimeoutSignal(5000) });
@@ -2911,7 +3021,7 @@ async function loadLikes() {
 
 async function toggleLike() {
     if (!API_URL) return;
-    if (!hasTelegramAuth()) {
+    if (!hasWriteAuth()) {
         requireTelegramAuth('ставить лайки');
         return;
     }
@@ -3005,7 +3115,7 @@ function findCommentInCache(commentId) {
 }
 
 function setReply(id, name) {
-    if (!hasTelegramAuth()) {
+    if (!hasWriteAuth()) {
         requireTelegramAuth('отвечать на комментарии');
         return;
     }
@@ -3160,7 +3270,7 @@ function renderComments(comments) {
         const editedBadge = isEdited
             ? `<span class="comment-edited-badge" title="Отредактировано ${formatDate(c.updated_at)}">ред.</span>`
             : '';
-        const canWriteComments = hasTelegramAuth();
+        const canWriteComments = hasWriteAuth();
         const isOwn = canWriteComments && String(c.user_id) === userId;
         const viewerIsAdmin = canWriteComments && isAdminMode;
         const color = getAvatarColor(String(c.user_id));
@@ -3251,7 +3361,7 @@ function renderComments(comments) {
 
 function reportComment(id) {
     if (!API_URL) return;
-    if (!hasTelegramAuth()) {
+    if (!hasWriteAuth()) {
         requireTelegramAuth('отправлять жалобы');
         return;
     }
@@ -3301,7 +3411,7 @@ function reportComment(id) {
 
 async function reactToComment(commentId, type) {
     if (!API_URL) return;
-    if (!hasTelegramAuth()) {
+    if (!hasWriteAuth()) {
         requireTelegramAuth('ставить реакции комментариям');
         return;
     }
@@ -3481,7 +3591,7 @@ function insertFormatting(start, end) {
 
 async function postComment() {
     if (!API_URL) return;
-    if (!hasTelegramAuth()) {
+    if (!hasWriteAuth()) {
         requireTelegramAuth('писать комментарии');
         return;
     }
@@ -6169,7 +6279,7 @@ function initReaderScrollListeners() {
 // Optimistic chapter reactions with rollback on network/server errors.
 async function toggleReaction(type) {
     if (!API_URL) return;
-    if (!hasTelegramAuth()) {
+    if (!hasWriteAuth()) {
         requireTelegramAuth('ставить реакции');
         return;
     }
@@ -6246,7 +6356,7 @@ bindDelegatedSelectionEvents();
 updateLibraryFilterButtons();
 restoreSettings();
 syncAdminModeControls();
-loadData();
+loadSiteAuthState().then(() => loadData());
 initTypoReporter();
 initGestures();
 initReaderScrollListeners();

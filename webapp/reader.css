@@ -4776,6 +4776,23 @@ input[type=range]:active::-webkit-slider-thumb {
     color: var(--text-secondary);
 }
 
+.comment-auth-user {
+    font-weight: 700;
+    color: var(--accent) !important;
+}
+
+.comment-auth-user.hidden {
+    display: none;
+}
+
+.telegram-login-widget {
+    min-height: 40px;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+}
+
 .comment-auth-cta-btn {
     min-height: var(--ui-hit-target);
     flex: 0 0 auto;
@@ -5453,6 +5470,11 @@ body.keyboard-open #screen-reader .admin-menu {
     }
 
     .comment-auth-cta-btn {
+        width: 100%;
+    }
+
+    .telegram-login-widget {
+        justify-content: stretch;
         width: 100%;
     }
 }
