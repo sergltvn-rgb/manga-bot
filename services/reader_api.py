@@ -26,7 +26,7 @@ import time
 
 import aiohttp.web
 
-from services.cache_utils import _if_none_match_matches
+from services.cache_utils import _compute_reader_etag, _if_none_match_matches
 from services.reader_pipeline import get_cached_chapter_content
 from services.validators import _is_valid_chapter_token, _is_valid_series_id
 from services.webapp_cors import CORS_HEADERS
@@ -61,7 +61,16 @@ async def handle_chapter_content(request: aiohttp.web.Request) -> aiohttp.web.Re
             return aiohttp.web.json_response({"error": "not found"}, status=status_code, headers=CORS_HEADERS)
 
         headers = dict(CORS_HEADERS)
-        headers["Cache-Control"] = "no-cache"
+        etag = _compute_reader_etag(payload)
+        headers.update(
+            {
+                "ETag": etag,
+                "Cache-Control": "no-cache",
+                "Vary": "If-None-Match",
+            }
+        )
+        if _if_none_match_matches(request.headers.get("If-None-Match", ""), etag):
+            return aiohttp.web.Response(status=304, headers=headers)
         payload_with_cache = dict(payload)
         payload_with_cache["cache_status"] = "hit" if cache_hit else "miss"
         return aiohttp.web.json_response(payload_with_cache, status=status_code, headers=headers)

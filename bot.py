@@ -4779,6 +4779,7 @@ from services.admin_chapter_api import (  # noqa: E402,F401
     _get_table_info,
     handle_chapter_add,
     handle_chapter_bulk,
+    handle_chapter_bulk_preview,
     handle_chapter_delete,
     handle_chapter_edit,
     handle_rename_delete,
@@ -5308,6 +5309,8 @@ def create_webapp_api_app() -> aiohttp.web.Application:
 
     app.router.add_post("/api/chapters/bulk", handle_chapter_bulk)
     app.router.add_options("/api/chapters/bulk", handle_cors_preflight)
+    app.router.add_post("/api/chapters/bulk/preview", handle_chapter_bulk_preview)
+    app.router.add_options("/api/chapters/bulk/preview", handle_cors_preflight)
 
     app.router.add_route("PUT", "/api/series", handle_series_update)
     app.router.add_options("/api/series", handle_cors_preflight)

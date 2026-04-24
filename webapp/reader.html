@@ -11,7 +11,7 @@
     <script>
         (function () {
             const params = new URLSearchParams(window.location.search);
-            const rev = params.get('rev') || '26';
+            const rev = params.get('rev') || '27';
             window.__READER_REV = rev;
             const css = document.createElement('link');
             css.rel = 'stylesheet';
@@ -46,6 +46,17 @@
     </div>
 
     <!-- === ЭКРАН 1: Выбор серии === -->
+    <div id="reader-search-panel" class="reader-search-panel">
+        <div class="reader-search-wrap">
+            <svg class="reader-search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <input id="reader-search-input" class="reader-search-input" type="search" autocomplete="off" placeholder="Поиск по библиотеке и главам" oninput="handleReaderSearchInput(this.value)">
+            <button id="reader-search-clear" class="reader-search-clear hidden" type="button" onclick="clearReaderSearch()" aria-label="Очистить поиск">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </button>
+        </div>
+        <div id="reader-search-empty" class="reader-search-empty hidden" aria-live="polite"></div>
+    </div>
+
     <div id="screen-series" class="screen active">
         <div class="reader-header">
             <div class="header-title">
@@ -548,8 +559,10 @@
         <h3>Массовое добавление глав</h3>
         <p class="bulk-upload-hint">Вставьте ссылки (по одной на строку). Нумерация продолжится автоматически.</p>
         <textarea id="bulk-upload-input" class="bulk-upload-input" placeholder="https://telegra.ph/chapter-15&#10;https://telegra.ph/chapter-16&#10;https://telegra.ph/chapter-17" rows="6"></textarea>
+        <div id="bulk-upload-preview-panel" class="bulk-preview-panel hidden" aria-live="polite"></div>
         <div class="bulk-upload-actions">
             <button class="edit-url-cancel" onclick="closeBulkModal()">Отмена</button>
+            <button class="edit-url-cancel bulk-preview-btn" id="bulk-upload-preview" onclick="previewBulkUpload()">Проверить</button>
             <button class="edit-url-save" id="bulk-upload-save" onclick="executeBulkUpload()">Добавить</button>
         </div>
     </div>
@@ -611,7 +624,7 @@
 
     <script>
         (function () {
-            const rev = window.__READER_REV || '26';
+            const rev = window.__READER_REV || '27';
             const script = document.createElement('script');
             script.src = `reader.js?v=${encodeURIComponent(rev)}`;
             document.body.appendChild(script);

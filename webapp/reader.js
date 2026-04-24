@@ -1011,24 +1011,80 @@ function getChapterSourceUrls(chapter) {
 }
 
 const CHAPTER_PAYLOAD_CACHE_LIMIT = 16;
+const CHAPTER_PAYLOAD_PERSIST_LIMIT = 32;
+const CHAPTER_PAYLOAD_PERSIST_PREFIX = 'reader_chapter_payload_v2';
 const chapterPayloadCache = new Map();
 const chapterPayloadInflight = new Map();
+let readerSearchQuery = '';
+let bulkUploadPreviewState = null;
 
 function buildChapterPayloadCacheKey(seriesId, volume, chapterId) {
     if (seriesId === undefined || volume === undefined || chapterId === undefined) return '';
     return `${String(seriesId)}::${String(volume)}::${String(chapterId)}`;
 }
 
-function getCachedChapterPayload(cacheKey) {
-    if (!cacheKey || !chapterPayloadCache.has(cacheKey)) return null;
-    const payload = chapterPayloadCache.get(cacheKey);
-    chapterPayloadCache.delete(cacheKey);
-    chapterPayloadCache.set(cacheKey, payload);
-    return payload;
+function getPersistentChapterPayloadKey(cacheKey) {
+    return `${CHAPTER_PAYLOAD_PERSIST_PREFIX}_${READER_REV}_${cacheKey}`;
 }
 
-function rememberCachedChapterPayload(cacheKey, payload) {
+function getPersistentChapterPayload(cacheKey) {
+    if (!cacheKey) return null;
+    const cached = safeGetLocal(getPersistentChapterPayloadKey(cacheKey), null);
+    if (!cached || typeof cached !== 'object' || !cached.payload || typeof cached.payload !== 'object') return null;
+    return {
+        payload: cached.payload,
+        etag: typeof cached.etag === 'string' ? cached.etag : '',
+        ts: Number(cached.ts || 0)
+    };
+}
+
+function prunePersistentChapterPayloads() {
+    try {
+        const prefix = `${CHAPTER_PAYLOAD_PERSIST_PREFIX}_${READER_REV}_`;
+        const entries = [];
+        for (let i = 0; i < localStorage.length; i += 1) {
+            const key = localStorage.key(i);
+            if (!key || !key.startsWith(prefix)) continue;
+            const item = safeGetLocal(key, null);
+            entries.push({ key, ts: Number(item?.ts || 0) });
+        }
+        entries.sort((a, b) => b.ts - a.ts);
+        entries.slice(CHAPTER_PAYLOAD_PERSIST_LIMIT).forEach((entry) => localStorage.removeItem(entry.key));
+    } catch (err) {
+        console.warn('Chapter persistent cache prune failed:', err);
+    }
+}
+
+function rememberPersistentChapterPayload(cacheKey, payload, etag = '') {
     if (!cacheKey || !payload || typeof payload !== 'object') return;
+    safeSetLocal(getPersistentChapterPayloadKey(cacheKey), {
+        payload,
+        etag: typeof etag === 'string' ? etag : '',
+        ts: Date.now()
+    });
+    prunePersistentChapterPayloads();
+}
+
+function getCachedChapterPayload(cacheKey) {
+    if (!cacheKey) return null;
+    if (chapterPayloadCache.has(cacheKey)) {
+        const payload = chapterPayloadCache.get(cacheKey);
+        chapterPayloadCache.delete(cacheKey);
+        chapterPayloadCache.set(cacheKey, payload);
+        return payload;
+    }
+    const persistent = getPersistentChapterPayload(cacheKey);
+    if (!persistent?.payload) return null;
+    rememberCachedChapterPayload(cacheKey, persistent.payload, { persist: false, etag: persistent.etag });
+    return persistent.payload;
+}
+
+function rememberCachedChapterPayload(cacheKey, payload, options = {}) {
+    if (!cacheKey || !payload || typeof payload !== 'object') return;
+    const etag = typeof options.etag === 'string' ? options.etag : '';
+    if (etag) {
+        payload._etag = etag;
+    }
     if (chapterPayloadCache.has(cacheKey)) {
         chapterPayloadCache.delete(cacheKey);
     }
@@ -1037,6 +1093,9 @@ function rememberCachedChapterPayload(cacheKey, payload) {
         const firstKey = chapterPayloadCache.keys().next().value;
         if (!firstKey) break;
         chapterPayloadCache.delete(firstKey);
+    }
+    if (options.persist !== false) {
+        rememberPersistentChapterPayload(cacheKey, payload, etag || payload._etag || '');
     }
 }
 
@@ -1085,7 +1144,7 @@ async function warmChapterPayloadByIndex(idx, options = {}) {
             }
             const payload = await resp.json();
             if (payload && typeof payload === 'object') {
-                rememberCachedChapterPayload(cacheKey, payload);
+                rememberCachedChapterPayload(cacheKey, payload, { etag: resp.headers.get('etag') || '' });
                 if (preferPrefetchSlot && payload.ok && payload.html) {
                     prefetchedChapter = { idx, html: payload.html };
                 }
@@ -1819,6 +1878,89 @@ function showEmptyState() {
     });
 }
 
+function normalizeReaderSearchText(value) {
+    return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function chapterSearchText(chapter, volume) {
+    const parts = [
+        chapter?.chapter,
+        chapter?.custom_name,
+        chapter?.title,
+        chapter?.name,
+        volume !== undefined && volume !== null ? `том ${volume}` : '',
+        volume !== undefined && volume !== null ? `vol ${volume}` : '',
+        chapter?.chapter !== undefined ? `глава ${chapter.chapter}` : '',
+        chapter?.chapter !== undefined ? `chapter ${chapter.chapter}` : ''
+    ];
+    return normalizeReaderSearchText(parts.filter(Boolean).join(' '));
+}
+
+function seriesSearchText(series) {
+    const parts = [series?.title, series?.id, series?.author, ...(Array.isArray(series?.tags) ? series.tags : [])];
+    (series?.volumes || []).forEach((volume) => {
+        parts.push(volume?.custom_name, volume?.volume !== undefined ? `том ${volume.volume}` : '');
+        (volume?.chapters || []).forEach((chapter) => parts.push(chapterSearchText(chapter, volume?.volume)));
+    });
+    return normalizeReaderSearchText(parts.filter(Boolean).join(' '));
+}
+
+function matchesSeriesSearch(series, query) {
+    if (!query) return true;
+    return seriesSearchText(series).includes(query);
+}
+
+function matchesChapterSearch(chapter, query, volume) {
+    if (!query) return true;
+    return chapterSearchText(chapter, volume).includes(query);
+}
+
+function updateReaderSearchEmpty(message = '') {
+    const empty = document.getElementById('reader-search-empty');
+    if (!empty) return;
+    if (!message) {
+        empty.classList.add('hidden');
+        empty.textContent = '';
+        return;
+    }
+    empty.textContent = message;
+    empty.classList.remove('hidden');
+}
+
+function syncReaderSearchVisibility() {
+    const panel = document.getElementById('reader-search-panel');
+    if (!panel) return;
+    const screenName = getActiveScreenName();
+    const visible = screenName === 'series' || screenName === 'chapters';
+    panel.classList.toggle('hidden', !visible);
+    if (!visible) {
+        updateReaderSearchEmpty('');
+        return;
+    }
+    const input = document.getElementById('reader-search-input');
+    const clear = document.getElementById('reader-search-clear');
+    if (input && input.value !== readerSearchQuery) input.value = readerSearchQuery;
+    if (clear) clear.classList.toggle('hidden', !readerSearchQuery);
+}
+
+function handleReaderSearchInput(value) {
+    readerSearchQuery = normalizeReaderSearchText(value);
+    syncReaderSearchVisibility();
+    const active = getActiveScreenName();
+    if (active === 'series') renderSeriesList();
+    if (active === 'chapters') renderChaptersList();
+}
+
+function clearReaderSearch() {
+    readerSearchQuery = '';
+    const input = document.getElementById('reader-search-input');
+    if (input) input.value = '';
+    syncReaderSearchVisibility();
+    const active = getActiveScreenName();
+    if (active === 'series') renderSeriesList();
+    if (active === 'chapters') renderChaptersList();
+}
+
 function showNetworkState() {
     renderStateBlock('series-list', {
         variant: 'error',
@@ -1887,7 +2029,15 @@ function renderSeriesList() {
         return;
     }
 
-    container.innerHTML = allData.series.map((s, i) => renderSeriesPosterCard(s, i)).join('');
+    const query = readerSearchQuery;
+    const visibleSeries = allData.series.filter((series) => matchesSeriesSearch(series, query));
+    if (visibleSeries.length === 0) {
+        container.innerHTML = '';
+        updateReaderSearchEmpty(query ? 'Ничего не найдено. Попробуйте название серии, том или номер главы.' : '');
+        return;
+    }
+    updateReaderSearchEmpty('');
+    container.innerHTML = visibleSeries.map((s, i) => renderSeriesPosterCard(s, i)).join('');
 }
 
 // Refresh v4: карточка-постер (2:3 обложка + компактная инфа снизу).
@@ -2202,10 +2352,26 @@ function renderChaptersList() {
     }
 
     // Определяем последнюю читаемую главу для подсветки
+    const query = readerSearchQuery;
+    const visibleChapters = currentChapters
+        .map((ch, idx) => ({ ch, idx }))
+        .filter(({ ch }) => matchesChapterSearch(ch, query, currentVolume.volume));
+
+    if (visibleChapters.length === 0) {
+        renderStateBlock(container, {
+            icon: '\uD83D\uDD0E',
+            title: '\u041d\u0438\u0447\u0435\u0433\u043e \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e',
+            description: '\u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043d\u043e\u043c\u0435\u0440 \u0433\u043b\u0430\u0432\u044b, \u043d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u0438\u043b\u0438 \u0442\u043e\u043c.'
+        });
+        updateReaderSearchEmpty(query ? 'В этом томе нет глав по текущему запросу.' : '');
+        return;
+    }
+    updateReaderSearchEmpty('');
+
     const lastRead = getLastRead(currentSeries.id);
     const lastChapter = sameReaderKey(lastRead?.volume, currentVolume.volume) ? lastRead.chapter : null;
 
-    container.innerHTML = currentChapters.map((ch, idx) => {
+    container.innerHTML = visibleChapters.map(({ ch, idx }, visibleIdx) => {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
         const chapName = ch.custom_name || `Глава ${ch.chapter}`;
         const hasCustom = !!ch.custom_name;
@@ -2240,7 +2406,7 @@ function renderChaptersList() {
         <div class="chapter-item chapter-tile ${readClass}${isCurrent ? ' current-chapter' : ''}${!hasContent ? ' chapter-item-disabled' : ''}" data-chapter-idx="${idx}" ${isAdminMode ? 'draggable="true"' : ''}>
             ${isAdminMode ? '<div class="drag-handle" title="Перетащить">⠿</div>' : ''}
             ${isAdminMode ? `<div class="admin-move-group">${moveBtns}</div>` : ''}
-            <div class="chapter-num${readState ? ' is-read' : ''}${isCurrent ? ' is-current' : ''}">${idx + 1}</div>
+            <div class="chapter-num${readState ? ' is-read' : ''}${isCurrent ? ' is-current' : ''}">${query ? visibleIdx + 1 : idx + 1}</div>
             <div class="chapter-body">
                 <div class="chapter-name">${chapName}${customBadge}${linkBtn}${editBtns}${fallbackBtn}</div>
                 <div class="chapter-meta">${meta}</div>
@@ -2487,29 +2653,30 @@ function loadChapterContentFromServer(chapter, telemetryContext = null) {
     }
 
     const cachedPayload = getCachedChapterPayload(cacheKey);
+    let renderedCachedPayload = false;
     if (cachedPayload && cachedPayload.ok && cachedPayload.html) {
         renderLoadedContent(container, cachedPayload.html, chapter, chapterTelemetryContext, cachedPayload.source_type || 'api_cache');
+        renderedCachedPayload = true;
         if (!chapterContentLooksVisible(container)) {
             renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
                 source_type: cachedPayload?.source_type || 'fallback',
                 fallback_url: cachedPayload?.fallback_url || null,
                 reason: 'empty_cached_content'
             });
+            renderedCachedPayload = false;
         }
-        return;
-    }
-    if (cachedPayload && !cachedPayload.ok) {
+    } else if (cachedPayload && !cachedPayload.ok) {
         renderUnavailableChapterState(container, chapter, chapterTelemetryContext, {
             source_type: cachedPayload?.source_type || 'fallback',
             fallback_url: cachedPayload?.fallback_url || null,
             reason: 'cached_fallback'
         });
-        return;
+        renderedCachedPayload = true;
     }
 
     const inflightPayload = cacheKey ? chapterPayloadInflight.get(cacheKey) : null;
     if (inflightPayload) {
-        showChapterLoadingState(container, chapter);
+        if (!renderedCachedPayload) showChapterLoadingState(container, chapter);
         inflightPayload.then((payload) => {
             if (chapter !== currentChapters[currentChapterIdx]) return;
             if (payload && payload.ok && payload.html) {
@@ -2540,16 +2707,31 @@ function loadChapterContentFromServer(chapter, telemetryContext = null) {
         }
     }, 15000);
 
-    showChapterLoadingState(container, chapter);
+    if (!renderedCachedPayload) {
+        showChapterLoadingState(container, chapter);
+    } else {
+        const hint = container.querySelector('[data-chapter-loading-hint]');
+        if (hint) hint.textContent = 'Показываю сохранённую главу, тихо проверяю обновление...';
+    }
 
-    apiFetch(endpoint, { signal }).then(async (resp) => {
+    const headers = {};
+    const cachedEtag = cachedPayload?._etag || getPersistentChapterPayload(cacheKey)?.etag || '';
+    if (cachedEtag) headers['If-None-Match'] = cachedEtag;
+
+    apiFetch(endpoint, { signal, headers }).then(async (resp) => {
         if (signal.aborted || chapter !== currentChapters[currentChapterIdx]) return;
+        if (resp.status === 304) {
+            if (!renderedCachedPayload && cachedPayload && cachedPayload.ok && cachedPayload.html) {
+                renderLoadedContent(container, cachedPayload.html, chapter, chapterTelemetryContext, cachedPayload.source_type || 'api_cache');
+            }
+            return;
+        }
         if (!resp.ok) {
             throw new Error(`HTTP ${resp.status}`);
         }
         const payload = await resp.json();
         if (payload && typeof payload === 'object') {
-            rememberCachedChapterPayload(cacheKey, payload);
+            rememberCachedChapterPayload(cacheKey, payload, { etag: resp.headers.get('etag') || '' });
         }
         if (payload && payload.ok && payload.html) {
             renderLoadedContent(container, payload.html, chapter, chapterTelemetryContext, payload.source_type || 'api');
@@ -2569,6 +2751,11 @@ function loadChapterContentFromServer(chapter, telemetryContext = null) {
         });
     }).catch((err) => {
         if (err.name === 'AbortError') return;
+        if (renderedCachedPayload) {
+            const hint = container.querySelector('[data-chapter-loading-hint]');
+            if (hint) hint.textContent = 'Нет сети, показываю сохранённую версию.';
+            return;
+        }
         console.warn('Chapter API load failed, using direct fallback:', err);
         loadChapterContentDirectFallback(chapter, chapterTelemetryContext);
     });
@@ -3946,6 +4133,7 @@ function showScreen(name) {
     syncAdminBadge();
     // Refresh v4: global admin FAB на не-reader экранах
     syncGlobalAdminFab(name);
+    syncReaderSearchVisibility();
 
     // Update bottom nav
     const navTabs = document.querySelectorAll('.nav-tab');
@@ -4099,7 +4287,12 @@ function scheduleNextChapterPrefetch(chapter) {
         const activeChapter = currentChapters[currentChapterIdx];
         if (!activeChapter || String(activeChapter.chapter) !== chapterKey) return;
         if (API_URL) {
-            warmChapterPayloadByIndex(currentChapterIdx + 1, { preferPrefetchSlot: true }).catch(() => {});
+            const indexes = [currentChapterIdx - 1, currentChapterIdx + 1, currentChapterIdx + 2];
+            indexes.forEach((idx, order) => {
+                setTimeout(() => {
+                    warmChapterPayloadByIndex(idx, { preferPrefetchSlot: idx === currentChapterIdx + 1 }).catch(() => {});
+                }, order * 180);
+            });
         }
         prefetchNextChapter();
     }, 180);
@@ -4907,6 +5100,8 @@ function openBulkModal() {
     }
     const input = document.getElementById('bulk-upload-input');
     if (input) input.value = '';
+    bulkUploadPreviewState = null;
+    renderBulkPreviewPanel(null);
     restoreOriginalLabel(document.getElementById('bulk-upload-save'));
     document.getElementById('bulk-upload-overlay').classList.remove('hidden');
     document.getElementById('bulk-upload-modal').classList.remove('hidden');
@@ -4918,6 +5113,8 @@ function closeBulkModal() {
     const modal = document.getElementById('bulk-upload-modal');
     if (overlay) overlay.classList.add('hidden');
     if (modal) modal.classList.add('hidden');
+    bulkUploadPreviewState = null;
+    renderBulkPreviewPanel(null);
     restoreOriginalLabel(document.getElementById('bulk-upload-save'));
 }
 
@@ -4929,6 +5126,98 @@ function computeNextChapterNumber(chapters) {
     if (nums.length === 0) return 1;
     const max = Math.max(...nums);
     return Math.max(1, Math.floor(max) + 1);
+}
+
+function collectBulkUploadPayload() {
+    const raw = document.getElementById('bulk-upload-input')?.value.trim() || '';
+    const urls = raw.split('\n').map((u) => u.trim()).filter((u) => u.length > 0);
+    return {
+        raw,
+        urls,
+        payload: {
+            series_id: currentSeries?.id,
+            volume: currentVolume?.volume,
+            start_chapter: computeNextChapterNumber(currentChapters),
+            urls
+        }
+    };
+}
+
+function renderBulkPreviewPanel(result) {
+    const panel = document.getElementById('bulk-upload-preview-panel');
+    if (!panel) return;
+    if (!result) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        return;
+    }
+
+    const items = Array.isArray(result.items) ? result.items : [];
+    const invalid = Array.isArray(result.invalid) ? result.invalid : [];
+    const duplicates = Array.isArray(result.duplicates) ? result.duplicates : [];
+    const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+    const newCount = items.filter((item) => item.status !== 'duplicate').length;
+    const itemRows = items.map((item) => {
+        const status = item.status === 'duplicate' ? 'Дубликат' : 'Новая';
+        const rowClass = item.status === 'duplicate' ? 'is-duplicate' : 'is-new';
+        return `
+            <div class="bulk-preview-row ${rowClass}">
+                <div class="bulk-preview-status">${status}</div>
+                <div class="bulk-preview-url">Глава ${escapeHtml(String(item.chapter ?? ''))}: ${escapeHtml(item.url || '')}</div>
+            </div>`;
+    }).join('');
+    const invalidRows = invalid.map((item) => `
+        <div class="bulk-preview-row is-invalid">
+            <div class="bulk-preview-status">Ошибка</div>
+            <div class="bulk-preview-url">${escapeHtml(item.url || item.value || '')}</div>
+            <div class="bulk-preview-warning">${escapeHtml(item.error || item.message || 'невалидная ссылка')}</div>
+        </div>`).join('');
+    const warningRows = warnings.map((item) => `
+        <div class="bulk-preview-warning-row">${escapeHtml(item.message || String(item))}</div>`).join('');
+
+    panel.innerHTML = `
+        <div class="bulk-preview-summary">
+            <span class="bulk-preview-chip">Новых: ${newCount}</span>
+            <span class="bulk-preview-chip">Дубликатов: ${duplicates.length}</span>
+            <span class="bulk-preview-chip">Ошибок: ${invalid.length}</span>
+        </div>
+        <div class="bulk-preview-list">${itemRows}${invalidRows}${warningRows}</div>
+    `;
+    panel.classList.remove('hidden');
+}
+
+async function previewBulkUpload() {
+    if (!API_URL || !currentSeries || !currentVolume) return null;
+    const collected = collectBulkUploadPayload();
+    if (!collected.raw) return showToast('Вставьте ссылки');
+    if (collected.urls.length === 0) return showToast('Нет валидных ссылок');
+
+    const previewBtn = document.getElementById('bulk-upload-preview');
+    captureOriginalLabel(previewBtn);
+    if (previewBtn) {
+        previewBtn.disabled = true;
+        previewBtn.textContent = 'Проверяю...';
+    }
+
+    try {
+        const resp = await apiFetch(API_URL + '/api/chapters/bulk/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(collected.payload)
+        });
+        const result = await resp.json();
+        bulkUploadPreviewState = { raw: collected.raw, result };
+        renderBulkPreviewPanel(result);
+        if (!resp.ok || result.ok === false) {
+            showToast(result.error || 'Есть ошибки, публикация остановлена');
+        }
+        return result;
+    } catch (e) {
+        showToast('Ошибка проверки: ' + e.message);
+        return null;
+    } finally {
+        restoreOriginalLabel(previewBtn);
+    }
 }
 
 async function executeBulkUpload() {
@@ -4978,6 +5267,52 @@ async function executeBulkUpload() {
 // ==========================================================================
 // ADD / DELETE / COVER MODALS (Admin, Iteration D)
 // ==========================================================================
+
+async function executeBulkUploadLegacy() {
+    if (!API_URL || !currentSeries || !currentVolume) return;
+    const collected = collectBulkUploadPayload();
+    if (!collected.raw) return showToast('Вставьте ссылки');
+    if (collected.urls.length === 0) return showToast('Нет валидных ссылок');
+
+    let preview = bulkUploadPreviewState && bulkUploadPreviewState.raw === collected.raw
+        ? bulkUploadPreviewState.result
+        : null;
+    if (!preview) {
+        preview = await previewBulkUpload();
+    }
+    const invalid = Array.isArray(preview?.invalid) ? preview.invalid : [];
+    if (!preview || invalid.length > 0 || preview.ok === false) {
+        return showToast('Публикация остановлена: исправьте ошибки предпросмотра');
+    }
+
+    const saveBtn = document.getElementById('bulk-upload-save');
+    captureOriginalLabel(saveBtn);
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = `Добавление ${collected.urls.length} глав...`;
+    }
+
+    try {
+        const resp = await apiFetch(API_URL + '/api/chapters/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(collected.payload)
+        });
+        const result = await resp.json();
+        if (result.ok) {
+            closeBulkModal();
+            showToast(`Добавлено ${result.added} глав`);
+            haptic('success');
+            refreshReaderDataInBackground();
+        } else {
+            showToast('Ошибка: ' + (result.error || `HTTP ${resp.status}`));
+        }
+    } catch (e) {
+        showToast('Ошибка сети: ' + e.message);
+    } finally {
+        restoreOriginalLabel(saveBtn);
+    }
+}
 
 function openAddChapterModal(forIdx) {
     if (!hasAdminApi()) {

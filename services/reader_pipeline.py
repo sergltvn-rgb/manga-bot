@@ -43,6 +43,7 @@ from services.reader_cache import (
     CHAPTER_CONTENT_CACHE_TTL_SECONDS,
     _chapter_content_cache,
     _chapter_content_cache_lock,
+    _store_chapter_content_cache_entry,
 )
 from services.validators import _extract_chapter_urls
 
@@ -264,6 +265,8 @@ async def get_cached_chapter_content(
         and isinstance(cached_entry, dict)
         and (now - float(cached_entry.get("built_at") or 0.0)) < CHAPTER_CONTENT_CACHE_TTL_SECONDS
     ):
+        if hasattr(_chapter_content_cache, "move_to_end"):
+            _chapter_content_cache.move_to_end(cache_key)
         return cached_entry.get("payload"), True, int(cached_entry.get("status") or 200)
 
     async with _chapter_content_cache_lock:
@@ -274,15 +277,13 @@ async def get_cached_chapter_content(
             and isinstance(cached_entry, dict)
             and (now - float(cached_entry.get("built_at") or 0.0)) < CHAPTER_CONTENT_CACHE_TTL_SECONDS
         ):
+            if hasattr(_chapter_content_cache, "move_to_end"):
+                _chapter_content_cache.move_to_end(cache_key)
             return cached_entry.get("payload"), True, int(cached_entry.get("status") or 200)
 
         payload, status_code = await _build_chapter_content_payload(series_id, volume, chapter)
         if payload is not None:
-            _chapter_content_cache[cache_key] = {
-                "payload": payload,
-                "status": status_code,
-                "built_at": time.time(),
-            }
+            _store_chapter_content_cache_entry(cache_key, payload, status=status_code, built_at=time.time())
         else:
             _chapter_content_cache.pop(cache_key, None)
         return payload, False, status_code

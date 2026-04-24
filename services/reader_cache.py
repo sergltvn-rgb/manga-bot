@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 
 # --- TTL-константы -----------------------------------------------------------
 
@@ -32,7 +33,8 @@ READER_CACHE_TTL_SECONDS: int = 30
 
 # HTML-контент главы (после fetch+sanitize) живёт 5 минут.
 # Инвалидация — только через `invalidate_chapter_content_cache` (не по TTL).
-CHAPTER_CONTENT_CACHE_TTL_SECONDS: int = 300
+CHAPTER_CONTENT_CACHE_TTL_SECONDS: int = 6 * 60 * 60
+CHAPTER_CONTENT_CACHE_MAX_ENTRIES: int = 256
 
 
 # --- State (in-process, read/write из bot.py) -------------------------------
@@ -49,7 +51,7 @@ _reader_data_cache: dict = {
 _reader_cache_lock: asyncio.Lock = asyncio.Lock()
 
 # `<series_id>::<volume>::<chapter>` → dict(payload, status, built_at).
-_chapter_content_cache: dict = {}
+_chapter_content_cache: OrderedDict[str, dict] = OrderedDict()
 _chapter_content_cache_lock: asyncio.Lock = asyncio.Lock()
 
 
@@ -68,6 +70,21 @@ def invalidate_chapter_content_cache(reason: str = "") -> None:
     _chapter_content_cache.clear()
     if reason:
         logging.info("Chapter content cache invalidated: %s", reason)
+
+
+def _store_chapter_content_cache_entry(cache_key: str, payload: dict, status: int, built_at: float) -> None:
+    """Store one chapter payload and evict oldest entries when the cache is full."""
+    if not cache_key:
+        return
+    if cache_key in _chapter_content_cache:
+        _chapter_content_cache.pop(cache_key, None)
+    _chapter_content_cache[cache_key] = {
+        "payload": payload,
+        "status": int(status),
+        "built_at": float(built_at),
+    }
+    while len(_chapter_content_cache) > CHAPTER_CONTENT_CACHE_MAX_ENTRIES:
+        _chapter_content_cache.popitem(last=False)
 
 
 def invalidate_reader_cache(reason: str = "") -> None:

@@ -421,6 +421,7 @@ class TestTelegraph:
 class TestReaderCache:
     def test_imports(self):
         from services.reader_cache import (
+            CHAPTER_CONTENT_CACHE_MAX_ENTRIES,
             CHAPTER_CONTENT_CACHE_TTL_SECONDS,
             READER_CACHE_TTL_SECONDS,
             _chapter_content_cache,
@@ -433,6 +434,7 @@ class TestReaderCache:
 
         assert isinstance(READER_CACHE_TTL_SECONDS, int) and READER_CACHE_TTL_SECONDS > 0
         assert isinstance(CHAPTER_CONTENT_CACHE_TTL_SECONDS, int) and CHAPTER_CONTENT_CACHE_TTL_SECONDS > 0
+        assert isinstance(CHAPTER_CONTENT_CACHE_MAX_ENTRIES, int) and CHAPTER_CONTENT_CACHE_MAX_ENTRIES > 0
         # State — правильного типа.
         assert isinstance(_reader_data_cache, dict)
         assert set(_reader_data_cache.keys()) == {"payload", "etag", "built_at"}
@@ -454,6 +456,22 @@ class TestReaderCache:
 
         invalidate_chapter_content_cache("unit_test")
         assert _chapter_content_cache == {}
+
+    def test_chapter_content_cache_is_bounded_lru(self, monkeypatch):
+        import time
+
+        import services.reader_cache as reader_cache
+        from services.reader_cache import _chapter_content_cache, _store_chapter_content_cache_entry
+
+        monkeypatch.setattr(reader_cache, "CHAPTER_CONTENT_CACHE_MAX_ENTRIES", 2)
+        _chapter_content_cache.clear()
+
+        _store_chapter_content_cache_entry("a", {"html": "a"}, status=200, built_at=time.time())
+        _store_chapter_content_cache_entry("b", {"html": "b"}, status=200, built_at=time.time())
+        _store_chapter_content_cache_entry("a", {"html": "a2"}, status=200, built_at=time.time())
+        _store_chapter_content_cache_entry("c", {"html": "c"}, status=200, built_at=time.time())
+
+        assert list(_chapter_content_cache.keys()) == ["a", "c"]
 
     def test_invalidate_reader_cache_resets_both(self):
         from services.reader_cache import (
@@ -756,6 +774,47 @@ class TestReaderApi:
         body = json.loads(resp.body.decode())
         assert body["error"] == "invalid chapter"
 
+    def test_chapter_content_supports_etag_and_304(self, monkeypatch):
+        import asyncio
+        import json
+
+        from aiohttp.test_utils import make_mocked_request
+        from multidict import CIMultiDict
+
+        import services.reader_api as reader_api
+        from services.reader_api import handle_chapter_content
+
+        payload = {
+            "ok": True,
+            "source_type": "inline",
+            "html": "<p>cached chapter</p>",
+            "series_id": "manga_ru",
+            "volume": "1",
+            "chapter": "1",
+        }
+
+        async def fake_get_cached_chapter_content(*_args, **_kwargs):
+            return payload, True, 200
+
+        monkeypatch.setattr(reader_api, "get_cached_chapter_content", fake_get_cached_chapter_content)
+
+        req = make_mocked_request("GET", "/api/chapter-content?series_id=manga_ru&volume=1&chapter=1")
+        resp = asyncio.run(handle_chapter_content(req))
+        assert resp.status == 200
+        assert resp.headers.get("ETag")
+        assert resp.headers.get("Vary") == "If-None-Match"
+        body = json.loads(resp.body.decode())
+        assert body["cache_status"] == "hit"
+
+        req_304 = make_mocked_request(
+            "GET",
+            "/api/chapter-content?series_id=manga_ru&volume=1&chapter=1",
+            headers=CIMultiDict({"If-None-Match": resp.headers["ETag"]}),
+        )
+        resp_304 = asyncio.run(handle_chapter_content(req_304))
+        assert resp_304.status == 304
+        assert resp_304.body in (None, b"")
+
 
 # --- services.auth ---
 
@@ -894,6 +953,7 @@ class TestAdminChapterApi:
             _get_table_info,
             handle_chapter_add,
             handle_chapter_bulk,
+            handle_chapter_bulk_preview,
             handle_chapter_delete,
             handle_chapter_edit,
             handle_rename_delete,
@@ -903,6 +963,7 @@ class TestAdminChapterApi:
         for h in (
             handle_chapter_add,
             handle_chapter_bulk,
+            handle_chapter_bulk_preview,
             handle_chapter_delete,
             handle_chapter_edit,
             handle_rename_delete,
@@ -950,6 +1011,74 @@ class TestAdminChapterApi:
         from services.admin_chapter_api import _get_table_info
 
         assert _get_table_info("unknown_series", 1) is None
+
+    def test_bulk_preview_detects_duplicates_and_does_not_write(self, tmp_path, monkeypatch):
+        import asyncio
+        import json
+
+        import aiosqlite
+
+        import bot
+        import services.admin_chapter_api as admin_chapter_api
+        from services.admin_chapter_api import handle_chapter_bulk_preview
+
+        db_path = tmp_path / "bulk-preview.db"
+
+        async def setup_db():
+            async with aiosqlite.connect(db_path) as db:
+                await db.execute(
+                    "CREATE TABLE chapters_urls (chapter_number TEXT, lang TEXT, url TEXT, sort_order INTEGER DEFAULT 0, PRIMARY KEY (chapter_number, lang))"
+                )
+                await db.execute(
+                    "INSERT INTO chapters_urls (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?)",
+                    ("2", "ru", "https://old.example/2", 2),
+                )
+                await db.commit()
+
+        asyncio.run(setup_db())
+        monkeypatch.setattr(bot, "DB_PATH", str(db_path))
+        monkeypatch.setattr(admin_chapter_api, "get_auth_user", lambda _request: {"id": 123})
+
+        async def fake_rate_limit(*_args, **_kwargs):
+            return None
+
+        async def fake_check_admin(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(admin_chapter_api, "_enforce_rate_limit", fake_rate_limit)
+        monkeypatch.setattr(admin_chapter_api, "_check_admin", fake_check_admin)
+
+        class FakeRequest:
+            path = "/api/chapters/bulk/preview"
+
+            async def json(self):
+                return {
+                    "series_id": "manga_ru",
+                    "start_chapter": 1,
+                    "urls": [
+                        "https://example.org/1",
+                        "https://example.org/2",
+                        "not-a-url",
+                    ],
+                }
+
+        resp = asyncio.run(handle_chapter_bulk_preview(FakeRequest()))
+        assert resp.status == 200
+        body = json.loads(resp.body.decode())
+        assert body["ok"] is False
+        assert body["items"][0]["chapter"] == "1"
+        assert body["items"][0]["status"] == "new"
+        assert body["items"][1]["chapter"] == "2"
+        assert body["items"][1]["status"] == "duplicate"
+        assert body["invalid"][0]["index"] == 3
+        assert body["warnings"]
+
+        async def count_rows():
+            async with aiosqlite.connect(db_path) as db:
+                async with db.execute("SELECT COUNT(*) FROM chapters_urls") as cursor:
+                    return (await cursor.fetchone())[0]
+
+        assert asyncio.run(count_rows()) == 1
 
 
 # --- services.comments_api ---

@@ -32,11 +32,13 @@ function createMockState() {
       renameRequest: 0,
       chapterEdit: 0,
       chapterBulk: 0,
+      chapterBulkPreview: 0,
       chapterAdd: 0,
       chapterDelete: 0,
       seriesUpdate: 0,
       sortPut: 0,
     },
+    chapterContentRequests: [],
     readerData: {
       bot_username: "AlyaTestBot",
       admin_ids: [ADMIN_USER_ID],
@@ -98,8 +100,10 @@ function createMobileSelectionState() {
       renameRequest: 0,
       chapterEdit: 0,
       chapterBulk: 0,
+      chapterBulkPreview: 0,
       sortPut: 0,
     },
+    chapterContentRequests: [],
     readerData: {
       bot_username: "AlyaTestBot",
       admin_ids: [ADMIN_USER_ID],
@@ -330,6 +334,11 @@ async function installTelegramAndApiMocks(page, state) {
       const seriesId = url.searchParams.get("series_id") || "";
       const volumeId = url.searchParams.get("volume") || "";
       const chapterId = url.searchParams.get("chapter") || "";
+      state.chapterContentRequests = state.chapterContentRequests || [];
+      state.chapterContentRequests.push(`${seriesId}::${volumeId}::${chapterId}`);
+      if (state.chapterContentDelayMs) {
+        await new Promise((resolve) => setTimeout(resolve, state.chapterContentDelayMs));
+      }
       const chapter = findChapter(state, seriesId, volumeId, chapterId);
       if (!chapter) {
         await fulfillJson(route, { error: "not found" }, 404);
@@ -500,6 +509,49 @@ async function installTelegramAndApiMocks(page, state) {
         }
       }
       await fulfillJson(route, { ok: true });
+      return;
+    }
+
+    if (pathname === "/api/chapters/bulk/preview" && method === "POST") {
+      state.calls.chapterBulkPreview += 1;
+      const body = safeJson(request);
+      const volume = findVolume(state, body.series_id, body.volume);
+      const urls = Array.isArray(body.urls) ? body.urls : [];
+      let chapterNumber = Number(body.start_chapter || 1);
+      const items = [];
+      const duplicates = [];
+      const invalid = [];
+      const warnings = [];
+      for (let idx = 0; idx < urls.length; idx += 1) {
+        const chapter = String(chapterNumber++);
+        const urlText = String(urls[idx] || "");
+        if (!/^https?:\/\//i.test(urlText)) {
+          invalid.push({ index: idx + 1, chapter, url: urlText, reason: "invalid_url" });
+          warnings.push(`Глава ${chapter}: невалидная ссылка`);
+          continue;
+        }
+        const exists = !!volume?.chapters.some((ch) => String(ch.chapter) === chapter);
+        const item = { index: idx + 1, chapter, url: urlText, status: exists ? "duplicate" : "new" };
+        items.push(item);
+        if (exists) {
+          duplicates.push(item);
+          warnings.push(`Глава ${chapter}: уже есть в БД`);
+        }
+      }
+      await fulfillJson(route, {
+        ok: invalid.length === 0,
+        items,
+        duplicates,
+        invalid,
+        warnings,
+        summary: {
+          total: urls.length,
+          valid: items.length,
+          new: items.filter((item) => item.status === "new").length,
+          duplicates: duplicates.length,
+          invalid: invalid.length,
+        },
+      });
       return;
     }
 
@@ -1210,6 +1262,91 @@ test.describe("Reader E2E smoke", () => {
     await expect.poll(() => state.calls.sortPut).toBe(1);
   });
 
+  test("reader search filters series and chapters", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=search-a");
+    await expect(page.locator("#reader-search-input")).toBeVisible();
+
+    await page.fill("#reader-search-input", "Test Series");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    await page.fill("#reader-search-input", "nothing here");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(0);
+    await expect(page.locator("#reader-search-empty")).toBeVisible();
+
+    await page.fill("#reader-search-input", "");
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(2);
+
+    await page.fill("#reader-search-input", "Chapter 2");
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(1);
+    await expect(page.locator("#chapters-list .chapter-item").first()).toContainText("Chapter 2");
+  });
+
+  test("chapter payload cache survives reload and renders before slow network refresh", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=persistent-cache");
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#reader-text")).toContainText("This is chapter one text");
+
+    state.chapterContentDelayMs = 1000;
+    await page.reload();
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#reader-text")).toContainText("This is chapter one text", { timeout: 250 });
+    await expect.poll(() => state.calls.chapterContent).toBeGreaterThan(1);
+  });
+
+  test("opening a chapter warms previous one and the next two chapters", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.series[0].volumes[0].chapters.push(
+      { chapter: "3", custom_name: "Chapter 3", text: "Third chapter text.", url: "" },
+      { chapter: "4", custom_name: "Chapter 4", text: "Fourth chapter text.", url: "" }
+    );
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=prefetch-window");
+    await page.locator("#series-list .series-card").first().click();
+    state.chapterContentRequests = [];
+    await page.locator("#chapters-list .chapter-item").nth(1).click();
+
+    await expect.poll(() => Array.from(new Set(state.chapterContentRequests)).sort()).toEqual([
+      "manga_ru::1::1",
+      "manga_ru::1::2",
+      "manga_ru::1::3",
+      "manga_ru::1::4",
+    ]);
+  });
+
+  test("admin bulk upload preview validates before publishing", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=bulk-preview");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.click(".admin-bulk-btn");
+    await page.fill("#bulk-upload-input", "https://example.org/chapter-3\nbad-url");
+
+    await page.click("#bulk-upload-preview");
+    await expect.poll(() => state.calls.chapterBulkPreview).toBe(1);
+    await expect(page.locator(".bulk-preview-row")).toHaveCount(2);
+    await expect(page.locator("#bulk-upload-preview-panel")).toContainText("Глава 3");
+    await expect(page.locator("#bulk-upload-preview-panel")).toContainText("невалидная ссылка");
+    expect(state.calls.chapterBulk).toBe(0);
+
+    await page.fill("#bulk-upload-input", "https://example.org/chapter-3\nhttps://example.org/chapter-4");
+    await page.click("#bulk-upload-preview");
+    await expect.poll(() => state.calls.chapterBulkPreview).toBe(2);
+    await page.click("#bulk-upload-save");
+    await expect.poll(() => state.calls.chapterBulk).toBe(1);
+  });
+
   test("mobile flow: keeps series selection stable and handles teletype image chapters", async ({ browser }) => {
     const state = createMobileSelectionState();
     const context = await browser.newContext({
@@ -1289,7 +1426,7 @@ test.describe("Reader E2E smoke", () => {
     });
   });
 
-  test("chapters screen warms likely chapter and reader reuses cached payload", async ({ page }) => {
+  test("chapters screen warms likely chapter and reader reuses cached payload while revalidating", async ({ page }) => {
     const state = createMockState();
     state.readerData.series[0].volumes[0].chapters = [
       {
@@ -1311,7 +1448,7 @@ test.describe("Reader E2E smoke", () => {
     await expect(page.locator("#screen-reader")).toHaveClass(/active/);
     await expect(page.locator("#reader-text")).toContainText("Prefetched chapter body");
     await page.waitForTimeout(250);
-    await expect.poll(() => state.calls.chapterContent).toBe(1);
+    await expect.poll(() => state.calls.chapterContent).toBeGreaterThanOrEqual(2);
   });
 
   test("admin persist: toggle survives reload and FAB appears in reader", async ({ page }) => {

@@ -251,6 +251,125 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
         return _api_error_response(e, context=request.path)
 
 
+async def handle_chapter_bulk_preview(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """POST: validate a bulk chapter upload without writing to the database."""
+    from bot import DB_PATH
+
+    user_id = ""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_chapter_bulk_preview", user_id=user_id)
+        if limited:
+            return limited
+        forbidden = await _check_admin(request, user_id)
+        if forbidden is not None:
+            return forbidden
+
+        data = await request.json()
+        series_id = str(data.get("series_id", "")).strip()
+        volume = data.get("volume")
+        start_chapter = data.get("start_chapter", 1)
+        urls = data.get("urls", [])
+
+        if not series_id or not urls:
+            return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
+            return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
+        if not isinstance(urls, list):
+            return aiohttp.web.json_response({"error": "urls must be array"}, status=400, headers=CORS_HEADERS)
+        if len(urls) > MAX_BULK_URLS_PER_REQUEST:
+            return aiohttp.web.json_response({"error": "too many urls"}, status=400, headers=CORS_HEADERS)
+        try:
+            start_chapter_int = int(str(start_chapter))
+        except Exception:  # noqa: BLE001
+            return aiohttp.web.json_response({"error": "invalid start_chapter"}, status=400, headers=CORS_HEADERS)
+        if start_chapter_int < 0:
+            return aiohttp.web.json_response({"error": "invalid start_chapter"}, status=400, headers=CORS_HEADERS)
+
+        info = _get_table_info(series_id, volume)
+        if not info:
+            return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
+
+        table, chapter_col, _, _ = info
+        id_col = "lang" if series_id.startswith(("manga_", "ranobe_")) else "volume"
+        idx_val = series_id.split("_", 1)[1] if "_" in series_id else volume
+
+        existing_chapters: set[str] = set()
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(f"SELECT {chapter_col} FROM {table} WHERE {id_col} = ?", (str(idx_val),)) as cursor:
+                existing_chapters = {str(row[0]) for row in await cursor.fetchall()}
+
+        items = []
+        invalid = []
+        duplicates = []
+        warnings = []
+        seen_in_request: set[str] = set()
+        next_order = len(existing_chapters)
+
+        for idx, raw_url in enumerate(urls, start=1):
+            chapter = str(start_chapter_int + idx - 1)
+            normalized = _normalize_external_url(str(raw_url or "").strip())
+            if not normalized:
+                invalid.append({"index": idx, "chapter": chapter, "url": str(raw_url or ""), "reason": "invalid_url"})
+                warnings.append(f"Глава {chapter}: невалидная ссылка")
+                continue
+
+            status = "new"
+            if chapter in existing_chapters:
+                status = "duplicate"
+                duplicates.append({"index": idx, "chapter": chapter, "url": normalized})
+                warnings.append(f"Глава {chapter}: уже есть в БД")
+            elif chapter in seen_in_request:
+                status = "duplicate"
+                duplicates.append({"index": idx, "chapter": chapter, "url": normalized, "source": "request"})
+                warnings.append(f"Глава {chapter}: дубль в текущей загрузке")
+
+            seen_in_request.add(chapter)
+            next_order += 1
+            items.append(
+                {
+                    "index": idx,
+                    "chapter": chapter,
+                    "url": normalized,
+                    "status": status,
+                    "sort_order": next_order,
+                }
+            )
+
+        return aiohttp.web.json_response(
+            {
+                "ok": not invalid,
+                "items": items,
+                "duplicates": duplicates,
+                "invalid": invalid,
+                "warnings": warnings,
+                "summary": {
+                    "total": len(urls),
+                    "valid": len(items),
+                    "new": len([item for item in items if item["status"] == "new"]),
+                    "duplicates": len(duplicates),
+                    "invalid": len(invalid),
+                },
+            },
+            headers=CORS_HEADERS,
+        )
+    except Exception as e:  # noqa: BLE001
+        logging.error(f"Bulk Preview API Error: {e}")
+        await _audit_admin_action(
+            action="chapter_bulk_preview",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return _api_error_response(e, context=request.path)
+
+
 async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """POST: массовое добавление глав с URL. Только для админов."""
     from bot import DB_PATH, invalidate_reader_cache, run_git_sync, spawn_bg
