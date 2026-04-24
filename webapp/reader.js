@@ -20,6 +20,73 @@ const tgUser = tg.initDataUnsafe?.user || {};
 const userId = String(tgUser.id || '');
 const userName = tgUser.first_name || 'Аноним';
 
+function hasTelegramAuth() {
+    return Boolean(userId && tg && tg.initData);
+}
+
+function isPublicReadMode() {
+    return !hasTelegramAuth();
+}
+
+function getBotUsername() {
+    return String((allData && allData.bot_username) || 'Alyamangapage_bot').replace(/^@/, '');
+}
+
+function getTelegramReaderUrl() {
+    return `https://t.me/${encodeURIComponent(getBotUsername())}`;
+}
+
+function openTelegramReaderAuth() {
+    const url = getTelegramReaderUrl();
+    if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.openTelegramLink === 'function') {
+        window.Telegram.WebApp.openTelegramLink(url);
+        return;
+    }
+    window.open(url, '_blank', 'noopener');
+}
+
+function requireTelegramAuth(actionText = 'выполнить действие') {
+    syncPublicReadModeUI();
+    showToast(`Откройте читалку через Telegram, чтобы ${actionText}.`);
+    return false;
+}
+
+function syncPublicReadModeUI() {
+    const publicMode = isPublicReadMode();
+    if (document.body) {
+        document.body.classList.toggle('public-read-mode', publicMode);
+    }
+
+    const form = document.getElementById('comment-form');
+    const cta = document.getElementById('comment-auth-cta');
+    const input = document.getElementById('comment-input');
+    const sendBtn = document.querySelector('#comment-form .comment-send-btn');
+    const formatBtn = document.getElementById('comment-format-toggle');
+    const likeBtn = document.getElementById('like-btn');
+    const reactionBar = document.getElementById('reaction-bar');
+
+    if (form) {
+        form.classList.toggle('auth-required', publicMode);
+        form.setAttribute('aria-hidden', publicMode ? 'true' : 'false');
+    }
+    if (cta) {
+        cta.classList.toggle('hidden', !publicMode);
+    }
+    [input, sendBtn, formatBtn].forEach((el) => {
+        if (!el) return;
+        el.disabled = publicMode;
+        el.setAttribute('aria-disabled', publicMode ? 'true' : 'false');
+    });
+    if (likeBtn) {
+        likeBtn.classList.toggle('auth-required', publicMode);
+        likeBtn.setAttribute('aria-disabled', publicMode ? 'true' : 'false');
+        likeBtn.title = publicMode ? 'Откройте через Telegram, чтобы поставить лайк' : '';
+    }
+    if (reactionBar) {
+        reactionBar.classList.toggle('auth-required', publicMode);
+    }
+}
+
 // === Состояние ===
 let allData = { series: [] };
 let adminIds = []; // Список ID администраторов из БД
@@ -31,9 +98,9 @@ const ADMIN_MODE_STORAGE_KEY = 'reader_admin_mode';
 let isAdminMode = (() => {
     try { return localStorage.getItem(ADMIN_MODE_STORAGE_KEY) === '1'; } catch (e) { return false; }
 })();
-let currentCommentSort = 'top'; 
-let allCommentsCache = []; 
-let commentsData = []; 
+let currentCommentSort = 'top';
+let allCommentsCache = [];
+let commentsData = [];
 let isImmersive = false;
 const LIBRARY_FILTER_KEY = 'reader_library_filter';
 const LIBRARY_FILTERS = {
@@ -464,7 +531,7 @@ function toggleImmersiveMode(force = null) {
     const header = document.querySelector('.reader-header');
     const bottomBar = document.getElementById('reader-bottom-bar');
     const fab = document.getElementById('fab-container');
-    
+
     if (isImmersive) {
         header?.classList.add('header-hidden');
         bottomBar?.classList.add('bar-hidden');
@@ -480,7 +547,7 @@ function setQuickSwitcherOpen(isOpen) {
     const switcher = document.getElementById('quick-switcher');
     const overlay = document.getElementById('quick-switcher-overlay');
     if (!switcher) return;
-    
+
     // Прячем меню FAB если открыто
     const fabMenu = document.getElementById('fab-menu');
     if (fabMenu && !fabMenu.classList.contains('hidden')) toggleFab();
@@ -508,7 +575,7 @@ function toggleQuickSwitcher() {
 function renderQuickSwitcherList() {
     const list = document.getElementById('quick-switcher-list');
     if (!list || !currentChapters) return;
-    
+
     list.innerHTML = currentChapters.map((ch, idx) => `
         <div class="quick-switcher-item ${idx === currentChapterIdx ? 'active' : ''}" data-chapter-idx="${idx}">
             ${ch.custom_name || 'Глава ' + ch.chapter}
@@ -701,14 +768,14 @@ function _r4DefaultTheme() {
     } catch (_) {}
     return 'dark';
 }
-const defaults = { 
-    fontSize: 17, 
-    theme: _r4DefaultTheme(), 
-    textWidth: 90, 
-    font: 'serif', 
-    lineHeight: 1.8, 
-    textAlign: 'left', 
-    indent: true, 
+const defaults = {
+    fontSize: 17,
+    theme: _r4DefaultTheme(),
+    textWidth: 90,
+    font: 'serif',
+    lineHeight: 1.8,
+    textAlign: 'left',
+    indent: true,
     paraSpacing: 20,
     letterSpacing: 0,
     paraIndent: 25,
@@ -1321,7 +1388,7 @@ function saveScrollPosition() {
     saveLastRead();
 
     // Синхронизация с сервером (debounced — не чаще 1 раз в 3 секунды)
-    if (API_URL && userId && currentSeries && currentVolume && currentChapters[currentChapterIdx]) {
+    if (API_URL && hasTelegramAuth() && currentSeries && currentVolume && currentChapters[currentChapterIdx]) {
         clearTimeout(_progressSyncTimer);
         _progressSyncTimer = setTimeout(() => {
             apiFetch(API_URL + '/api/progress', {
@@ -1383,9 +1450,9 @@ function restoreScrollPosition() {
             hasRestored = true;
         }
     });
-    
+
     _scrollResizeObserver.observe(el);
-    
+
     _scrollResizeTimeout = setTimeout(() => {
         if (_scrollResizeObserver) {
             _scrollResizeObserver.disconnect();
@@ -1420,12 +1487,12 @@ function getLastRead(seriesId) {
     const local = all[seriesId];
 
     const serverBm = serverBookmarks.find(b => String(b.series_id) === String(seriesId));
-    
+
     if (serverBm && local) {
         // Сравниваем время. Сервер возвращает строку TIMESTAMP.
         const serverTs = new Date(serverBm.updated_at + (serverBm.updated_at.includes('Z') ? '' : ' UTC')).getTime();
         const localTs = local.ts || 0;
-        
+
         if (serverTs > localTs) {
             console.log("Using newer Server progress for", seriesId);
             return {
@@ -1493,7 +1560,7 @@ async function loadData() {
     };
 
     // 1. Пытаемся загрузить прогресс (если есть API)
-    if (API_URL && userId) {
+    if (API_URL && hasTelegramAuth()) {
         console.log("Fetching progress from API...");
         try {
             const bResp = await apiFetch(API_URL + '/api/progress', { signal: getTimeoutSignal(5000) });
@@ -1545,6 +1612,7 @@ async function loadData() {
                 allData = apiData;
                 adminIds = Array.isArray(allData.admin_ids) ? allData.admin_ids.map(id => String(id)) : [];
                 syncAdminModeControls();
+                syncPublicReadModeUI();
                 if (allData.series && allData.series.length > 0) {
                     validateCriticalSeriesMappings();
                     renderSeriesList();
@@ -1570,6 +1638,7 @@ async function loadData() {
             allData = await resp.json();
             adminIds = Array.isArray(allData.admin_ids) ? allData.admin_ids.map(id => String(id)) : [];
             syncAdminModeControls();
+            syncPublicReadModeUI();
             console.log("Data loaded from fallback JSON, series count:", allData.series?.length);
             if (allData.series && allData.series.length > 0) {
                 validateCriticalSeriesMappings();
@@ -1640,15 +1709,15 @@ function handleStartParam() {
         const [, sId, vNum, cKey] = match;
         const series = findSeriesById(sId);
         if (!series) return;
-        
+
         currentSeries = series;
         const vol = findVolumeByKey(series, vNum);
         if (!vol) return;
-        
+
         currentVolume = vol;
         currentChapters = vol.chapters || [];
         const cIdx = currentChapters.findIndex(c => sameReaderKey(c.chapter, cKey));
-        
+
         if (cIdx !== -1) {
             openChapter(cIdx);
         } else {
@@ -2056,7 +2125,7 @@ function openChapter(idx, usePrefetch = false) {
     assertReaderState('openChapter:after_set_idx');
     const chapter = currentChapters[idx];
     if (!chapter) return;
-    
+
     // Проверка что chapter имеет необходимые свойства
     if (!chapter.chapter) {
         console.warn('Chapter object missing required properties:', chapter);
@@ -2079,7 +2148,7 @@ function openChapter(idx, usePrefetch = false) {
     // Update UI
     const titleHeader = document.getElementById('chapter-title-header');
     if (titleHeader) titleHeader.textContent = chapter.custom_name || `Глава ${chapter.chapter}`;
-    
+
     updateNavButtons();
     if (currentSeries && currentVolume) {
         markAsRead(currentSeries.id, currentVolume.volume, chapter.chapter);
@@ -2090,7 +2159,7 @@ function openChapter(idx, usePrefetch = false) {
 
     initProgressBar();
     if (progressBarEl) progressBarEl.style.width = '0%';
-    
+
     // Auto-close switcher
     setQuickSwitcherOpen(false);
 
@@ -2101,6 +2170,7 @@ function openChapter(idx, usePrefetch = false) {
         loadReactions();
         loadComments();
         document.getElementById('social-section').style.display = 'block';
+        syncPublicReadModeUI();
     } else {
         document.getElementById('social-section').style.display = 'none';
     }
@@ -2560,7 +2630,7 @@ function renderLoadedContent(container, html, chapter, telemetryContext = null, 
     const textContent = container.innerText;
     const wordCount = textContent.split(/\s+/).filter(w => w.length > 0).length;
     if (wordCount > 50) {
-        const readingTimeMins = Math.max(1, Math.ceil(wordCount / 200)); 
+        const readingTimeMins = Math.max(1, Math.ceil(wordCount / 200));
         const timeBadge = document.createElement('div');
         timeBadge.className = 'reading-time-badge';
         timeBadge.innerHTML = `<svg class="icon-xs" viewBox="0 0 24 24" style="vertical-align:-2px; margin-right:4px;"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><polyline points="12 6 12 12 16 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>~${readingTimeMins} мин. чтения`;
@@ -2621,7 +2691,7 @@ function initImageFadeIn(container) {
             img.classList.remove('img-loading');
             img.classList.add('img-loaded');
         };
-        
+
         if (img.complete) {
             handleLoad();
         } else {
@@ -2677,7 +2747,7 @@ function prefetchNextChapter() {
     if (urlsToLoad.length > 0) {
         const prefetchAbortController = new AbortController();
         setTimeout(() => prefetchAbortController.abort(), 20000); // 20s timeout
-        
+
         const loadPromises = urlsToLoad.map(async (u) => {
             if (u.includes('teletype.in')) {
                 return `<iframe src="${u}" class="teletype-iframe" frameborder="0" style="width:100%;min-height:85vh;border:none;border-radius:8px;margin-bottom:20px;" loading="lazy"></iframe>`;
@@ -2798,14 +2868,14 @@ function spawnFloatingEmoji(emoji, targetEl) {
         const el = document.createElement('div');
         el.className = 'floating-emoji';
         el.innerHTML = emoji;
-        
+
         // Random layout
         const rx = (Math.random() * 60 - 30);
         const ry = (Math.random() * 20 - 10);
-        
+
         el.style.left = `${rect.left + rect.width / 2 + rx}px`;
         el.style.top = `${rect.top + rect.height / 2 + ry}px`;
-        
+
         // Custom properties for animation
         el.style.setProperty('--tx', `${Math.random() * 100 - 50}px`);
         el.style.setProperty('--ty', `-${Math.random() * 150 + 100}px`);
@@ -2840,7 +2910,11 @@ async function loadLikes() {
 }
 
 async function toggleLike() {
-    if (!API_URL || !userId) return;
+    if (!API_URL) return;
+    if (!hasTelegramAuth()) {
+        requireTelegramAuth('ставить лайки');
+        return;
+    }
     const key = getChapterKey();
     if (!key) return;
     try {
@@ -2931,6 +3005,10 @@ function findCommentInCache(commentId) {
 }
 
 function setReply(id, name) {
+    if (!hasTelegramAuth()) {
+        requireTelegramAuth('отвечать на комментарии');
+        return;
+    }
     replyingToId = id;
     const indicator = document.getElementById('reply-indicator');
     if (indicator) indicator.style.display = 'flex';
@@ -2979,10 +3057,10 @@ async function loadComments() {
         const data = await resp.json();
         const pending = Array.from(pendingCommentSends.values()).filter((c) => c._optimisticState === 'sending' || c._optimisticState === 'error');
         allCommentsCache = [...pending, ...(data.comments || [])];
-        
+
         const countBadge = document.getElementById('comments-count-badge');
         if (countBadge) countBadge.textContent = allCommentsCache.length > 0 ? `(${allCommentsCache.length})` : '';
-        
+
         if (!activeCommentEditId) {
             renderComments(allCommentsCache);
         }
@@ -3005,7 +3083,7 @@ async function loadComments() {
 function renderComments(comments) {
     allCommentsCache = comments; // Важно: обновляем кэш для корректной работы сортировки
     const list = document.getElementById('comments-list');
-    
+
     const countBadge = document.getElementById('comments-count-badge');
     if (countBadge) countBadge.textContent = comments.length > 0 ? `(${comments.length})` : '';
 
@@ -3059,14 +3137,14 @@ function renderComments(comments) {
 
     function getAvatarColor(userIdStr) {
         const colors = [
-            '#FF4D6D', '#EF476F', '#FFD166', '#06D6A0', '#118AB2', '#073B4C', 
+            '#FF4D6D', '#EF476F', '#FFD166', '#06D6A0', '#118AB2', '#073B4C',
             '#7B2CBF', '#5A189A', '#3C096C', '#240046', '#fb5607', '#3a86ff'
         ];
         if (!userIdStr) return colors[0];
         let hash = 0;
         for (let i = 0; i < userIdStr.length; i++) {
             hash = ((hash << 5) - hash) + userIdStr.charCodeAt(i);
-            hash |= 0; 
+            hash |= 0;
         }
         return colors[Math.abs(hash) % colors.length];
     }
@@ -3082,8 +3160,9 @@ function renderComments(comments) {
         const editedBadge = isEdited
             ? `<span class="comment-edited-badge" title="Отредактировано ${formatDate(c.updated_at)}">ред.</span>`
             : '';
-        const isOwn = String(c.user_id) === userId;
-        const viewerIsAdmin = isAdminMode;
+        const canWriteComments = hasTelegramAuth();
+        const isOwn = canWriteComments && String(c.user_id) === userId;
+        const viewerIsAdmin = canWriteComments && isAdminMode;
         const color = getAvatarColor(String(c.user_id));
         const role = getUserRole(String(c.user_id));
         const roleBadge = role ? `<span class="comment-role-badge ${role.css}">${role.text}</span>` : '';
@@ -3114,8 +3193,8 @@ function renderComments(comments) {
 
         const deleteBtn = (isOwn || viewerIsAdmin) ? `<button class="c-action-btn c-delete" onclick="deleteComment(${c.id})" title="Удалить"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : '';
         const editBtn = isOwn ? `<button class="c-action-btn" onclick="editComment(${c.id})" title="Редактировать"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : '';
-        const replyBtn = `<button class="c-action-btn c-reply" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Ответить</span></button>`;
-        const reportBtn = !isOwn ? `<button class="c-action-btn" onclick="reportComment(${c.id})" title="Пожаловаться"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22V3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : '';
+        const replyBtn = canWriteComments ? `<button class="c-action-btn c-reply" onclick="setReply(${c.id}, '${escapeHtml(c.user_name)}')"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Ответить</span></button>` : '';
+        const reportBtn = canWriteComments && !isOwn ? `<button class="c-action-btn" onclick="reportComment(${c.id})" title="Пожаловаться"><svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22V3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>` : '';
         const retryBtn = c._optimisticState === 'error'
             ? `<button class="c-action-btn c-retry" onclick="retryPendingComment('${escapeHtml(String(c.id))}')">Повтор</button>`
             : '';
@@ -3127,7 +3206,7 @@ function renderComments(comments) {
         const userReaction = c.user_reaction;
         const likeActive = userReaction === 'like' ? 'active' : '';
         const reactionPending = !!c._reactionPending;
-        const likeBtn = isPendingComment ? '' : `<button class="c-action-btn c-like ${likeActive} ${reactionPending ? 'pending' : ''}" ${reactionPending ? 'disabled' : ''} onclick="reactToComment(${c.id}, 'like')" title="Нравится">
+        const likeBtn = isPendingComment || !canWriteComments ? '' : `<button class="c-action-btn c-like ${likeActive} ${reactionPending ? 'pending' : ''}" ${reactionPending ? 'disabled' : ''} onclick="reactToComment(${c.id}, 'like')" title="Нравится">
             <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="${likeActive ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span>${likes || ''}</span>
         </button>`;
@@ -3172,6 +3251,10 @@ function renderComments(comments) {
 
 function reportComment(id) {
     if (!API_URL) return;
+    if (!hasTelegramAuth()) {
+        requireTelegramAuth('отправлять жалобы');
+        return;
+    }
 
     // Create a custom modal for reporting instead of prompt()
     const overlay = document.createElement('div');
@@ -3217,8 +3300,9 @@ function reportComment(id) {
 }
 
 async function reactToComment(commentId, type) {
-    if (!API_URL || !userId) {
-        showToast('Пожалуйста, авторизуйтесь через бота.');
+    if (!API_URL) return;
+    if (!hasTelegramAuth()) {
+        requireTelegramAuth('ставить реакции комментариям');
         return;
     }
     const comment = findCommentInCache(commentId);
@@ -3280,10 +3364,10 @@ function editComment(id) {
     activeCommentEditId = id;
     const comment = allCommentsCache.find(c => c.id === id);
     if (!comment) return;
-    
+
     const textNode = document.getElementById(`comment-text-${id}`);
     const originalText = comment.text;
-    
+
     textNode.innerHTML = `
         <textarea class="comment-input edit-area" id="edit-input-${id}" rows="3">${escapeHtml(originalText)}</textarea>
         <div class="edit-actions" style="margin-top:8px; display:flex; gap:8px;">
@@ -3360,7 +3444,7 @@ function updateCommentPreview() {
     const input = document.getElementById('comment-input');
     const preview = document.getElementById('comment-preview-area');
     if (!input || !preview) return;
-    
+
     const val = input.value.trim();
     if (val) {
         preview.classList.remove('hidden');
@@ -3381,22 +3465,26 @@ function insertFormatting(start, end) {
     const endPos = input.selectionEnd;
     const text = input.value;
     const selectedText = text.substring(startPos, endPos);
-    
+
     const before = text.substring(0, startPos);
     const after = text.substring(endPos, text.length);
-    
+
     input.value = before + start + selectedText + end + after;
     input.focus();
-    
+
     // Помещаем курсор после вставки
     const newPos = startPos + start.length + selectedText.length + end.length;
     input.setSelectionRange(newPos, newPos);
-    
+
     updateCommentPreview();
 }
 
 async function postComment() {
-    if (!API_URL || !userId) return;
+    if (!API_URL) return;
+    if (!hasTelegramAuth()) {
+        requireTelegramAuth('писать комментарии');
+        return;
+    }
     const input = document.getElementById('comment-input');
     const text = input.value.trim();
     if (!text) {
@@ -3526,7 +3614,7 @@ function discardPendingComment(commentId) {
 
 async function deleteComment(commentId) {
     if (!API_URL || !userId) return;
-    
+
     const isConfirmed = await new Promise(resolve => {
         if (tg && tg.showConfirm) {
             tg.showConfirm("Удалить комментарий?", resolve);
@@ -3566,7 +3654,7 @@ function escapeHtml(str) {
 function applyMarkup(text) {
     if (!text) return '';
     let html = escapeHtml(text);
-    
+
     // 2. Bold: [b]...[/b]
     html = html.replace(/\[b\]([\s\S]+?)\[\/b\]/g, '<strong>$1</strong>');
     // 3. Italic: [i]...[/i]
@@ -3579,7 +3667,7 @@ function applyMarkup(text) {
     });
     // 6. Quote: [quote]...[/quote]
     html = html.replace(/\[quote\]([\s\S]+?)\[\/quote\]/g, '<blockquote class="comment-quote">$1</blockquote>');
-    
+
     return html;
 }
 
@@ -3636,12 +3724,17 @@ function renderReactions(data) {
 
     const reactions = safeData.reactions || {};
     const user_reaction = safeData.user_reaction;
+    const publicMode = isPublicReadMode();
 
     bar.innerHTML = list.map(item => {
         const count = reactions[item.type] || 0;
-        const active = user_reaction === item.type ? 'active' : '';
+        const active = !publicMode && user_reaction === item.type ? 'active' : '';
+        const authClass = publicMode ? 'auth-required' : '';
+        const authAttrs = publicMode
+            ? `aria-disabled="true" onclick="requireTelegramAuth('ставить реакции')"`
+            : `onclick="toggleReaction('${item.type}')"`;
         return `
-            <div class="reaction-item ${active} type-${item.type}" onclick="toggleReaction('${item.type}')" title="${item.text}">
+            <div class="reaction-item ${active} ${authClass} type-${item.type}" ${authAttrs} title="${item.text}">
                 <div class="reaction-icon-wrapper">${item.svg}</div>
                 <span class="reaction-count">${count > 0 ? count : ''}</span>
             </div>
@@ -3719,15 +3812,15 @@ function markAsRead(seriesId, vol, chapter) {
 
 function setFontSize(size) {
     settings.fontSize = parseInt(size);
-    
+
     // Обновляем label если есть
     const label = document.getElementById('label-fontSize');
     if (label) label.innerText = size + 'px';
-    
+
     // Применяем настройки
     applySettings();
     saveSettings();
-    
+
     // Обновляем активные кнопки
     document.querySelectorAll('[data-size]').forEach(b => {
         b.classList.toggle('active', parseInt(b.dataset.size) === parseInt(size));
@@ -4399,7 +4492,7 @@ function buildToC() {
         const isActive = idx === currentChapterIdx;
         const isRead = readChapters[ch.id || `${currentSeries.id}_v${currentVolume.volume}_ch${ch.chapter}`];
         return `
-            <div class="toc-item ${isActive ? 'active' : ''} ${isRead ? 'read' : ''}" 
+            <div class="toc-item ${isActive ? 'active' : ''} ${isRead ? 'read' : ''}"
                  onclick="openChapter(${idx}); toggleToC();">
                 <span class="toc-num">${idx + 1}.</span>
                 <span class="toc-name">${ch.custom_name || 'Глава ' + ch.chapter}</span>
@@ -5271,7 +5364,7 @@ let _typoReporterInitialized = false;
 function initTypoReporter() {
     if (_typoReporterInitialized) return;
     _typoReporterInitialized = true;
-    
+
     const readerContent = document.getElementById('reader-content');
     if (!readerContent) return;
 
@@ -5813,7 +5906,7 @@ function initGestures() {
         let deltaY = Math.abs(e.clientY - gestureTouchStartY);
 
         // Добавлен порог по Y чтобы не срабатывало при скролле (Баг 1)
-        if (deltaX > SWIPE_MIN_DELTA_X && deltaY < SWIPE_MAX_DELTA_Y) { 
+        if (deltaX > SWIPE_MIN_DELTA_X && deltaY < SWIPE_MAX_DELTA_Y) {
             indicator.style.opacity = Math.min(deltaX / 100, 0.8);
             // Сохраняем translateY(-50%) для центрирования (Баг 3)
             indicator.style.transform = `translateY(-50%) scaleY(${Math.min(0.5 + deltaX / 200, 1)}) translateX(${deltaX / 2}px)`;
@@ -5823,7 +5916,7 @@ function initGestures() {
     reader.addEventListener('pointerup', (e) => {
         let deltaX = e.clientX - touchStartX;
         indicator.style.opacity = 0;
-        indicator.style.transform = 'translateY(-50%) translateX(-100%)'; 
+        indicator.style.transform = 'translateY(-50%) translateX(-100%)';
 
         if (isSwipeActive && deltaX > SWIPE_TRIGGER_THRESHOLD) {
             haptic('medium');
@@ -6058,8 +6151,9 @@ function initReaderScrollListeners() {
 
 // Optimistic chapter reactions with rollback on network/server errors.
 async function toggleReaction(type) {
-    if (!API_URL || !userId) {
-        showToast('Авторизуйтесь в боте для реакций');
+    if (!API_URL) return;
+    if (!hasTelegramAuth()) {
+        requireTelegramAuth('ставить реакции');
         return;
     }
     if (_isReacting) return;

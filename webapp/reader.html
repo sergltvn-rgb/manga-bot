@@ -28,7 +28,7 @@
 
     <!-- ★ Full Screen Dimmer Overlay (MangaLib style) -->
     <div id="dimmer-overlay" class="dimmer-overlay"></div>
-    
+
     <!-- ★ Toast Container -->
     <div id="toast-container" class="toast-container"></div>
     <div id="network-status" class="network-status-banner hidden" aria-live="polite"></div>
@@ -59,7 +59,7 @@
         <div class="content-area">
             <!-- Блок "Продолжить чтение" -->
             <div id="continue-reading-container" style="display:none;"></div>
-            
+
             <div id="series-list">
                 <div class="skeleton-cards">
                     <div class="skeleton-card"><div class="skeleton-cover"></div><div class="skeleton-card-lines"><div class="skeleton-line" style="width:70%"></div><div class="skeleton-line" style="width:50%"></div></div></div>
@@ -99,7 +99,7 @@
                 <div class="chapter-title" id="chapter-title-header">Глава 1</div>
                 <svg class="icon-xs switcher-arrow" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </div>
-            
+
             <div class="header-right-actions">
                 <button class="header-action-btn" id="header-toc-btn" onclick="toggleToC()" title="Оглавление">
                     <svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -108,7 +108,7 @@
                     <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
             </div>
-            
+
         </div>
         <!-- ★ Quick Switcher Modal (Controlled via .active class) -->
         <div id="quick-switcher-overlay" class="modal-overlay hidden" onclick="toggleQuickSwitcher()"></div>
@@ -140,7 +140,7 @@
 
             <!-- Лайк и комментарии (после текста) -->
             <div id="social-section" class="social-section" style="display:none;">
-                
+
                 <div class="chapter-actions-bar" id="chapter-actions-bar">
                     <button class="manga-action-btn channel-btn" onclick="openChannel()">
                         <svg class="icon-sm" viewBox="0 0 24 24" style="margin-right: 6px;"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -166,7 +166,7 @@
                         <div class="comment-tab active" id="tab-sort-top" onclick="sortComments('top')">Интересные</div>
                         <div class="comment-tab" id="tab-sort-new" onclick="sortComments('new')">По дате</div>
                     </div>
-                    
+
                     <div class="comment-form tg-style" id="comment-form">
                         <div id="reply-indicator" class="reply-indicator" style="display:none;">
                             <div class="reply-indicator-body">
@@ -195,6 +195,16 @@
                         </div>
                         <div id="comment-preview-area" class="comment-preview-area hidden"></div>
                         <div id="comment-send-status" class="comment-send-status hidden" aria-live="polite"></div>
+                    </div>
+
+                    <div id="comment-auth-cta" class="comment-auth-cta hidden" aria-live="polite">
+                        <div class="comment-auth-cta-text">
+                            <strong>Читайте без входа.</strong>
+                            <span>Чтобы комментировать, ставить реакции и жаловаться на спам, откройте читалку через Telegram.</span>
+                        </div>
+                        <button type="button" class="comment-auth-cta-btn" onclick="openTelegramReaderAuth()">
+                            Открыть в Telegram
+                        </button>
                     </div>
 
                     <div id="comments-list" class="comments-list"></div>
@@ -306,7 +316,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <h3 class="library-section-title">В процессе чтения</h3>
             <div id="library-filters" class="library-filter-row">
                 <button class="library-filter-btn active" data-filter="in_progress" onclick="setLibraryFilter('in_progress')">В процессе</button>

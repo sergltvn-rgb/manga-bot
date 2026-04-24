@@ -276,6 +276,13 @@ async function installVisualMocks(page, state) {
   });
 }
 
+async function installPublicVisualMocks(page, state) {
+  await installVisualMocks(page, state);
+  await page.addInitScript(() => {
+    delete window.Telegram;
+  });
+}
+
 test.describe("Reader visual regression", () => {
   test.use({ viewport: { width: 393, height: 852 } });
 
@@ -307,7 +314,7 @@ test.describe("Reader visual regression", () => {
     await expect(page.locator("#screen-reader")).toHaveClass(/active/);
     await expect(page.locator("#chapter-title-header")).toContainText("1");
 
-    await expect(page.locator("#reader-header")).toHaveScreenshot("state-reader-top-mobile.png", {
+    await expect(page.locator("#reader-top-bar")).toHaveScreenshot("state-reader-top-mobile.png", {
       animations: "disabled",
       caret: "hide"
     });
@@ -319,7 +326,11 @@ test.describe("Reader visual regression", () => {
       caret: "hide"
     });
 
-    await page.click("#header-settings-btn");
+    await page.evaluate(() => {
+      if (typeof toggleSettings === "function") {
+        toggleSettings();
+      }
+    });
     await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/);
     await expect(page.locator("#settings-panel")).toHaveScreenshot("state-settings-mobile.png", {
       animations: "disabled",
@@ -374,6 +385,37 @@ test.describe("Reader visual regression", () => {
         caret: "hide"
       });
     }
+
+    expect(runtimeErrors, `Runtime errors:\n${runtimeErrors.join("\n")}`).toEqual([]);
+  });
+
+  test("public mode: unauthenticated comments CTA", async ({ page }) => {
+    const state = createVisualState();
+    const key = chapterKey("manga_ru", 1, "1");
+    state.likesByChapter[key].liked = false;
+    state.userReactionByChapter[key] = null;
+    await installPublicVisualMocks(page, state);
+
+    const runtimeErrors = [];
+    page.on("pageerror", (err) => runtimeErrors.push(`pageerror: ${err.message}`));
+
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=public-visual");
+
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("body")).toHaveClass(/public-read-mode/);
+    await expect(page.locator("#comment-form")).toHaveClass(/auth-required/);
+    await expect(page.locator("#comment-auth-cta")).toBeVisible();
+    await expect(page.locator("#comments-list .c-reply")).toHaveCount(0);
+
+    await page.locator("#social-section").scrollIntoViewIfNeeded();
+    await expect(page.locator("#social-section")).toHaveScreenshot("state-public-reader-comments-mobile.png", {
+      animations: "disabled",
+      caret: "hide"
+    });
 
     expect(runtimeErrors, `Runtime errors:\n${runtimeErrors.join("\n")}`).toEqual([]);
   });

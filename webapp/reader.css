@@ -4738,6 +4738,77 @@ input[type=range]:active::-webkit-slider-thumb {
     transition: none;
 }
 
+.comment-form.auth-required {
+    display: none;
+}
+
+.comment-auth-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin: 0 0 var(--space-4);
+    padding: 14px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--surface-border);
+    background: color-mix(in srgb, var(--surface-1) 86%, var(--accent) 14%);
+    color: var(--text);
+}
+
+.comment-auth-cta.hidden {
+    display: none;
+}
+
+.comment-auth-cta-text {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.comment-auth-cta-text strong {
+    font-size: 13.5px;
+    color: var(--text-main);
+}
+
+.comment-auth-cta-text span {
+    color: var(--text-secondary);
+}
+
+.comment-auth-cta-btn {
+    min-height: var(--ui-hit-target);
+    flex: 0 0 auto;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--surface-border));
+    border-radius: var(--radius-pill);
+    padding: 0 14px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 6px 16px rgba(var(--accent-rgb), 0.22);
+}
+
+.comment-auth-cta-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--ui-focus-ring), 0 6px 16px rgba(var(--accent-rgb), 0.22);
+}
+
+.like-btn.auth-required,
+.reaction-item.auth-required {
+    opacity: 0.86;
+}
+
+.reaction-item.auth-required.active {
+    background: var(--surface-2);
+    border-color: var(--surface-border);
+    color: var(--text-secondary);
+    box-shadow: none;
+}
+
 .comment-form .comment-input-row {
     display: flex;
     align-items: flex-end;
@@ -5375,6 +5446,17 @@ body.keyboard-open #screen-reader .admin-menu {
     }
 }
 
+@media (max-width: 640px) {
+    .comment-auth-cta {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .comment-auth-cta-btn {
+        width: 100%;
+    }
+}
+
 @media (min-width: 768px) {
     #screen-reader .reader-header {
         padding-left: 20px;
@@ -5609,6 +5691,3 @@ body.keyboard-open #screen-reader .admin-menu {
 .reader-content.loading {
     opacity: 0;
 }
-
-
-

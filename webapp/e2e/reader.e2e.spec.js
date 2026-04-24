@@ -18,6 +18,9 @@ function createMockState() {
       reader: 0,
       chapterContent: 0,
       commentsPost: 0,
+      commentsReact: 0,
+      commentsReport: 0,
+      likesPost: 0,
       reactionsPost: 0,
       typoPost: 0,
       renameRequest: 0,
@@ -591,7 +594,201 @@ async function installTelegramAndApiMocks(page, state) {
   });
 }
 
+async function installPublicApiMocks(page, state) {
+  await page.addInitScript(() => {
+    const injectNoMotionCss = () => {
+      const existing = document.getElementById("__pw_no_motion");
+      if (existing) return;
+      const style = document.createElement("style");
+      style.id = "__pw_no_motion";
+      style.textContent = `
+        *, *::before, *::after {
+          transition: none !important;
+          animation-duration: 0s !important;
+          animation-delay: 0s !important;
+        }
+      `;
+      (document.head || document.documentElement).appendChild(style);
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", injectNoMotionCss, { once: true });
+    } else {
+      injectNoMotionCss();
+    }
+  });
+
+  await page.route("https://telegram.org/js/telegram-web-app.js", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: "/* public browser mode: Telegram WebApp is absent */",
+    });
+  });
+
+  await page.route("**/api/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const method = request.method().toUpperCase();
+    const pathname = url.pathname;
+
+    if (method === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+          "access-control-allow-headers": "Content-Type, Authorization",
+        },
+        body: "",
+      });
+      return;
+    }
+
+    if (pathname === "/api/reader" && method === "GET") {
+      state.calls.reader += 1;
+      await fulfillJson(route, state.readerData);
+      return;
+    }
+
+    if (pathname === "/api/chapter-content" && method === "GET") {
+      state.calls.chapterContent += 1;
+      const seriesId = url.searchParams.get("series_id") || "";
+      const volumeId = url.searchParams.get("volume") || "";
+      const chapterId = url.searchParams.get("chapter") || "";
+      const chapter = findChapter(state, seriesId, volumeId, chapterId);
+      if (!chapter) {
+        await fulfillJson(route, { error: "not found" }, 404);
+        return;
+      }
+
+      await fulfillJson(route, {
+        ok: true,
+        source_type: "inline",
+        html: renderInlineChapterHtml(chapter.text || ""),
+        fallback_url: chapter.url || null,
+        cache_status: "miss",
+      });
+      return;
+    }
+
+    if (pathname === "/api/progress" && method === "GET") {
+      await fulfillJson(route, { bookmarks: [] });
+      return;
+    }
+
+    if (pathname === "/api/likes" && method === "GET") {
+      const key = url.searchParams.get("chapter_key") || "";
+      await fulfillJson(route, state.likesByChapter[key] || { count: 0, liked: false });
+      return;
+    }
+
+    if (pathname === "/api/comments" && method === "GET") {
+      const key = url.searchParams.get("chapter_key") || "";
+      await fulfillJson(route, { comments: state.commentsByChapter[key] || [] });
+      return;
+    }
+
+    if (pathname === "/api/reactions" && method === "GET") {
+      const key = url.searchParams.get("chapter_key") || "";
+      await fulfillJson(route, {
+        reactions: state.chapterReactionsByChapter[key] || {},
+        user_reaction: null,
+      });
+      return;
+    }
+
+    if (pathname === "/api/likes" && method === "POST") {
+      state.calls.likesPost += 1;
+      await fulfillJson(route, { error: "auth required" }, 401);
+      return;
+    }
+
+    if (pathname === "/api/comments" && method === "POST") {
+      state.calls.commentsPost += 1;
+      await fulfillJson(route, { error: "auth required" }, 401);
+      return;
+    }
+
+    if (pathname === "/api/comments/react" && method === "POST") {
+      state.calls.commentsReact += 1;
+      await fulfillJson(route, { error: "auth required" }, 401);
+      return;
+    }
+
+    if (pathname === "/api/comments/report" && method === "POST") {
+      state.calls.commentsReport += 1;
+      await fulfillJson(route, { error: "auth required" }, 401);
+      return;
+    }
+
+    if (pathname === "/api/reactions" && method === "POST") {
+      state.calls.reactionsPost += 1;
+      await fulfillJson(route, { error: "auth required" }, 401);
+      return;
+    }
+
+    if (pathname === "/api/avatar" && method === "GET") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+        },
+        body: "",
+      });
+      return;
+    }
+
+    await fulfillJson(route, { ok: true });
+  });
+}
+
 test.describe("Reader E2E smoke", () => {
+  test("public browser mode: reads chapter and comments without authenticated actions", async ({ page }) => {
+    const state = createMockState();
+    const key = chapterKey("manga_ru", 1, "1");
+    state.likesByChapter[key] = { count: 7, liked: false };
+    state.chapterReactionsByChapter[key] = { like: 3, heart: 2 };
+    state.commentsByChapter[key] = [
+      {
+        id: 11,
+        chapter_key: key,
+        user_id: "101",
+        user_name: "PublicReader",
+        text: "public comment is visible",
+        parent_id: null,
+        likes: 4,
+        user_reaction: null,
+        created_at: nowSql(),
+      },
+    ];
+    await installPublicApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=public-mode");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("#reader-text")).toContainText("This is chapter one text");
+
+    await expect(page.locator("#comments-list .comment-text").first()).toContainText("public comment is visible");
+    await expect(page.locator("#comment-form")).toHaveClass(/auth-required/);
+    await expect(page.locator("#comment-auth-cta")).toBeVisible();
+    await expect(page.locator("#comment-auth-cta")).toContainText("Telegram");
+    await expect(page.locator("#comments-list .c-reply")).toHaveCount(0);
+    await expect(page.locator("#comments-list .c-like")).toHaveCount(0);
+
+    await expect(page.locator("#like-btn")).toHaveAttribute("aria-disabled", "true");
+    await page.locator("#like-btn").dispatchEvent("click");
+    await page.click("#reaction-bar .reaction-item.type-like");
+
+    expect(state.calls.likesPost).toBe(0);
+    expect(state.calls.reactionsPost).toBe(0);
+    expect(state.calls.commentsPost).toBe(0);
+    expect(state.calls.commentsReact).toBe(0);
+    expect(state.calls.commentsReport).toBe(0);
+  });
+
   test("user flow: open chapter, navigate, comment, react, typo report", async ({ page }) => {
     const state = createMockState();
     await installTelegramAndApiMocks(page, state);
