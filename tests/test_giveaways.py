@@ -290,3 +290,11 @@ class TestGiveawayPublishing:
         assert "Изменить текст" in buttons
         assert "Изменить призы" in buttons
         assert "Отменить" in buttons
+
+    def test_publish_error_formats_chat_not_found_hint(self):
+        from services.giveaways import _format_publish_error
+
+        text = _format_publish_error(Exception("Bad Request: chat not found"))
+
+        assert "Бот не видит канал" in text
+        assert "chat not found" in text

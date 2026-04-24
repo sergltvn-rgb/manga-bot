@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiosqlite
 from aiogram import F, Router, types
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -49,6 +50,10 @@ _DURATION_RE = re.compile(r"^(?P<count>\d+)(?P<unit>[mhd])$", re.IGNORECASE)
 
 
 class GiveawayValidationError(ValueError):
+    pass
+
+
+class GiveawayPublishError(RuntimeError):
     pass
 
 
@@ -435,6 +440,46 @@ async def is_channel_subscriber(bot, channel_id: str, user_id: int) -> bool:
     return str(status) in JOINED_STATUSES
 
 
+def _telegram_error_text(exc: Exception) -> str:
+    message = getattr(exc, "message", None) or str(exc)
+    return str(message).strip() or type(exc).__name__
+
+
+def _format_publish_error(exc: Exception) -> str:
+    detail = _telegram_error_text(exc)
+    lowered = detail.lower()
+    if "chat not found" in lowered:
+        hint = "Бот не видит канал. Проверьте @username/-100 id и добавьте бота администратором канала."
+    elif "not enough rights" in lowered or "not enough privileges" in lowered or "need administrator" in lowered:
+        hint = "У бота нет прав публикации. Выдайте ему права администратора с публикацией постов."
+    elif "can't parse entities" in lowered or "entities" in lowered:
+        hint = "Telegram не принял разметку текста. Попробуйте убрать нестандартные HTML-символы."
+    elif "message is too long" in lowered or "caption is too long" in lowered:
+        hint = "Текст слишком длинный для Telegram. Сократите описание или призы."
+    else:
+        hint = "Telegram отклонил публикацию. Точный ответ API ниже."
+    return f"{hint}\n\nОтвет Telegram: {detail}"
+
+
+async def validate_publish_channel(bot, channel_id: str) -> None:
+    try:
+        await bot.get_chat(chat_id=channel_id)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=channel_id, user_id=me.id)
+    except TelegramAPIError as exc:
+        raise GiveawayPublishError(_format_publish_error(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - keep diagnostics visible to the admin.
+        raise GiveawayPublishError(_format_publish_error(exc)) from exc
+
+    raw_status = getattr(member, "status", "")
+    status = str(getattr(raw_status, "value", raw_status))
+    if status not in {"administrator", "creator"}:
+        raise GiveawayPublishError("Бот найден в канале, но он не администратор. Выдайте права администратора с публикацией постов.")
+    can_post = getattr(member, "can_post_messages", True)
+    if can_post is False:
+        raise GiveawayPublishError("Бот администратор канала, но без права публикации постов.")
+
+
 def _giveaway_post_text(giveaway: Giveaway) -> str:
     prizes = _format_prizes_block(giveaway.prize, giveaway.winners_count)
     return (
@@ -565,6 +610,7 @@ async def create_and_publish_giveaway(
     media_type: str | None = None,
     media_file_id: str | None = None,
 ) -> int:
+    await validate_publish_channel(bot, channel_id)
     giveaway_id = await create_giveaway(
         channel_id=channel_id,
         prize=prize,
@@ -663,7 +709,7 @@ def _admin_giveaway_menu() -> types.InlineKeyboardMarkup:
 
 
 @giveaway_router.message(Command("giveaway_create"))
-async def cmd_giveaway_create(message: types.Message):
+async def cmd_giveaway_create(message: types.Message, state: FSMContext):
     if not await _is_bot_admin(message.from_user.id):
         return
     try:
@@ -671,22 +717,16 @@ async def cmd_giveaway_create(message: types.Message):
     except GiveawayValidationError as exc:
         return await message.answer(str(exc))
     media_type, media_file_id = extract_media_from_message(message.reply_to_message)
-    try:
-        giveaway_id = await create_and_publish_giveaway(
-            message.bot,
-            created_by=message.from_user.id,
-            channel_id=channel_id,
-            ends_at_utc=ends_at,
-            winners_count=winners_count,
-            prize=prize,
-            post_text=post_text,
-            media_type=media_type,
-            media_file_id=media_file_id,
-        )
-    except Exception as exc:  # noqa: BLE001 - show admin the publication failure.
-        logging.exception("giveaway quick create failed")
-        return await message.answer(f"Не удалось опубликовать розыгрыш: {type(exc).__name__}")
-    await message.answer(f"Розыгрыш #{giveaway_id} опубликован в {channel_id}.")
+    await state.update_data(
+        channel_id=channel_id,
+        ends_at_utc=_dt_to_db(ends_at),
+        winners_count=winners_count,
+        prize=prize,
+        post_text=post_text,
+        media_type=media_type,
+        media_file_id=media_file_id,
+    )
+    await _show_giveaway_preview(message, state)
 
 
 @giveaway_router.callback_query(F.data == "admin_giveaways")
@@ -852,9 +892,12 @@ async def _publish_giveaway_from_state(message: types.Message, state: FSMContext
             media_type=data.get("media_type"),
             media_file_id=data.get("media_file_id"),
         )
+    except GiveawayPublishError as exc:
+        logging.warning("giveaway publish failed: %s", exc)
+        return await message.answer(f"Не удалось опубликовать розыгрыш:\n{exc}")
     except Exception as exc:  # noqa: BLE001 - show admin the publication failure.
         logging.exception("giveaway wizard failed")
-        return await message.answer(f"Не удалось опубликовать розыгрыш: {type(exc).__name__}")
+        return await message.answer(f"Не удалось опубликовать розыгрыш:\n{_format_publish_error(exc)}")
     await state.clear()
     await message.answer(f"Розыгрыш #{giveaway_id} опубликован в {data.get('channel_id') or GIVEAWAY_CHANNEL_ID}.")
 
