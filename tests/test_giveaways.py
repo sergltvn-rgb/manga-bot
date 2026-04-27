@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import zipfile
 from datetime import datetime, timezone
+from io import BytesIO
 
 import pytest
 
@@ -263,6 +265,44 @@ class TestGiveawayDb:
         assert "giveaway_id,user_id,username,first_name,joined_at_utc,joined_at_msk,status,is_winner,winner_place" in csv_text
         assert f"{giveaway_id},1001,alice,Alice," in csv_text
         assert ",joined,1" in csv_text
+
+    def test_export_entries_xlsx_is_formatted_for_excel(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        run(giveaways.mark_winners(giveaway_id, [giveaways.GiveawayEntry(giveaway_id, 1001, "alice", "Alice", "joined", True)]))
+
+        xlsx_bytes = run(giveaways.build_giveaway_entries_xlsx(giveaway_id))
+
+        with zipfile.ZipFile(BytesIO(xlsx_bytes)) as archive:
+            names = set(archive.namelist())
+            sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
+            workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
+
+        assert "xl/worksheets/sheet1.xml" in names
+        assert "xl/worksheets/sheet2.xml" in names
+        assert "Участники" in workbook_xml
+        assert "Сводка" in workbook_xml
+        assert "Победитель" in sheet_xml
+        assert "Да" in sheet_xml
+        assert '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' in sheet_xml
+        assert '<autoFilter ref="A1:I2"/>' in sheet_xml
 
     def test_mark_winners_stores_winner_places(self, tmp_path, monkeypatch):
         import database

@@ -4,17 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1082;&#1072; &#1088;&#1086;&#1079;&#1099;&#1075;&#1088;&#1099;&#1096;&#1072;</title>
+  <meta name="theme-color" content="#8b5cf6">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root {
       color-scheme: light;
-      --bg-a: #9fcb7f;
-      --bg-b: #7fb66c;
-      --surface: #ffffff;
-      --text: #1d1f24;
-      --muted: #667085;
-      --accent: #43bfb4;
-      --line: rgba(29, 31, 36, 0.1);
+      --bg: #fbfaff;
+      --surface: rgba(255, 255, 255, 0.94);
+      --surface-strong: #ffffff;
+      --text: #1a1a2e;
+      --muted: #64748b;
+      --accent: #8b5cf6;
+      --accent-2: #ec4899;
+      --state: #8b5cf6;
+      --line: rgba(139, 92, 246, 0.16);
+      --shadow: 0 18px 54px rgba(88, 28, 135, 0.18);
     }
 
     * { box-sizing: border-box; }
@@ -25,39 +29,75 @@
       font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: var(--text);
       background:
-        radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.28), transparent 30%),
-        linear-gradient(145deg, var(--bg-a), var(--bg-b));
+        linear-gradient(160deg, #ffffff 0%, #f5f0ff 43%, #fff0f7 100%);
+      overflow-x: hidden;
+    }
+
+    body[data-state="success"] { --state: #16a34a; }
+    body[data-state="missing"] { --state: #f59e0b; }
+    body[data-state="error"] { --state: #ef4444; }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(90deg, rgba(139, 92, 246, 0.08) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(139, 92, 246, 0.06) 1px, transparent 1px);
+      background-size: 34px 34px;
+      mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.48), transparent 72%);
     }
 
     .shell {
       min-height: 100svh;
       display: grid;
       grid-template-rows: 1fr auto;
-      padding: max(28px, env(safe-area-inset-top)) 18px max(16px, env(safe-area-inset-bottom));
-      gap: 20px;
+      padding: max(18px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+      gap: 14px;
+      position: relative;
     }
 
     .stage {
       display: grid;
       place-items: center;
+      min-height: 0;
     }
 
     .panel {
-      width: min(100%, 432px);
+      width: min(100%, 440px);
       background: var(--surface);
-      border-radius: 14px;
-      padding: 28px 24px 28px;
-      box-shadow: 0 14px 34px rgba(34, 67, 27, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 22px;
+      padding: 18px 18px 22px;
+      box-shadow: var(--shadow);
       text-align: center;
+      backdrop-filter: blur(18px);
+    }
+
+    .eyebrow {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+      border-radius: 999px;
+      background: rgba(139, 92, 246, 0.1);
+      color: #6d28d9;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
     }
 
     .mascot {
-      width: min(100%, 310px);
+      width: min(100%, 344px);
       aspect-ratio: 1 / 1;
-      margin: 0 auto 22px;
-      border-radius: 18px;
+      margin: 8px auto 10px;
+      border-radius: 26px;
       overflow: hidden;
-      background: #fff;
+      background: linear-gradient(180deg, #ffffff, #f8f4ff);
+      border: 1px solid rgba(139, 92, 246, 0.1);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
     }
 
     .mascot img {
@@ -66,11 +106,30 @@
       height: 100%;
       object-fit: contain;
       object-position: center;
+      transform: scale(1.04);
+      filter: saturate(1.05) contrast(1.02);
+    }
+
+    .state-pill {
+      width: fit-content;
+      max-width: 100%;
+      min-height: 34px;
+      margin: 0 auto 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 14px;
+      border-radius: 999px;
+      color: var(--state);
+      background: color-mix(in srgb, var(--state) 12%, #ffffff);
+      border: 1px solid color-mix(in srgb, var(--state) 24%, transparent);
+      font-size: 13px;
+      font-weight: 800;
     }
 
     h1 {
       margin: 0 0 10px;
-      font-size: 22px;
+      font-size: clamp(24px, 8vw, 30px);
       line-height: 1.25;
       letter-spacing: 0;
     }
@@ -78,29 +137,31 @@
     p {
       margin: 0;
       color: var(--muted);
-      font-size: 15px;
+      font-size: 15.5px;
       line-height: 1.45;
     }
 
     .status {
-      margin-top: 20px;
+      margin-top: 18px;
       display: grid;
-      gap: 10px;
+      gap: 8px;
     }
 
     .channel {
-      min-height: 44px;
+      min-height: 50px;
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 14px;
+      background: var(--surface-strong);
       color: var(--text);
       text-decoration: none;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 10px 12px;
+      padding: 11px 12px;
       font-weight: 650;
       font-size: 14px;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
     }
 
     .channel span:first-child {
@@ -109,13 +170,14 @@
     }
 
     .channel span:last-child {
-      color: var(--accent);
+      color: var(--accent-2);
       font-size: 13px;
+      font-weight: 800;
       white-space: nowrap;
     }
 
     .actions {
-      width: min(100%, 452px);
+      width: min(100%, 440px);
       margin: 0 auto;
       display: grid;
       gap: 10px;
@@ -123,19 +185,32 @@
 
     button {
       width: 100%;
-      min-height: 50px;
+      min-height: 52px;
       border: 0;
-      border-radius: 8px;
+      border-radius: 14px;
       color: #fff;
-      background: var(--accent);
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
       font: inherit;
       font-weight: 700;
       cursor: pointer;
+      box-shadow: 0 12px 26px rgba(139, 92, 246, 0.28);
     }
 
     button.secondary {
       color: var(--text);
-      background: rgba(255, 255, 255, 0.82);
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      box-shadow: none;
+    }
+
+    button:active {
+      transform: translateY(1px);
+    }
+
+    @media (max-height: 700px) {
+      .mascot { width: min(100%, 270px); }
+      .panel { padding: 14px 14px 18px; }
+      h1 { font-size: 22px; }
     }
 
     .hidden { display: none; }
@@ -145,9 +220,11 @@
   <main class="shell">
     <section class="stage">
       <div class="panel">
+        <div class="eyebrow">Alya Giveaway</div>
         <div class="mascot" aria-hidden="true">
-          <img id="mascot" src="assets/giveaway-waiting-clean.webp" alt="" decoding="async">
+          <img id="mascot" src="assets/giveaway-waiting-clean.webp" srcset="assets/giveaway-waiting-clean.webp 1x, assets/giveaway-waiting.jpg 2x" alt="" decoding="async" fetchpriority="high">
         </div>
+        <div id="state" class="state-pill">Проверка подписки</div>
         <h1 id="title">&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1103;&#1077;&#1084; &#1087;&#1086;&#1076;&#1087;&#1080;&#1089;&#1082;&#1091;...</h1>
         <p id="text">&#1069;&#1090;&#1086; &#1079;&#1072;&#1081;&#1084;&#1077;&#1090; &#1087;&#1072;&#1088;&#1091; &#1089;&#1077;&#1082;&#1091;&#1085;&#1076;.</p>
         <div id="channels" class="status hidden"></div>
@@ -167,6 +244,10 @@
     const apiBase = (params.get('api') || location.origin).replace(/\/$/, '');
 
     const copy = {
+      checkingState: '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0438',
+      successState: '\u0412\u0441\u0435 \u0433\u043e\u0442\u043e\u0432\u043e',
+      missingState: '\u041d\u0443\u0436\u043d\u0430 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0430',
+      errorState: '\u041d\u0443\u0436\u043d\u043e \u043f\u043e\u0432\u0442\u043e\u0440\u0438\u0442\u044c',
       checkingTitle: '\u041f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u043c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443...',
       checkingText: '\u042d\u0442\u043e \u0437\u0430\u0439\u043c\u0435\u0442 \u043f\u0430\u0440\u0443 \u0441\u0435\u043a\u0443\u043d\u0434.',
       notFoundTitle: '\u0420\u043e\u0437\u044b\u0433\u0440\u044b\u0448 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d',
@@ -199,18 +280,29 @@
     const retry = document.getElementById('retry');
     const closeBtn = document.getElementById('close');
     const mascot = document.getElementById('mascot');
+    const state = document.getElementById('state');
     const mascotImages = {
-      waiting: 'assets/giveaway-waiting-clean.webp',
-      success: 'assets/giveaway-success-clean.webp',
+      waiting: {
+        src: 'assets/giveaway-waiting-clean.webp',
+        srcset: 'assets/giveaway-waiting-clean.webp 1x, assets/giveaway-waiting.jpg 2x',
+      },
+      success: {
+        src: 'assets/giveaway-success-clean.webp',
+        srcset: 'assets/giveaway-success-clean.webp 1x, assets/giveaway-success.jpg 2x',
+      },
     };
 
-    function setCopy(nextTitle, nextText) {
+    function setCopy(nextTitle, nextText, nextState = copy.checkingState, tone = 'checking') {
       title.textContent = nextTitle;
       text.textContent = nextText;
+      state.textContent = nextState;
+      document.body.dataset.state = tone;
     }
 
     function setMascot(state) {
-      mascot.src = mascotImages[state] || mascotImages.waiting;
+      const image = mascotImages[state] || mascotImages.waiting;
+      mascot.src = image.src;
+      mascot.srcset = image.srcset;
     }
 
     function openUrl(url) {
@@ -245,13 +337,13 @@
       retry.classList.add('hidden');
       renderChannels([]);
       setMascot('waiting');
-      setCopy(copy.checkingTitle, copy.checkingText);
+      setCopy(copy.checkingTitle, copy.checkingText, copy.checkingState, 'checking');
       if (!giveawayId) {
-        setCopy(copy.notFoundTitle, copy.notFoundText);
+        setCopy(copy.notFoundTitle, copy.notFoundText, copy.errorState, 'error');
         return;
       }
       if (!tg?.initData) {
-        setCopy(copy.telegramTitle, copy.telegramText);
+        setCopy(copy.telegramTitle, copy.telegramText, copy.errorState, 'error');
         return;
       }
       try {
@@ -261,33 +353,33 @@
         });
         const data = await response.json();
         if (!response.ok || !data.ok) {
-          setCopy(copy.failedTitle, copy.failedText);
+          setCopy(copy.failedTitle, copy.failedText, copy.errorState, 'error');
           retry.classList.remove('hidden');
           return;
         }
         if (!data.is_active) {
-          setCopy(copy.endedTitle, copy.endedText);
+          setCopy(copy.endedTitle, copy.endedText, copy.errorState, 'error');
           return;
         }
         if (data.joined) {
           setMascot('success');
-          setCopy(copy.joinedTitle, copy.joinedText);
+          setCopy(copy.joinedTitle, copy.joinedText, copy.successState, 'success');
           return;
         }
         if (data.is_allowed) {
           setMascot('success');
-          setCopy(copy.allowedTitle, copy.allowedText);
+          setCopy(copy.allowedTitle, copy.allowedText, copy.successState, 'success');
           retry.classList.remove('hidden');
           return;
         }
         const required = Array.isArray(data.required_channels) ? data.required_channels : [];
         const missingIds = Array.isArray(data.missing_channels) ? data.missing_channels : [];
         const missing = required.filter((item) => missingIds.includes(item.channel_id));
-        setCopy(copy.missingTitle, copy.missingText);
+        setCopy(copy.missingTitle, copy.missingText, copy.missingState, 'missing');
         renderChannels(missing);
         retry.classList.remove('hidden');
       } catch (error) {
-        setCopy(copy.unavailableTitle, copy.unavailableText);
+        setCopy(copy.unavailableTitle, copy.unavailableText, copy.errorState, 'error');
         retry.classList.remove('hidden');
       }
     }

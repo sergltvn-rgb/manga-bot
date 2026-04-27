@@ -13,10 +13,12 @@ import json
 import logging
 import random
 import re
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 from urllib.parse import quote
+from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiosqlite
@@ -643,6 +645,164 @@ async def build_giveaway_entries_csv(giveaway_id: int) -> str:
                 entry.winner_place or "",
             ]
         )
+    return output.getvalue()
+
+
+def _xlsx_col(index: int) -> str:
+    letters = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def _xlsx_cell(row: int, col: int, value: object, *, style: int | None = None) -> str:
+    ref = f"{_xlsx_col(col)}{row}"
+    style_attr = f' s="{style}"' if style is not None else ""
+    if isinstance(value, bool):
+        value = "Да" if value else "Нет"
+    if isinstance(value, int):
+        return f'<c r="{ref}"{style_attr}><v>{value}</v></c>'
+    text = xml_escape("" if value is None else str(value))
+    return f'<c r="{ref}" t="inlineStr"{style_attr}><is><t>{text}</t></is></c>'
+
+
+def _xlsx_sheet_xml(rows: list[list[object]], *, widths: list[int], freeze_header: bool = False, auto_filter: bool = False) -> str:
+    row_count = max(1, len(rows))
+    col_count = max(1, max((len(row) for row in rows), default=1))
+    dimension = f"A1:{_xlsx_col(col_count)}{row_count}"
+    cols = "".join(f'<col min="{idx}" max="{idx}" width="{width}" customWidth="1"/>' for idx, width in enumerate(widths[:col_count], 1))
+    pane = (
+        '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+        '<selection pane="bottomLeft" activeCell="A2" sqref="A2"/>'
+        if freeze_header
+        else '<selection activeCell="A1" sqref="A1"/>'
+    )
+    sheet_rows = []
+    for row_idx, row in enumerate(rows, 1):
+        cells = []
+        for col_idx, value in enumerate(row, 1):
+            style = 1 if row_idx == 1 else 2 if col_idx == 8 and value == "Да" else None
+            cells.append(_xlsx_cell(row_idx, col_idx, value, style=style))
+        sheet_rows.append(f'<row r="{row_idx}">{"".join(cells)}</row>')
+    filter_xml = f'<autoFilter ref="{dimension}"/>' if auto_filter else ""
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        f'<dimension ref="{dimension}"/>'
+        f'<sheetViews><sheetView workbookViewId="0">{pane}</sheetView></sheetViews>'
+        '<sheetFormatPr defaultRowHeight="18"/>'
+        f'<cols>{cols}</cols>'
+        f'<sheetData>{"".join(sheet_rows)}</sheetData>'
+        f'{filter_xml}'
+        '</worksheet>'
+    )
+
+
+def _xlsx_styles_xml() -> str:
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/><color rgb="FFFFFFFF"/></font></fonts>'
+        '<fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FF8B5CF6"/><bgColor indexed="64"/></patternFill></fill>'
+        '<fill><patternFill patternType="solid"><fgColor rgb="FFE9D5FF"/><bgColor indexed="64"/></patternFill></fill></fills>'
+        '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
+        '<border><left style="thin"><color rgb="FFE5E7EB"/></left><right style="thin"><color rgb="FFE5E7EB"/></right>'
+        '<top style="thin"><color rgb="FFE5E7EB"/></top><bottom style="thin"><color rgb="FFE5E7EB"/></bottom><diagonal/></border></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0"/>'
+        '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>'
+        '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"/></cellXfs>'
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        '</styleSheet>'
+    )
+
+
+async def build_giveaway_entries_xlsx(giveaway_id: int) -> bytes:
+    giveaway = await get_giveaway(giveaway_id)
+    entries = await get_giveaway_entries(giveaway_id)
+    participant_rows: list[list[object]] = [
+        ["Giveaway ID", "User ID", "Username", "Имя", "Вошел UTC", "Вошел МСК", "Статус", "Победитель", "Место"]
+    ]
+    for entry in entries:
+        joined_at_utc = entry.joined_at_utc.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if entry.joined_at_utc else ""
+        joined_at_msk = entry.joined_at_utc.astimezone(MSK_TZ).strftime("%d.%m.%Y %H:%M:%S") if entry.joined_at_utc else ""
+        participant_rows.append(
+            [
+                entry.giveaway_id,
+                entry.user_id,
+                f"@{entry.username}" if entry.username else "",
+                entry.first_name or "",
+                joined_at_utc,
+                joined_at_msk,
+                entry.status,
+                "Да" if entry.is_winner else "Нет",
+                entry.winner_place or "",
+            ]
+        )
+
+    summary_rows: list[list[object]] = [["Поле", "Значение"]]
+    if giveaway is not None:
+        summary_rows.extend(
+            [
+                ["ID", giveaway.id],
+                ["Статус", giveaway.status],
+                ["Канал", giveaway.channel_id],
+                ["Призы", giveaway.prize],
+                ["Победителей", giveaway.winners_count],
+                ["Участников", len(entries)],
+                ["Финиш МСК", format_giveaway_end(giveaway.ends_at_utc)],
+            ]
+        )
+    else:
+        summary_rows.append(["ID", giveaway_id])
+
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Участники" sheetId="1" r:id="rId1"/><sheet name="Сводка" sheetId="2" r:id="rId2"/></sheets>'
+        '</workbook>'
+    )
+    workbook_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>'
+        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        '</Relationships>'
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        '</Types>'
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        '</Relationships>'
+    )
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("[Content_Types].xml", content_types)
+        archive.writestr("_rels/.rels", root_rels)
+        archive.writestr("xl/workbook.xml", workbook_xml)
+        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        archive.writestr("xl/styles.xml", _xlsx_styles_xml())
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            _xlsx_sheet_xml(participant_rows, widths=[13, 14, 20, 24, 22, 22, 16, 16, 10], freeze_header=True, auto_filter=True),
+        )
+        archive.writestr("xl/worksheets/sheet2.xml", _xlsx_sheet_xml(summary_rows, widths=[20, 42]))
     return output.getvalue()
 
 
@@ -1342,14 +1502,54 @@ async def run_giveaway_scheduler(bot, *, interval_seconds: int = 30) -> None:
 
 def _admin_giveaway_menu() -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Создать розыгрыш", callback_data="admin_giveaway_create")
-    builder.button(text="Активные розыгрыши", callback_data="admin_giveaway_active")
+    builder.button(text="➕ Создать розыгрыш", callback_data="admin_giveaway_create")
+    builder.button(text="📋 Активные розыгрыши", callback_data="admin_giveaway_active")
     builder.button(text="Участники", callback_data="admin_giveaway_participants")
-    builder.button(text="Мои розыгрыши", callback_data="admin_giveaway_mine")
-    builder.button(text="История", callback_data="admin_giveaway_history")
-    builder.button(text="Назад", callback_data="admin_menu")
+    builder.button(text="👤 Мои розыгрыши", callback_data="admin_giveaway_mine")
+    builder.button(text="📚 История и Excel", callback_data="admin_giveaway_history")
+    builder.button(text="⬅️ Назад", callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
+
+
+def _giveaway_status_label(status: str) -> str:
+    labels = {
+        GIVEAWAY_STATUS_DRAFT: "черновик",
+        GIVEAWAY_STATUS_SCHEDULED: "запланирован",
+        GIVEAWAY_STATUS_ACTIVE: "активен",
+        GIVEAWAY_STATUS_FINISHING: "завершается",
+        GIVEAWAY_STATUS_FINISHED: "завершен",
+        GIVEAWAY_STATUS_CANCELLED: "отменен",
+    }
+    return labels.get(status, status)
+
+
+def _giveaway_status_icon(status: str) -> str:
+    icons = {
+        GIVEAWAY_STATUS_SCHEDULED: "🕒",
+        GIVEAWAY_STATUS_ACTIVE: "🟢",
+        GIVEAWAY_STATUS_FINISHING: "🟡",
+        GIVEAWAY_STATUS_FINISHED: "✅",
+        GIVEAWAY_STATUS_CANCELLED: "⛔",
+    }
+    return icons.get(status, "⚪")
+
+
+def _format_admin_giveaway_card(item: Giveaway, *, entries_count: int, required_channels: list[str] | None = None) -> str:
+    required = _format_required_channels(required_channels or [])
+    lines = [
+        f"{_giveaway_status_icon(item.status)} <b>#{item.id} · {escape_html_text(item.prize)}</b>",
+        f"Статус: <b>{escape_html_text(_giveaway_status_label(item.status))}</b>",
+        f"Участники: <b>{entries_count}</b> · мест: <b>{item.winners_count}</b>",
+        f"Финиш: <b>{format_giveaway_end(item.ends_at_utc)} МСК</b>",
+        f"Канал: <code>{escape_html_text(item.channel_id)}</code>",
+        f"Проверка подписки: <b>{escape_html_text(required)}</b>",
+    ]
+    if item.status == GIVEAWAY_STATUS_SCHEDULED:
+        lines.insert(3, f"Публикация: <b>{format_giveaway_publish(item.publish_at_utc)} МСК</b>")
+    if item.replacements_count:
+        lines.append(f"Перевыборов: <b>{item.replacements_count}</b>")
+    return "\n".join(lines)
 
 
 @giveaway_router.message(Command("giveaway_create"))
@@ -1380,7 +1580,12 @@ async def admin_giveaways_menu(callback: types.CallbackQuery):
     if not await _require_admin(callback):
         return
     await callback.message.edit_text(
-        f"Розыгрыши. Основной канал: {GIVEAWAY_CHANNEL_ID}",
+        (
+            "🎁 <b>Розыгрыши</b>\n"
+            f"Основной канал: <code>{escape_html_text(GIVEAWAY_CHANNEL_ID)}</code>\n\n"
+            "Здесь создаются посты, проверяются подписки, смотрятся участники, выгружается Excel и запускается перевыбор победителя."
+        ),
+        parse_mode="HTML",
         reply_markup=_admin_giveaway_menu(),
     )
     await callback.answer()
@@ -1712,32 +1917,26 @@ async def admin_giveaway_active(callback: types.CallbackQuery):
         return
     active = await list_active_giveaways()
     if not active:
-        text = "Активных розыгрышей нет."
+        text = "📋 <b>Активные розыгрыши</b>\n\nСейчас нет активных или запланированных розыгрышей."
     else:
-        lines = ["Активные розыгрыши:"]
+        lines = ["📋 <b>Активные и запланированные розыгрыши</b>"]
         for item in active:
             count = await count_giveaway_entries(item.id)
-            required = _format_required_channels(await get_required_channel_ids(item.id))
-            status_note = "запланирован" if item.status == GIVEAWAY_STATUS_SCHEDULED else "активен"
-            publish_note = (
-                f" · публикация {format_giveaway_publish(item.publish_at_utc)} МСК" if item.status == GIVEAWAY_STATUS_SCHEDULED else ""
-            )
-            lines.append(
-                f"#{item.id}: {status_note} · {item.prize} · участников {count}{publish_note} · до {format_giveaway_end(item.ends_at_utc)} "
-                f"· проверка: {required}"
-            )
+            required = await get_required_channel_ids(item.id)
+            lines.append("")
+            lines.append(_format_admin_giveaway_card(item, entries_count=count, required_channels=required))
         text = "\n".join(lines)
     builder = InlineKeyboardBuilder()
     for item in active[:10]:
         if item.status == GIVEAWAY_STATUS_ACTIVE:
-            builder.button(text=f"Завершить #{item.id}", callback_data=f"giveaway_finish:{item.id}")
-            builder.button(text=f"Кнопка #{item.id}", callback_data=f"giveaway_refresh_markup:{item.id}")
-        builder.button(text=f"Отменить #{item.id}", callback_data=f"giveaway_cancel:{item.id}")
-    builder.button(text="Обновить кнопки активных", callback_data="giveaway_refresh_markups")
-    builder.button(text="Назад", callback_data="admin_giveaways")
+            builder.button(text=f"🏁 Завершить #{item.id}", callback_data=f"giveaway_finish:{item.id}")
+            builder.button(text=f"🔄 Обновить кнопку #{item.id}", callback_data=f"giveaway_refresh_markup:{item.id}")
+        builder.button(text=f"⛔ Отменить #{item.id}", callback_data=f"giveaway_cancel:{item.id}")
+    builder.button(text="🔄 Обновить кнопки всех активных", callback_data="giveaway_refresh_markups")
+    builder.button(text="⬅️ Назад", callback_data="admin_giveaways")
     builder.adjust(2, 2, 1, 1)
     try:
-        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
     except TelegramAPIError as exc:
         if "message is not modified" not in _telegram_error_text(exc).lower():
             raise
@@ -1750,23 +1949,27 @@ async def admin_giveaway_participants(callback: types.CallbackQuery):
         return
     stats = await list_giveaway_participant_stats()
     builder = InlineKeyboardBuilder()
-    builder.button(text="Обновить", callback_data="admin_giveaway_participants")
-    builder.button(text="Назад", callback_data="admin_giveaways")
+    builder.button(text="🔄 Обновить", callback_data="admin_giveaway_participants")
+    builder.button(text="⬅️ Назад", callback_data="admin_giveaways")
     builder.adjust(1)
     if not stats:
-        text = "Активных розыгрышей нет."
+        text = "📈 <b>Участники розыгрышей</b>\n\nАктивных розыгрышей пока нет."
     else:
         total = sum(item.entries_count for item in stats)
-        lines = ["Участники активных розыгрышей:", f"Всего участников: {total}", ""]
+        lines = ["📈 <b>Участники активных розыгрышей</b>", f"Всего участников: <b>{total}</b>"]
         for item in stats:
             required = _format_required_channels(await get_required_channel_ids(item.giveaway_id))
+            lines.append("")
             lines.append(
-                f"#{item.giveaway_id}: {item.prize} · участников {item.entries_count} · "
-                f"мест {item.winners_count} · до {format_giveaway_end(item.ends_at_utc)} · {item.channel_id} · проверка: {required}"
+                f"🎁 <b>#{item.giveaway_id} · {escape_html_text(item.prize)}</b>\n"
+                f"Участники: <b>{item.entries_count}</b> · мест: <b>{item.winners_count}</b>\n"
+                f"Финиш: <b>{format_giveaway_end(item.ends_at_utc)} МСК</b>\n"
+                f"Канал: <code>{escape_html_text(item.channel_id)}</code>\n"
+                f"Проверка подписки: <b>{escape_html_text(required)}</b>"
             )
         text = "\n".join(lines)
     try:
-        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
     except TelegramAPIError as exc:
         if "message is not modified" not in _telegram_error_text(exc).lower():
             raise
@@ -1798,24 +2001,24 @@ async def _render_giveaway_history(
 ) -> None:
     builder = InlineKeyboardBuilder()
     if not items:
-        text = f"{title}\nПока пусто."
+        text = f"<b>{escape_html_text(title)}</b>\nПока пусто."
     else:
-        lines = [title]
+        lines = [f"<b>{escape_html_text(title)}</b>"]
         for item in items:
             count = await count_giveaway_entries(item.id)
-            lines.append(
-                f"#{item.id}: {item.status} · {item.channel_id} · участников {count} · мест {item.winners_count} · до {format_giveaway_end(item.ends_at_utc)}"
-            )
-            builder.button(text=f"CSV #{item.id}", callback_data=f"giveaway_export:{item.id}")
+            required = await get_required_channel_ids(item.id)
+            lines.append("")
+            lines.append(_format_admin_giveaway_card(item, entries_count=count, required_channels=required))
+            builder.button(text=f"📊 Excel #{item.id}", callback_data=f"giveaway_export:{item.id}")
             if item.status == GIVEAWAY_STATUS_FINISHED:
-                builder.button(text=f"Перевыбор #{item.id}", callback_data=f"giveaway_reroll_menu:{item.id}")
-            builder.button(text=f"Повторить #{item.id}", callback_data=f"giveaway_repeat:{item.id}")
+                builder.button(text=f"🎲 Перевыбор #{item.id}", callback_data=f"giveaway_reroll_menu:{item.id}")
+            builder.button(text=f"🔁 Повторить #{item.id}", callback_data=f"giveaway_repeat:{item.id}")
         text = "\n".join(lines)
-    builder.button(text="Обновить", callback_data=refresh_callback)
-    builder.button(text="Назад", callback_data="admin_giveaways")
+    builder.button(text="🔄 Обновить", callback_data=refresh_callback)
+    builder.button(text="⬅️ Назад", callback_data="admin_giveaways")
     builder.adjust(2, 1, 1)
     try:
-        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
     except TelegramAPIError as exc:
         if "message is not modified" not in _telegram_error_text(exc).lower():
             raise
@@ -1827,13 +2030,13 @@ async def admin_giveaway_export(callback: types.CallbackQuery):
     if not await _require_admin(callback):
         return
     giveaway_id = int(callback.data.split(":", 1)[1])
-    csv_text = await build_giveaway_entries_csv(giveaway_id)
-    filename = f"giveaway_{giveaway_id}_entries.csv"
+    xlsx_bytes = await build_giveaway_entries_xlsx(giveaway_id)
+    filename = f"giveaway_{giveaway_id}_entries.xlsx"
     await callback.message.answer_document(
-        types.BufferedInputFile(csv_text.encode("utf-8-sig"), filename=filename),
-        caption=f"Участники розыгрыша #{giveaway_id}",
+        types.BufferedInputFile(xlsx_bytes, filename=filename),
+        caption=f"Excel-таблица участников розыгрыша #{giveaway_id}",
     )
-    await callback.answer("CSV готов.")
+    await callback.answer("XLSX готов.")
 
 
 @giveaway_router.callback_query(F.data.startswith("giveaway_repeat:"))
