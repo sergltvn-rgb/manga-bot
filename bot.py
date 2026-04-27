@@ -4795,6 +4795,9 @@ from services.ai_chat_api import handle_ai_chat  # noqa: E402,F401
 from services.telemetry_api import handle_telemetry_post  # noqa: E402,F401
 
 
+from services.giveaway_webapp_api import handle_giveaway_status  # noqa: E402,F401
+
+
 # Reader API handlers вынесены в services/reader_api.py (Фаза 3 шаг 10).
 from services.reader_api import handle_chapter_content, handle_reader_data  # noqa: E402,F401
 
@@ -5266,17 +5269,20 @@ def create_webapp_api_app() -> aiohttp.web.Application:
         middlewares=[api_security_middleware],
         client_max_size=API_MAX_BODY_BYTES,
     )
+    app["bot"] = bot
     app.on_response_prepare.append(apply_webapp_response_headers)
     app.on_cleanup.append(close_webapp_resources)
 
     app.router.add_get("/api/reader", handle_reader_data)
     app.router.add_get("/api/chapter-content", handle_chapter_content)
     app.router.add_post("/api/telemetry", handle_telemetry_post)
+    app.router.add_get("/api/giveaway/status", handle_giveaway_status)
 
     app.router.add_get("/", handle_root_redirect)
     app.router.add_options("/api/reader", handle_cors_preflight)
     app.router.add_options("/api/chapter-content", handle_cors_preflight)
     app.router.add_options("/api/telemetry", handle_cors_preflight)
+    app.router.add_options("/api/giveaway/status", handle_cors_preflight)
 
     app.router.add_get("/api/likes", handle_likes_get)
     app.router.add_post("/api/likes", handle_likes_post)

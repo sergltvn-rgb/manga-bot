@@ -7,6 +7,19 @@ const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp 
 tg.expand();
 tg.ready();
 
+const initialSearchParams = new URLSearchParams(window.location.search);
+const initialStartParam = tg.initDataUnsafe?.start_param || initialSearchParams.get('tgWebAppStartParam') || '';
+const giveawayStartMatch = String(initialStartParam).match(/^giveaway_(\d+)$/);
+if (giveawayStartMatch) {
+    const target = new URL('giveaway.html', window.location.href);
+    target.searchParams.set('giveaway_id', giveawayStartMatch[1]);
+    for (const key of ['api', 'rev']) {
+        const value = initialSearchParams.get(key);
+        if (value) target.searchParams.set(key, value);
+    }
+    window.location.replace(target.toString());
+}
+
 function openChannel() {
     if (window.Telegram && window.Telegram.WebApp) {
         window.Telegram.WebApp.openTelegramLink('https://t.me/alya_novel');

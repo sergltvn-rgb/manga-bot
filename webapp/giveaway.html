@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1082;&#1072; &#1088;&#1086;&#1079;&#1099;&#1075;&#1088;&#1099;&#1096;&#1072;</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg-a: #9fcb7f;
+      --bg-b: #7fb66c;
+      --surface: #ffffff;
+      --text: #1d1f24;
+      --muted: #667085;
+      --accent: #43bfb4;
+      --danger: #ef4444;
+      --line: rgba(29, 31, 36, 0.1);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100svh;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.28), transparent 30%),
+        linear-gradient(145deg, var(--bg-a), var(--bg-b));
+    }
+
+    .shell {
+      min-height: 100svh;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      padding: max(28px, env(safe-area-inset-top)) 18px max(16px, env(safe-area-inset-bottom));
+      gap: 20px;
+    }
+
+    .stage {
+      display: grid;
+      place-items: center;
+    }
+
+    .panel {
+      width: min(100%, 432px);
+      background: var(--surface);
+      border-radius: 14px;
+      padding: 34px 24px 28px;
+      box-shadow: 0 18px 50px rgba(34, 67, 27, 0.18);
+      text-align: center;
+    }
+
+    .dice {
+      width: 112px;
+      height: 112px;
+      margin: 0 auto 26px;
+      border-radius: 26px;
+      position: relative;
+      background: linear-gradient(145deg, #f8fafc, #cfd5df);
+      box-shadow: inset -8px -10px 18px rgba(37, 48, 69, 0.16), inset 8px 8px 16px #fff, 0 10px 0 rgba(31, 41, 55, 0.16);
+      transform: rotate(7deg);
+      transform-origin: 50% 62%;
+      animation: dice-roll 2.8s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+    }
+
+    .pip {
+      width: 14px;
+      height: 14px;
+      border-radius: 999px;
+      background: #1e232b;
+      position: absolute;
+      box-shadow: inset 0 2px 2px rgba(255, 255, 255, 0.35);
+    }
+
+    .pip.one { left: 27px; top: 27px; }
+    .pip.two { right: 27px; top: 27px; }
+    .pip.three { left: 49px; top: 49px; background: var(--danger); }
+    .pip.four { left: 27px; bottom: 27px; }
+    .pip.five { right: 27px; bottom: 27px; }
+
+    .pip.three {
+      animation: red-pip-pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes dice-roll {
+      0%, 72%, 100% { transform: translateY(0) rotate(7deg); }
+      8% { transform: translateY(-8px) rotate(-12deg); }
+      18% { transform: translateY(2px) rotate(16deg); }
+      28% { transform: translateY(-4px) rotate(-6deg); }
+      38% { transform: translateY(0) rotate(7deg); }
+    }
+
+    @keyframes red-pip-pulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(239, 68, 68, 0); }
+      50% { transform: scale(1.22); box-shadow: 0 0 0 7px rgba(239, 68, 68, 0.14); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .dice,
+      .pip.three {
+        animation: none;
+      }
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: 22px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .status {
+      margin-top: 20px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .channel {
+      min-height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      color: var(--text);
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      font-weight: 650;
+      font-size: 14px;
+    }
+
+    .channel span:first-child {
+      overflow-wrap: anywhere;
+      text-align: left;
+    }
+
+    .channel span:last-child {
+      color: var(--accent);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .actions {
+      width: min(100%, 452px);
+      margin: 0 auto;
+      display: grid;
+      gap: 10px;
+    }
+
+    button {
+      width: 100%;
+      min-height: 50px;
+      border: 0;
+      border-radius: 8px;
+      color: #fff;
+      background: var(--accent);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button.secondary {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.82);
+    }
+
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="stage">
+      <div class="panel">
+        <div class="dice" aria-hidden="true">
+          <i class="pip one"></i>
+          <i class="pip two"></i>
+          <i class="pip three"></i>
+          <i class="pip four"></i>
+          <i class="pip five"></i>
+        </div>
+        <h1 id="title">&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1103;&#1077;&#1084; &#1087;&#1086;&#1076;&#1087;&#1080;&#1089;&#1082;&#1091;...</h1>
+        <p id="text">&#1069;&#1090;&#1086; &#1079;&#1072;&#1081;&#1084;&#1077;&#1090; &#1087;&#1072;&#1088;&#1091; &#1089;&#1077;&#1082;&#1091;&#1085;&#1076;.</p>
+        <div id="channels" class="status hidden"></div>
+      </div>
+    </section>
+    <section class="actions">
+      <button id="retry" class="secondary hidden" type="button">&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1080;&#1090;&#1100; &#1089;&#1085;&#1086;&#1074;&#1072;</button>
+      <button id="close" type="button">&#1047;&#1072;&#1082;&#1088;&#1099;&#1090;&#1100;</button>
+    </section>
+  </main>
+
+  <script>
+    const tg = window.Telegram?.WebApp || null;
+    const params = new URLSearchParams(location.search);
+    const startParam = tg?.initDataUnsafe?.start_param || params.get('tgWebAppStartParam') || '';
+    const giveawayId = params.get('giveaway_id') || (startParam.match(/^giveaway_(\d+)$/)?.[1] || '');
+    const apiBase = (params.get('api') || location.origin).replace(/\/$/, '');
+
+    const copy = {
+      checkingTitle: '\u041f\u0440\u043e\u0432\u0435\u0440\u044f\u0435\u043c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443...',
+      checkingText: '\u042d\u0442\u043e \u0437\u0430\u0439\u043c\u0435\u0442 \u043f\u0430\u0440\u0443 \u0441\u0435\u043a\u0443\u043d\u0434.',
+      notFoundTitle: '\u0420\u043e\u0437\u044b\u0433\u0440\u044b\u0448 \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d',
+      notFoundText: '\u041e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u043f\u043e \u043a\u043d\u043e\u043f\u043a\u0435 \u0438\u0437 \u043f\u043e\u0441\u0442\u0430 \u0440\u043e\u0437\u044b\u0433\u0440\u044b\u0448\u0430.',
+      telegramTitle: '\u041d\u0443\u0436\u0435\u043d Telegram Mini App',
+      telegramText: '\u041e\u0442\u043a\u0440\u043e\u0439\u0442\u0435 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u0447\u0435\u0440\u0435\u0437 \u043a\u043d\u043e\u043f\u043a\u0443 \u0432 Telegram, \u0447\u0442\u043e\u0431\u044b \u0431\u043e\u0442 \u043f\u043e\u043d\u044f\u043b, \u043a\u0442\u043e \u0443\u0447\u0430\u0441\u0442\u0432\u0443\u0435\u0442.',
+      failedTitle: '\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0440\u043e\u0437\u044b\u0433\u0440\u044b\u0448',
+      failedText: '\u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u043e\u0442\u043a\u0440\u044b\u0442\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0443 \u0437\u0430\u043d\u043e\u0432\u043e \u0438\u0437 \u043f\u043e\u0441\u0442\u0430.',
+      endedTitle: '\u0420\u043e\u0437\u044b\u0433\u0440\u044b\u0448 \u0443\u0436\u0435 \u0437\u0430\u0432\u0435\u0440\u0448\u0435\u043d',
+      endedText: '\u041a\u043d\u043e\u043f\u043a\u0430 \u0443\u0447\u0430\u0441\u0442\u0438\u044f \u0432 \u043f\u043e\u0441\u0442\u0435 \u0431\u043e\u043b\u044c\u0448\u0435 \u043d\u0435 \u043f\u0440\u0438\u043d\u0438\u043c\u0430\u0435\u0442 \u043d\u043e\u0432\u044b\u0445 \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432.',
+      joinedTitle: '\u0412\u044b \u0443\u0436\u0435 \u0443\u0447\u0430\u0441\u0442\u0432\u0443\u0435\u0442\u0435',
+      joinedText: '\u0417\u0430\u043f\u0438\u0441\u044c \u043d\u0430\u0439\u0434\u0435\u043d\u0430, \u043f\u043e\u0432\u0442\u043e\u0440\u043d\u043e \u043d\u0430\u0436\u0438\u043c\u0430\u0442\u044c \u043a\u043d\u043e\u043f\u043a\u0443 \u0443\u0447\u0430\u0441\u0442\u0438\u044f \u043d\u0435 \u043d\u0443\u0436\u043d\u043e.',
+      allowedTitle: '\u041f\u043e\u0434\u043f\u0438\u0441\u043a\u0430 \u043f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0430',
+      allowedText: '\u0412\u0435\u0440\u043d\u0438\u0442\u0435\u0441\u044c \u043a \u043f\u043e\u0441\u0442\u0443 \u0438 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 "\u0423\u0447\u0430\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c", \u0447\u0442\u043e\u0431\u044b \u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044c \u0432\u0445\u043e\u0434 \u0432 \u0440\u043e\u0437\u044b\u0433\u0440\u044b\u0448.',
+      missingTitle: '\u0412\u044b \u043d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u044b \u043d\u0430 \u0432\u0441\u0435 \u043a\u0430\u043d\u0430\u043b\u044b',
+      missingText: '\u041f\u043e\u0434\u043f\u0438\u0448\u0438\u0442\u0435\u0441\u044c \u043d\u0430 \u043a\u0430\u043d\u0430\u043b\u044b \u043d\u0438\u0436\u0435 \u0438 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0441\u043d\u043e\u0432\u0430".',
+      unavailableTitle: '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430',
+      unavailableText: '\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u0441\u043e\u0435\u0434\u0438\u043d\u0435\u043d\u0438\u0435 \u0438 \u043f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0435 \u0440\u0430\u0437.',
+      open: '\u041e\u0442\u043a\u0440\u044b\u0442\u044c',
+    };
+
+    if (tg) {
+      tg.ready();
+      tg.expand();
+    }
+
+    const title = document.getElementById('title');
+    const text = document.getElementById('text');
+    const channels = document.getElementById('channels');
+    const retry = document.getElementById('retry');
+    const closeBtn = document.getElementById('close');
+
+    function setCopy(nextTitle, nextText) {
+      title.textContent = nextTitle;
+      text.textContent = nextText;
+    }
+
+    function openUrl(url) {
+      if (tg && typeof tg.openTelegramLink === 'function' && /^https:\/\/t\.me\//i.test(url)) {
+        tg.openTelegramLink(url);
+      } else {
+        location.href = url;
+      }
+    }
+
+    function renderChannels(list) {
+      channels.innerHTML = '';
+      channels.classList.toggle('hidden', !list.length);
+      for (const item of list) {
+        const link = document.createElement('a');
+        const channelLabel = document.createElement('span');
+        const actionLabel = document.createElement('span');
+        link.className = 'channel';
+        link.href = item.url;
+        channelLabel.textContent = item.title || item.channel_id;
+        actionLabel.textContent = copy.open;
+        link.append(channelLabel, actionLabel);
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          openUrl(item.url);
+        });
+        channels.appendChild(link);
+      }
+    }
+
+    async function loadStatus() {
+      retry.classList.add('hidden');
+      renderChannels([]);
+      setCopy(copy.checkingTitle, copy.checkingText);
+      if (!giveawayId) {
+        setCopy(copy.notFoundTitle, copy.notFoundText);
+        return;
+      }
+      if (!tg?.initData) {
+        setCopy(copy.telegramTitle, copy.telegramText);
+        return;
+      }
+      try {
+        const response = await fetch(`${apiBase}/api/giveaway/status?giveaway_id=${encodeURIComponent(giveawayId)}`, {
+          headers: { Authorization: `tma ${tg.initData}` },
+          cache: 'no-store',
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          setCopy(copy.failedTitle, copy.failedText);
+          retry.classList.remove('hidden');
+          return;
+        }
+        if (!data.is_active) {
+          setCopy(copy.endedTitle, copy.endedText);
+          return;
+        }
+        if (data.joined) {
+          setCopy(copy.joinedTitle, copy.joinedText);
+          return;
+        }
+        if (data.is_allowed) {
+          setCopy(copy.allowedTitle, copy.allowedText);
+          retry.classList.remove('hidden');
+          return;
+        }
+        const required = Array.isArray(data.required_channels) ? data.required_channels : [];
+        const missingIds = Array.isArray(data.missing_channels) ? data.missing_channels : [];
+        const missing = required.filter((item) => missingIds.includes(item.channel_id));
+        setCopy(copy.missingTitle, copy.missingText);
+        renderChannels(missing);
+        retry.classList.remove('hidden');
+      } catch (error) {
+        setCopy(copy.unavailableTitle, copy.unavailableText);
+        retry.classList.remove('hidden');
+      }
+    }
+
+    retry.addEventListener('click', loadStatus);
+    closeBtn.addEventListener('click', () => {
+      if (tg && typeof tg.close === 'function') tg.close();
+      else history.length > 1 ? history.back() : window.close();
+    });
+
+    loadStatus();
+  </script>
+</body>
+</html>

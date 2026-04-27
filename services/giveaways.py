@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
+from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiosqlite
@@ -675,6 +676,8 @@ def _format_publish_error(exc: Exception) -> str:
         hint = "Бот не видит канал. Проверьте @username/-100 id и добавьте бота администратором канала."
     elif "not enough rights" in lowered or "not enough privileges" in lowered or "need administrator" in lowered:
         hint = "У бота нет прав публикации. Выдайте ему права администратора с публикацией постов."
+    elif "member list is inaccessible" in lowered:
+        hint = "\u0411\u043e\u0442 \u043d\u0435 \u043c\u043e\u0436\u0435\u0442 \u043f\u0440\u043e\u0432\u0435\u0440\u044f\u0442\u044c \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432 \u044d\u0442\u043e\u0433\u043e \u043a\u0430\u043d\u0430\u043b\u0430. \u0414\u043e\u0431\u0430\u0432\u044c\u0442\u0435 \u0431\u043e\u0442\u0430 \u0430\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440\u043e\u043c \u043a\u0430\u043d\u0430\u043b\u0430, \u0438\u043d\u0430\u0447\u0435 Telegram \u043d\u0435 \u0434\u0430\u0441\u0442 \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0443."
     elif "can't parse entities" in lowered or "entities" in lowered:
         hint = "Telegram не принял разметку текста. Попробуйте убрать нестандартные HTML-символы."
     elif "message is too long" in lowered or "caption is too long" in lowered:
@@ -707,6 +710,36 @@ def _format_required_channels(channel_ids: list[str]) -> str:
     return ", ".join(channel_ids) if channel_ids else "нет"
 
 
+def build_giveaway_mini_app_deeplink(bot_username: str, giveaway_id: int) -> str:
+    username = str(bot_username or "").lstrip("@")
+    return f"https://t.me/{username}?startapp={quote(f'giveaway_{int(giveaway_id)}')}"
+
+
+async def get_giveaway_webapp_status(bot, giveaway_id: int, user_id: int) -> dict:
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return {"ok": False, "status": "not_found", "giveaway_id": giveaway_id}
+
+    required_channel_ids = await get_required_channel_ids(giveaway.id)
+    subscription = await check_giveaway_required_subscriptions(bot, giveaway, required_channel_ids, user_id)
+    required_channels = [{"channel_id": giveaway.channel_id, "title": giveaway.channel_id, "url": _channel_url(giveaway.channel_id)}] + [
+        {"channel_id": item.channel_id, "title": item.title, "url": item.url} for item in await get_giveaway_required_channels(giveaway.id)
+    ]
+    return {
+        "ok": True,
+        "giveaway_id": giveaway.id,
+        "status": giveaway.status,
+        "is_active": giveaway.status == GIVEAWAY_STATUS_ACTIVE,
+        "is_allowed": subscription.is_allowed,
+        "missing_channels": subscription.missing_channels,
+        "required_channels": required_channels,
+        "joined": await has_giveaway_entry(giveaway.id, user_id),
+        "ends_at": format_giveaway_end(giveaway.ends_at_utc),
+        "winners_count": giveaway.winners_count,
+        "prize": giveaway.prize,
+    }
+
+
 def _giveaway_post_text(giveaway: Giveaway, required_channel_ids: list[str] | None = None) -> str:
     prizes = _format_prizes_block(giveaway.prize, giveaway.winners_count)
     required = _normalize_required_channel_ids(required_channel_ids or [], primary_channel_id=giveaway.channel_id)
@@ -724,9 +757,11 @@ def _giveaway_post_text(giveaway: Giveaway, required_channel_ids: list[str] | No
     )
 
 
-def _participation_markup(giveaway_id: int) -> types.InlineKeyboardMarkup:
+def _participation_markup(giveaway_id: int, *, mini_app_url: str | None = None) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Участвовать", callback_data=f"giveaway_join:{giveaway_id}")
+    if mini_app_url:
+        builder.button(text="Проверить подписку", url=mini_app_url)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -758,7 +793,13 @@ async def publish_giveaway_post(bot, giveaway: Giveaway, required_channel_ids: l
         except aiosqlite.Error:
             required_channel_ids = []
     text = _giveaway_post_text(giveaway, required_channel_ids)
-    markup = _participation_markup(giveaway.id)
+    mini_app_url = None
+    try:
+        me = await bot.get_me()
+        mini_app_url = build_giveaway_mini_app_deeplink(me.username, giveaway.id)
+    except Exception as exc:  # noqa: BLE001 - regular participation button must still publish.
+        logging.debug("giveaway: failed to build mini app link: %s", exc)
+    markup = _participation_markup(giveaway.id, mini_app_url=mini_app_url)
     if giveaway.media_type == "photo":
         msg = await bot.send_photo(
             chat_id=giveaway.channel_id, photo=giveaway.media_file_id, caption=text, parse_mode="HTML", reply_markup=markup

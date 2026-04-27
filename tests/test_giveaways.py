@@ -324,6 +324,45 @@ class TestGiveawayWinnerSelection:
         assert result.is_allowed is False
         assert result.missing_channels == ["@extra_channel"]
 
+    def test_webapp_status_reports_missing_channels_and_join_state(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class Member:
+            status = "member"
+
+        class Left:
+            status = "left"
+
+        class BotStub:
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member() if chat_id == "@main_channel" else Left()
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 10))
+        run(giveaways.set_giveaway_required_channels(giveaway_id, ["@extra_channel"]))
+
+        status = run(giveaways.get_giveaway_webapp_status(BotStub(), giveaway_id, 1001))
+
+        assert status["status"] == "active"
+        assert status["is_allowed"] is False
+        assert status["joined"] is False
+        assert status["missing_channels"] == ["@extra_channel"]
+
 
 class TestGiveawayPublishing:
     def test_publish_text_giveaway_uses_send_message(self):
@@ -393,6 +432,11 @@ class TestGiveawayPublishing:
         assert message_id == 56
         assert bot.calls[0][0] == "send_photo"
         assert bot.calls[0][1]["photo"] == "photo-file"
+
+    def test_mini_app_deeplink_uses_startapp_payload(self):
+        from services.giveaways import build_giveaway_mini_app_deeplink
+
+        assert build_giveaway_mini_app_deeplink("Alyamangapage_bot", 42) == "https://t.me/Alyamangapage_bot?startapp=giveaway_42"
 
     def test_finalize_sends_result_without_editing_original_post(self, tmp_path, monkeypatch):
         import database
