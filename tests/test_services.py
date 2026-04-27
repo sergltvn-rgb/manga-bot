@@ -378,6 +378,15 @@ class TestWebappMiddleware:
         assert callable(apply_webapp_response_headers)
         assert callable(_response_is_compressible)
 
+    def test_giveaway_html_revalidates_cache(self):
+        from types import SimpleNamespace
+
+        from services.webapp_middleware import _webapp_cache_control_for_request
+
+        request = SimpleNamespace(path="/webapp/giveaway.html", rel_url=SimpleNamespace(query={}))
+
+        assert _webapp_cache_control_for_request(request) == "no-cache"
+
 
 # --- services.telegraph ---
 
