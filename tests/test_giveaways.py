@@ -176,6 +176,34 @@ class TestGiveawayDb:
 
         assert [(item.giveaway_id, item.entries_count) for item in stats] == [(first_id, 2), (second_id, 0)]
 
+    def test_required_channels_roundtrip_and_old_giveaway_defaults_to_empty(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+
+        assert run(giveaways.get_giveaway_required_channels(giveaway_id)) == []
+
+        run(giveaways.set_giveaway_required_channels(giveaway_id, ["@extra_one", "@extra_two"]))
+        channels = run(giveaways.get_giveaway_required_channels(giveaway_id))
+
+        assert [item.channel_id for item in channels] == ["@extra_one", "@extra_two"]
+        assert [item.title for item in channels] == ["@extra_one", "@extra_two"]
+
     def test_verification_challenge_passes_only_correct_answer(self, tmp_path, monkeypatch):
         import database
 
@@ -266,6 +294,36 @@ class TestGiveawayWinnerSelection:
 
         assert run(is_channel_subscriber(BotStub(), "@alya_novel", 100)) is True
 
+    def test_required_subscription_check_reports_missing_extra_channels(self):
+        from services.giveaways import Giveaway, check_giveaway_required_subscriptions
+
+        class Member:
+            status = "member"
+
+        class Left:
+            status = "left"
+
+        class BotStub:
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member() if chat_id == "@main_channel" else Left()
+
+        giveaway = Giveaway(
+            id=1,
+            status="active",
+            channel_id="@main_channel",
+            message_id=10,
+            prize="Prize",
+            post_text="Post",
+            winners_count=1,
+            ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+            created_by=6210312655,
+        )
+
+        result = run(check_giveaway_required_subscriptions(BotStub(), giveaway, ["@extra_channel"], 1001))
+
+        assert result.is_allowed is False
+        assert result.missing_channels == ["@extra_channel"]
+
 
 class TestGiveawayPublishing:
     def test_publish_text_giveaway_uses_send_message(self):
@@ -335,6 +393,51 @@ class TestGiveawayPublishing:
         assert message_id == 56
         assert bot.calls[0][0] == "send_photo"
         assert bot.calls[0][1]["photo"] == "photo-file"
+
+    def test_finalize_sends_result_without_editing_original_post(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class Member:
+            status = "member"
+
+        class BotStub:
+            def __init__(self):
+                self.calls = []
+
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member()
+
+            async def send_message(self, **kwargs):
+                self.calls.append(("send_message", kwargs))
+                return type("Msg", (), {"message_id": 77})()
+
+            async def edit_message_reply_markup(self, **kwargs):
+                self.calls.append(("edit_message_reply_markup", kwargs))
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 24, 11, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 123))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        giveaway = run(giveaways.get_giveaway(giveaway_id))
+        bot = BotStub()
+
+        assert run(giveaways.finalize_giveaway(bot, giveaway)) is True
+
+        assert [call[0] for call in bot.calls] == ["send_message"]
 
     def test_preview_markup_has_publish_and_edit_buttons(self):
         from services.giveaways import _preview_markup

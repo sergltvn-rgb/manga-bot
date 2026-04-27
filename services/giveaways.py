@@ -95,6 +95,20 @@ class GiveawayParticipantStats:
 
 
 @dataclass(frozen=True)
+class GiveawayRequiredChannel:
+    giveaway_id: int
+    channel_id: str
+    title: str
+    url: str
+
+
+@dataclass(frozen=True)
+class GiveawaySubscriptionCheck:
+    is_allowed: bool
+    missing_channels: list[str]
+
+
+@dataclass(frozen=True)
 class WinnerSelectionResult:
     winners: list[GiveawayEntry]
     replaced_count: int
@@ -109,6 +123,7 @@ class GiveawayVerificationChallenge:
 
 class GiveawayCreate(StatesGroup):
     waiting_for_channel = State()
+    waiting_for_required_channels = State()
     waiting_for_prize = State()
     waiting_for_end = State()
     waiting_for_winners = State()
@@ -169,6 +184,29 @@ def _channel_url(channel_id: str) -> str:
     if channel_id == GIVEAWAY_CHANNEL_ID:
         return GIVEAWAY_CHANNEL_URL
     return str(channel_id)
+
+
+def parse_required_channels(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    parts = [part.strip() for part in re.split(r"[\s,;]+", text) if part.strip()]
+    invalid = [part for part in parts if not (part.startswith("@") or part.startswith("-100"))]
+    if invalid:
+        raise GiveawayValidationError("Каналы должны быть в формате @channel или -100... Можно отправить /skip.")
+    return _normalize_required_channel_ids(parts)
+
+
+def _normalize_required_channel_ids(channel_ids: list[str] | tuple[str, ...], *, primary_channel_id: str | None = None) -> list[str]:
+    seen = {primary_channel_id} if primary_channel_id else set()
+    normalized: list[str] = []
+    for raw in channel_ids:
+        channel_id = str(raw or "").strip()
+        if not channel_id or channel_id in seen:
+            continue
+        seen.add(channel_id)
+        normalized.append(channel_id)
+    return normalized
 
 
 def split_place_prizes(raw: str) -> list[str]:
@@ -418,6 +456,47 @@ async def count_giveaway_entries(giveaway_id: int) -> int:
             return int(row[0] if row else 0)
 
 
+async def set_giveaway_required_channels(giveaway_id: int, channel_ids: list[str]) -> None:
+    normalized = _normalize_required_channel_ids(channel_ids)
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        await db.execute("DELETE FROM giveaway_required_channels WHERE giveaway_id = ?", (giveaway_id,))
+        await db.executemany(
+            """
+            INSERT INTO giveaway_required_channels (giveaway_id, channel_id, title, url)
+            VALUES (?, ?, ?, ?)
+            """,
+            [(giveaway_id, channel_id, channel_id, _channel_url(channel_id)) for channel_id in normalized],
+        )
+        await db.commit()
+
+
+async def get_giveaway_required_channels(giveaway_id: int) -> list[GiveawayRequiredChannel]:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT giveaway_id, channel_id, title, url
+            FROM giveaway_required_channels
+            WHERE giveaway_id = ?
+            ORDER BY rowid
+            """,
+            (giveaway_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [
+        GiveawayRequiredChannel(
+            giveaway_id=int(row[0]),
+            channel_id=str(row[1]),
+            title=str(row[2]),
+            url=str(row[3]),
+        )
+        for row in rows
+    ]
+
+
+async def get_required_channel_ids(giveaway_id: int) -> list[str]:
+    return [item.channel_id for item in await get_giveaway_required_channels(giveaway_id)]
+
+
 async def list_giveaway_participant_stats() -> list[GiveawayParticipantStats]:
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(
@@ -554,6 +633,36 @@ async def is_channel_subscriber(bot, channel_id: str, user_id: int) -> bool:
     return str(status) in JOINED_STATUSES
 
 
+async def validate_subscription_channel(bot, channel_id: str) -> None:
+    try:
+        await bot.get_chat(chat_id=channel_id)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id=channel_id, user_id=me.id)
+    except TelegramAPIError as exc:
+        raise GiveawayPublishError(_format_publish_error(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 - keep diagnostics visible to the admin.
+        raise GiveawayPublishError(_format_publish_error(exc)) from exc
+
+    raw_status = getattr(member, "status", "")
+    status = str(getattr(raw_status, "value", raw_status))
+    if status not in {"administrator", "creator"}:
+        raise GiveawayPublishError(f"Бот должен быть администратором канала {channel_id}, чтобы проверять подписку участников.")
+
+
+async def check_giveaway_required_subscriptions(
+    bot,
+    giveaway: Giveaway,
+    required_channel_ids: list[str],
+    user_id: int,
+) -> GiveawaySubscriptionCheck:
+    channels = [giveaway.channel_id] + _normalize_required_channel_ids(required_channel_ids, primary_channel_id=giveaway.channel_id)
+    missing = []
+    for channel_id in channels:
+        if not await is_channel_subscriber(bot, channel_id, user_id):
+            missing.append(channel_id)
+    return GiveawaySubscriptionCheck(is_allowed=not missing, missing_channels=missing)
+
+
 def _telegram_error_text(exc: Exception) -> str:
     message = getattr(exc, "message", None) or str(exc)
     return str(message).strip() or type(exc).__name__
@@ -594,14 +703,23 @@ async def validate_publish_channel(bot, channel_id: str) -> None:
         raise GiveawayPublishError("Бот администратор канала, но без права публикации постов.")
 
 
-def _giveaway_post_text(giveaway: Giveaway) -> str:
+def _format_required_channels(channel_ids: list[str]) -> str:
+    return ", ".join(channel_ids) if channel_ids else "нет"
+
+
+def _giveaway_post_text(giveaway: Giveaway, required_channel_ids: list[str] | None = None) -> str:
     prizes = _format_prizes_block(giveaway.prize, giveaway.winners_count)
+    required = _normalize_required_channel_ids(required_channel_ids or [], primary_channel_id=giveaway.channel_id)
+    required_line = ""
+    if required:
+        required_line = f"\n📌 <b>Доп. подписка:</b> {escape_html_text(_format_required_channels(required))}\n"
     return (
         f"🎁 <b>Розыгрыш</b>\n\n"
         f"{escape_html_text(giveaway.post_text)}\n\n"
         f"🏆 <b>Призы:</b>\n{escape_html_text(prizes)}\n\n"
         f"👥 <b>Победителей:</b> {giveaway.winners_count}\n"
-        f"⏰ <b>Итоги:</b> {format_giveaway_end(giveaway.ends_at_utc)} МСК\n\n"
+        f"⏰ <b>Итоги:</b> {format_giveaway_end(giveaway.ends_at_utc)} МСК\n"
+        f"{required_line}\n"
         "Нажмите кнопку ниже, чтобы участвовать."
     )
 
@@ -618,6 +736,7 @@ def _preview_markup() -> types.InlineKeyboardMarkup:
     builder.button(text="Опубликовать", callback_data="giveaway_preview_publish")
     builder.button(text="Изменить текст", callback_data="giveaway_preview_edit_text")
     builder.button(text="Изменить призы", callback_data="giveaway_preview_edit_prizes")
+    builder.button(text="Изменить каналы проверки", callback_data="giveaway_preview_edit_required")
     builder.button(text="Изменить медиа", callback_data="giveaway_preview_edit_media")
     builder.button(text="Отменить", callback_data="giveaway_preview_cancel")
     builder.adjust(1)
@@ -632,8 +751,13 @@ def _verification_markup(giveaway_id: int, options: list[str]) -> types.InlineKe
     return builder.as_markup()
 
 
-async def publish_giveaway_post(bot, giveaway: Giveaway) -> int:
-    text = _giveaway_post_text(giveaway)
+async def publish_giveaway_post(bot, giveaway: Giveaway, required_channel_ids: list[str] | None = None) -> int:
+    if required_channel_ids is None:
+        try:
+            required_channel_ids = await get_required_channel_ids(giveaway.id)
+        except aiosqlite.Error:
+            required_channel_ids = []
+    text = _giveaway_post_text(giveaway, required_channel_ids)
     markup = _participation_markup(giveaway.id)
     if giveaway.media_type == "photo":
         msg = await bot.send_photo(
@@ -731,8 +855,12 @@ async def create_and_publish_giveaway(
     post_text: str,
     media_type: str | None = None,
     media_file_id: str | None = None,
+    required_channel_ids: list[str] | None = None,
 ) -> int:
     await validate_publish_channel(bot, channel_id)
+    normalized_required_channel_ids = _normalize_required_channel_ids(required_channel_ids or [], primary_channel_id=channel_id)
+    for required_channel_id in normalized_required_channel_ids:
+        await validate_subscription_channel(bot, required_channel_id)
     giveaway_id = await create_giveaway(
         channel_id=channel_id,
         prize=prize,
@@ -743,11 +871,12 @@ async def create_and_publish_giveaway(
         media_type=media_type,
         media_file_id=media_file_id,
     )
+    await set_giveaway_required_channels(giveaway_id, normalized_required_channel_ids)
     giveaway = await get_giveaway(giveaway_id)
     if giveaway is None:
         raise RuntimeError("Giveaway was not created.")
     try:
-        message_id = await publish_giveaway_post(bot, giveaway)
+        message_id = await publish_giveaway_post(bot, giveaway, normalized_required_channel_ids)
     except Exception:
         await cancel_giveaway(giveaway_id)
         raise
@@ -773,9 +902,11 @@ async def finalize_giveaway(bot, giveaway: Giveaway) -> bool:
     if not await claim_giveaway_finishing(giveaway.id):
         return False
     entries = await get_giveaway_entries(giveaway.id)
+    required_channel_ids = await get_required_channel_ids(giveaway.id)
 
     async def is_subscribed(user_id: int) -> bool:
-        return await is_channel_subscriber(bot, giveaway.channel_id, user_id)
+        result = await check_giveaway_required_subscriptions(bot, giveaway, required_channel_ids, user_id)
+        return result.is_allowed
 
     result = await select_winners(entries, giveaway.winners_count, is_subscribed=is_subscribed)
     await mark_winners(giveaway.id, result.winners)
@@ -800,11 +931,6 @@ async def finalize_giveaway(bot, giveaway: Giveaway) -> bool:
             "Победителей нет: не нашлось участников с актуальной подпиской."
         )
     await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
-    if giveaway.message_id:
-        try:
-            await bot.edit_message_reply_markup(chat_id=giveaway.channel_id, message_id=giveaway.message_id, reply_markup=None)
-        except Exception as exc:  # noqa: BLE001 - result post is more important than removing old button.
-            logging.debug("giveaway: failed to remove old markup: %s", exc)
     return True
 
 
@@ -848,6 +974,7 @@ async def cmd_giveaway_create(message: types.Message, state: FSMContext):
         post_text=post_text,
         media_type=media_type,
         media_file_id=media_file_id,
+        required_channel_ids=[],
     )
     await _show_giveaway_preview(message, state)
 
@@ -875,16 +1002,27 @@ async def admin_giveaway_create(callback: types.CallbackQuery, state: FSMContext
     await callback.answer()
 
 
-@giveaway_router.message(StateFilter(GiveawayCreate.waiting_for_channel, GiveawayCreate.waiting_for_media), Command("skip"))
+@giveaway_router.message(
+    StateFilter(GiveawayCreate.waiting_for_channel, GiveawayCreate.waiting_for_required_channels, GiveawayCreate.waiting_for_media),
+    Command("skip"),
+)
 async def giveaway_create_skip(message: types.Message, state: FSMContext):
     if not await _is_bot_admin(message.from_user.id):
         return await state.clear()
     current_state = await state.get_state()
     if current_state == GiveawayCreate.waiting_for_media.state:
         return await _finish_giveaway_wizard(message, state, None, None)
+    if current_state == GiveawayCreate.waiting_for_required_channels.state:
+        await state.update_data(required_channel_ids=[])
+        data = await state.get_data()
+        if data.get("preview_edit") == "required_channels":
+            await state.update_data(preview_edit=None)
+            return await _show_giveaway_preview(message, state)
+        await state.set_state(GiveawayCreate.waiting_for_end)
+        return await message.answer("Когда завершить розыгрыш? Время указывайте по МСК. Например: 27.04.2026 20:00, 12h или 3d.")
     await state.update_data(channel_id=GIVEAWAY_CHANNEL_ID)
-    await state.set_state(GiveawayCreate.waiting_for_end)
-    await message.answer("Когда завершить розыгрыш? Время указывайте по МСК. Например: 27.04.2026 20:00, 12h или 3d.")
+    await state.set_state(GiveawayCreate.waiting_for_required_channels)
+    await message.answer("Укажите доп. каналы для проверки подписки через пробел или отправьте /skip.")
 
 
 @giveaway_router.message(StateFilter(GiveawayCreate.waiting_for_channel))
@@ -895,6 +1033,30 @@ async def giveaway_create_channel(message: types.Message, state: FSMContext):
     if not (channel_id.startswith("@") or channel_id.startswith("-100")):
         return await message.answer("Канал должен быть в формате @channel или -100... Можно отправить /skip.")
     await state.update_data(channel_id=channel_id)
+    await state.set_state(GiveawayCreate.waiting_for_required_channels)
+    await message.answer("Укажите доп. каналы для проверки подписки через пробел или отправьте /skip.")
+
+
+@giveaway_router.message(StateFilter(GiveawayCreate.waiting_for_required_channels))
+async def giveaway_create_required_channels(message: types.Message, state: FSMContext):
+    if not await _is_bot_admin(message.from_user.id):
+        return await state.clear()
+    try:
+        channel_ids = parse_required_channels(message.text or "")
+    except GiveawayValidationError as exc:
+        return await message.answer(str(exc))
+    data = await state.get_data()
+    channel_ids = _normalize_required_channel_ids(channel_ids, primary_channel_id=str(data.get("channel_id") or GIVEAWAY_CHANNEL_ID))
+    for channel_id in channel_ids:
+        try:
+            await validate_subscription_channel(message.bot, channel_id)
+        except GiveawayPublishError as exc:
+            return await message.answer(f"Не удалось добавить канал проверки {channel_id}:\n{exc}")
+    await state.update_data(required_channel_ids=channel_ids)
+    data = await state.get_data()
+    if data.get("preview_edit") == "required_channels":
+        await state.update_data(preview_edit=None)
+        return await _show_giveaway_preview(message, state)
     await state.set_state(GiveawayCreate.waiting_for_end)
     await message.answer("Когда завершить розыгрыш? Время указывайте по МСК. Например: 27.04.2026 20:00, 12h или 3d.")
 
@@ -991,10 +1153,17 @@ async def _show_giveaway_preview(message: types.Message, state: FSMContext):
         media_type=data.get("media_type"),
         media_file_id=data.get("media_file_id"),
     )
+    required_channel_ids = list(data.get("required_channel_ids") or [])
     media_note = f"\n\nМедиа: {giveaway.media_type}" if giveaway.media_type else "\n\nМедиа: нет"
+    required_note = f"\nКаналы проверки: {_format_required_channels(required_channel_ids)}"
     await state.set_state(GiveawayCreate.waiting_for_preview)
     await message.answer(
-        "Предпросмотр перед публикацией:\n\n" + _giveaway_post_text(giveaway) + media_note,
+        "Предпросмотр перед публикацией:\n\n"
+        + f"Основной канал: {giveaway.channel_id}\n"
+        + required_note
+        + "\n\n"
+        + _giveaway_post_text(giveaway, required_channel_ids)
+        + media_note,
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=_preview_markup(),
@@ -1014,6 +1183,7 @@ async def _publish_giveaway_from_state(message: types.Message, state: FSMContext
             post_text=str(data["post_text"]),
             media_type=data.get("media_type"),
             media_file_id=data.get("media_file_id"),
+            required_channel_ids=list(data.get("required_channel_ids") or []),
         )
     except GiveawayPublishError as exc:
         logging.warning("giveaway publish failed: %s", exc)
@@ -1053,6 +1223,16 @@ async def giveaway_preview_edit_prizes(callback: types.CallbackQuery, state: FSM
     await callback.answer()
 
 
+@giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_edit_required")
+async def giveaway_preview_edit_required(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await state.update_data(preview_edit="required_channels")
+    await state.set_state(GiveawayCreate.waiting_for_required_channels)
+    await callback.message.answer("Отправьте новые доп. каналы проверки через пробел или /skip, чтобы убрать их.")
+    await callback.answer()
+
+
 @giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_edit_media")
 async def giveaway_preview_edit_media(callback: types.CallbackQuery, state: FSMContext):
     if not await _require_admin(callback):
@@ -1082,7 +1262,10 @@ async def admin_giveaway_active(callback: types.CallbackQuery):
         lines = ["Активные розыгрыши:"]
         for item in active:
             count = await count_giveaway_entries(item.id)
-            lines.append(f"#{item.id}: {item.prize} · участников {count} · до {format_giveaway_end(item.ends_at_utc)}")
+            required = _format_required_channels(await get_required_channel_ids(item.id))
+            lines.append(
+                f"#{item.id}: {item.prize} · участников {count} · до {format_giveaway_end(item.ends_at_utc)} " f"· проверка: {required}"
+            )
         text = "\n".join(lines)
     builder = InlineKeyboardBuilder()
     for item in active[:10]:
@@ -1113,9 +1296,10 @@ async def admin_giveaway_participants(callback: types.CallbackQuery):
         total = sum(item.entries_count for item in stats)
         lines = ["Участники активных розыгрышей:", f"Всего участников: {total}", ""]
         for item in stats:
+            required = _format_required_channels(await get_required_channel_ids(item.giveaway_id))
             lines.append(
                 f"#{item.giveaway_id}: {item.prize} · участников {item.entries_count} · "
-                f"мест {item.winners_count} · до {format_giveaway_end(item.ends_at_utc)} · {item.channel_id}"
+                f"мест {item.winners_count} · до {format_giveaway_end(item.ends_at_utc)} · {item.channel_id} · проверка: {required}"
             )
         text = "\n".join(lines)
     try:
@@ -1158,9 +1342,12 @@ async def giveaway_join(callback: types.CallbackQuery):
         return await callback.answer("Розыгрыш уже завершён.", show_alert=True)
     if await has_giveaway_entry(giveaway_id, callback.from_user.id):
         return await callback.answer("Вы уже участвуете.", show_alert=False)
-    if not await is_channel_subscriber(callback.bot, giveaway.channel_id, callback.from_user.id):
+    required_channel_ids = await get_required_channel_ids(giveaway_id)
+    subscription = await check_giveaway_required_subscriptions(callback.bot, giveaway, required_channel_ids, callback.from_user.id)
+    if not subscription.is_allowed:
         return await callback.answer(
-            f"Участвовать могут только подписчики канала {_channel_url(giveaway.channel_id)}",
+            "Участвовать могут только подписчики каналов:\n"
+            + "\n".join(_channel_url(channel_id) for channel_id in subscription.missing_channels),
             show_alert=True,
         )
     if not await is_giveaway_verified(giveaway_id, callback.from_user.id):
@@ -1202,8 +1389,13 @@ async def giveaway_verify(callback: types.CallbackQuery):
     giveaway = await get_giveaway(giveaway_id)
     if giveaway is None or giveaway.status != GIVEAWAY_STATUS_ACTIVE:
         return await callback.answer("Розыгрыш уже завершён.", show_alert=True)
-    if not await is_channel_subscriber(callback.bot, giveaway.channel_id, callback.from_user.id):
-        return await callback.answer("Подписка на канал больше не найдена.", show_alert=True)
+    required_channel_ids = await get_required_channel_ids(giveaway_id)
+    subscription = await check_giveaway_required_subscriptions(callback.bot, giveaway, required_channel_ids, callback.from_user.id)
+    if not subscription.is_allowed:
+        return await callback.answer(
+            "Подписка больше не найдена:\n" + "\n".join(_channel_url(channel_id) for channel_id in subscription.missing_channels),
+            show_alert=True,
+        )
     added = await add_giveaway_entry(
         giveaway_id,
         callback.from_user.id,
