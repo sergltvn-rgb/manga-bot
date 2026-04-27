@@ -857,6 +857,130 @@ class TestGiveawayPublishing:
         assert "VIP" in text
         assert "\n2 место" in text
 
+    def test_history_page_shows_four_open_buttons_without_export_actions(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class MessageStub:
+            def __init__(self):
+                self.text = ""
+                self.reply_markup = None
+
+            async def edit_text(self, text, **kwargs):
+                self.text = text
+                self.reply_markup = kwargs["reply_markup"]
+
+        class CallbackStub:
+            def __init__(self):
+                self.message = MessageStub()
+                self.from_user = type("User", (), {"id": 6210312655})()
+
+            async def answer(self, *args, **kwargs):
+                return None
+
+        run(database.init_db())
+        for idx in range(11):
+            run(
+                giveaways.create_giveaway(
+                    channel_id="@main_channel",
+                    prize=f"Prize {idx + 1}",
+                    post_text="Post",
+                    winners_count=1,
+                    ends_at_utc=datetime(2027, 4, 27, 17, idx, tzinfo=timezone.utc),
+                    created_by=6210312655,
+                )
+            )
+
+        callback = CallbackStub()
+        run(giveaways._render_giveaway_history(callback, scope="all", page=0))
+        buttons = [button.text for row in callback.message.reply_markup.inline_keyboard for button in row]
+
+        assert "Страница 1/3" in callback.message.text
+        assert [text for text in buttons if text.startswith("Открыть #")] == ["Открыть #11", "Открыть #10", "Открыть #9", "Открыть #8"]
+        assert not any(text.startswith("📊 Excel #") for text in buttons)
+        assert not any(text.startswith("🔁 Повторить #") for text in buttons)
+        assert not any(text.startswith("🎲 Перевыбор #") for text in buttons)
+        assert "▶️" in buttons
+
+        callback_page_2 = CallbackStub()
+        run(giveaways._render_giveaway_history(callback_page_2, scope="all", page=1))
+        page_2_buttons = [button.text for row in callback_page_2.message.reply_markup.inline_keyboard for button in row]
+
+        assert "Страница 2/3" in callback_page_2.message.text
+        assert [text for text in page_2_buttons if text.startswith("Открыть #")] == ["Открыть #7", "Открыть #6", "Открыть #5", "Открыть #4"]
+
+    def test_history_detail_contains_actions_and_reroll_only_for_finished(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class MessageStub:
+            def __init__(self):
+                self.text = ""
+                self.reply_markup = None
+
+            async def edit_text(self, text, **kwargs):
+                self.text = text
+                self.reply_markup = kwargs["reply_markup"]
+
+        class CallbackStub:
+            def __init__(self):
+                self.message = MessageStub()
+                self.from_user = type("User", (), {"id": 6210312655})()
+
+            async def answer(self, *args, **kwargs):
+                return None
+
+        run(database.init_db())
+        finished_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Finished prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2027, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        active_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Active prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2027, 4, 28, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(finished_id, 101))
+        run(giveaways.mark_giveaway_finished(finished_id))
+        run(giveaways.set_giveaway_published(active_id, 102))
+
+        finished_callback = CallbackStub()
+        run(giveaways._render_giveaway_history_item(finished_callback, scope="all", page=0, giveaway_id=finished_id))
+        finished_buttons = [button.text for row in finished_callback.message.reply_markup.inline_keyboard for button in row]
+
+        assert "Розыгрыш #1" in finished_callback.message.text
+        assert f"📊 Excel #{finished_id}" in finished_buttons
+        assert f"🔁 Повторить #{finished_id}" in finished_buttons
+        assert f"🎲 Перевыбор #{finished_id}" in finished_buttons
+        assert "⬅️ К странице" in finished_buttons
+
+        active_callback = CallbackStub()
+        run(giveaways._render_giveaway_history_item(active_callback, scope="all", page=0, giveaway_id=active_id))
+        active_buttons = [button.text for row in active_callback.message.reply_markup.inline_keyboard for button in row]
+
+        assert f"📊 Excel #{active_id}" in active_buttons
+        assert f"🔁 Повторить #{active_id}" in active_buttons
+        assert f"🎲 Перевыбор #{active_id}" not in active_buttons
+
     def test_admin_giveaway_menu_has_participants_button(self):
         from services.giveaways import _admin_giveaway_menu
 

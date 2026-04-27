@@ -53,6 +53,7 @@ GIVEAWAY_STATUS_FINISHED = "finished"
 GIVEAWAY_STATUS_CANCELLED = "cancelled"
 JOINED_STATUSES = {"member", "administrator", "creator"}
 SUPPORTED_MEDIA_TYPES = {"photo", "video", "document", "animation"}
+GIVEAWAY_HISTORY_PAGE_SIZE = 4
 _DURATION_RE = re.compile(r"^(?P<count>\d+)(?P<unit>[mhd])$", re.IGNORECASE)
 
 
@@ -573,14 +574,16 @@ async def get_required_channel_ids(giveaway_id: int) -> list[str]:
     return [item.channel_id for item in await get_giveaway_required_channels(giveaway_id)]
 
 
-async def list_recent_giveaways(*, created_by: int | None = None, limit: int = 20) -> list[Giveaway]:
+async def list_recent_giveaways(*, created_by: int | None = None, limit: int = 20, offset: int = 0) -> list[Giveaway]:
     limit = max(1, min(int(limit), 50))
+    offset = max(0, int(offset))
     params: list[object] = []
     where = ""
     if created_by is not None:
         where = "WHERE created_by = ?"
         params.append(created_by)
     params.append(limit)
+    params.append(offset)
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(
             f"""
@@ -590,11 +593,24 @@ async def list_recent_giveaways(*, created_by: int | None = None, limit: int = 2
             {where}
             ORDER BY id DESC
             LIMIT ?
+            OFFSET ?
             """,
             params,
         ) as cursor:
             rows = await cursor.fetchall()
     return [_row_to_giveaway(row) for row in rows]
+
+
+async def count_recent_giveaways(*, created_by: int | None = None) -> int:
+    params: list[object] = []
+    where = ""
+    if created_by is not None:
+        where = "WHERE created_by = ?"
+        params.append(created_by)
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(f"SELECT COUNT(*) FROM giveaways {where}", params) as cursor:
+            row = await cursor.fetchone()
+            return int(row[0] if row else 0)
 
 
 async def clone_giveaway(
@@ -1992,49 +2008,104 @@ async def admin_giveaway_participants(callback: types.CallbackQuery):
 async def admin_giveaway_history(callback: types.CallbackQuery):
     if not await _require_admin(callback):
         return
-    items = await list_recent_giveaways(limit=10)
-    await _render_giveaway_history(callback, items, title="История розыгрышей:", refresh_callback="admin_giveaway_history")
+    await _render_giveaway_history(callback, scope="all", page=0)
 
 
 @giveaway_router.callback_query(F.data == "admin_giveaway_mine")
 async def admin_giveaway_mine(callback: types.CallbackQuery):
     if not await _require_admin(callback):
         return
-    items = await list_recent_giveaways(created_by=callback.from_user.id, limit=10)
-    await _render_giveaway_history(callback, items, title="Мои розыгрыши:", refresh_callback="admin_giveaway_mine")
+    await _render_giveaway_history(callback, scope="mine", page=0)
 
 
 async def _render_giveaway_history(
     callback: types.CallbackQuery,
-    items: list[Giveaway],
     *,
-    title: str,
-    refresh_callback: str,
+    scope: str,
+    page: int,
 ) -> None:
+    page = max(0, int(page))
+    created_by = callback.from_user.id if scope == "mine" else None
+    title = "Мои розыгрыши" if scope == "mine" else "История розыгрышей"
+    total = await count_recent_giveaways(created_by=created_by)
+    total_pages = max(1, (total + GIVEAWAY_HISTORY_PAGE_SIZE - 1) // GIVEAWAY_HISTORY_PAGE_SIZE)
+    page = min(page, total_pages - 1)
+    items = await list_recent_giveaways(
+        created_by=created_by,
+        limit=GIVEAWAY_HISTORY_PAGE_SIZE,
+        offset=page * GIVEAWAY_HISTORY_PAGE_SIZE,
+    )
     builder = InlineKeyboardBuilder()
     if not items:
-        text = f"<b>{escape_html_text(title)}</b>\nПока пусто."
+        text = f"<b>{escape_html_text(title)}</b>\n\nПока пусто."
     else:
-        lines = [f"<b>{escape_html_text(title)}</b>"]
+        lines = [f"<b>{escape_html_text(title)}</b>", f"Страница {page + 1}/{total_pages} · всего: {total}"]
         for item in items:
             count = await count_giveaway_entries(item.id)
-            required = await get_required_channel_ids(item.id)
-            lines.append("")
-            lines.append(_format_admin_giveaway_card(item, entries_count=count, required_channels=required))
-            builder.button(text=f"📊 Excel #{item.id}", callback_data=f"giveaway_export:{item.id}")
-            if item.status == GIVEAWAY_STATUS_FINISHED:
-                builder.button(text=f"🎲 Перевыбор #{item.id}", callback_data=f"giveaway_reroll_menu:{item.id}")
-            builder.button(text=f"🔁 Повторить #{item.id}", callback_data=f"giveaway_repeat:{item.id}")
+            lines.append(
+                f"\n{_giveaway_status_icon(item.status)} <b>#{item.id}</b> · "
+                f"{escape_html_text(_giveaway_status_label(item.status))} · "
+                f"участников: <b>{count}</b> · до {format_giveaway_end(item.ends_at_utc)} МСК"
+            )
+            builder.button(text=f"Открыть #{item.id}", callback_data=f"giveaway_history_item:{scope}:{page}:{item.id}")
         text = "\n".join(lines)
-    builder.button(text="🔄 Обновить", callback_data=refresh_callback)
+    if page > 0:
+        builder.button(text="◀️", callback_data=f"admin_giveaway_history_page:{scope}:{page - 1}")
+    if page < total_pages - 1:
+        builder.button(text="▶️", callback_data=f"admin_giveaway_history_page:{scope}:{page + 1}")
+    builder.button(text="🔄 Обновить", callback_data=f"admin_giveaway_history_page:{scope}:{page}")
     builder.button(text="⬅️ Назад", callback_data="admin_giveaways")
-    builder.adjust(2, 1, 1)
+    builder.adjust(1)
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
     except TelegramAPIError as exc:
         if "message is not modified" not in _telegram_error_text(exc).lower():
             raise
     await callback.answer()
+
+
+async def _render_giveaway_history_item(
+    callback: types.CallbackQuery,
+    *,
+    scope: str,
+    page: int,
+    giveaway_id: int,
+) -> None:
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return await callback.answer("Розыгрыш не найден.", show_alert=True)
+    count = await count_giveaway_entries(giveaway_id)
+    required = await get_required_channel_ids(giveaway_id)
+    text = _format_admin_giveaway_card(giveaway, entries_count=count, required_channels=required)
+    builder = InlineKeyboardBuilder()
+    builder.button(text=f"📊 Excel #{giveaway_id}", callback_data=f"giveaway_export:{giveaway_id}")
+    if giveaway.status == GIVEAWAY_STATUS_FINISHED:
+        builder.button(text=f"🎲 Перевыбор #{giveaway_id}", callback_data=f"giveaway_reroll_menu:{giveaway_id}")
+    builder.button(text=f"🔁 Повторить #{giveaway_id}", callback_data=f"giveaway_repeat:{giveaway_id}")
+    builder.button(text="⬅️ К странице", callback_data=f"admin_giveaway_history_page:{scope}:{page}")
+    builder.adjust(1)
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
+    except TelegramAPIError as exc:
+        if "message is not modified" not in _telegram_error_text(exc).lower():
+            raise
+    await callback.answer()
+
+
+@giveaway_router.callback_query(F.data.startswith("admin_giveaway_history_page:"))
+async def admin_giveaway_history_page(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    _, scope, page_raw = callback.data.split(":", 2)
+    await _render_giveaway_history(callback, scope=scope, page=int(page_raw))
+
+
+@giveaway_router.callback_query(F.data.startswith("giveaway_history_item:"))
+async def admin_giveaway_history_item(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    _, scope, page_raw, giveaway_id_raw = callback.data.split(":", 3)
+    await _render_giveaway_history_item(callback, scope=scope, page=int(page_raw), giveaway_id=int(giveaway_id_raw))
 
 
 @giveaway_router.callback_query(F.data.startswith("giveaway_export:"))
