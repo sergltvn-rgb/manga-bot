@@ -62,7 +62,7 @@ def _webapp_cache_control_for_request(request: aiohttp.web.Request) -> str:
     """
     path = request.path.lower()
     # HTML/app shell and frequently changing metadata must revalidate.
-    if path.endswith(("/reader.html", "/index.html", "/giveaway.html", "/manifest.json", "/sw.js", "/chapters_data.json")):
+    if path.endswith(("/reader.html", "/index.html", "/giveaway.html", "/arts.html", "/manifest.json", "/sw.js", "/chapters_data.json")):
         return "no-cache"
     # Versioned assets (?v=12) can be cached aggressively.
     if "v" in request.rel_url.query:

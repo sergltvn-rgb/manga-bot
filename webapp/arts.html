@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Арты</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f4ee;
+      --ink: #171a22;
+      --muted: #667085;
+      --line: rgba(23, 26, 34, .12);
+      --panel: rgba(255, 255, 255, .78);
+      --accent: #0e9f86;
+      --danger: #dc3f5f;
+      --gold: #c98a18;
+      --shadow: 0 20px 60px rgba(23, 26, 34, .16);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(135deg, rgba(255,255,255,.8), rgba(255,255,255,0) 38%),
+        radial-gradient(circle at 88% 8%, rgba(14,159,134,.16), transparent 28%),
+        var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    button {
+      border: 0;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .shell {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      padding: 18px clamp(14px, 4vw, 32px) 30px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-end;
+      padding: 8px 0 18px;
+      animation: rise .44s ease both;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(34px, 8vw, 84px);
+      line-height: .9;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 520px;
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .status {
+      min-width: 160px;
+      text-align: right;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px 0 18px;
+      border-top: 1px solid var(--line);
+      animation: rise .5s ease both;
+    }
+
+    .tab, .load-more, .icon-action {
+      min-height: 42px;
+      padding: 0 16px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.72);
+      border: 1px solid var(--line);
+      transition: transform .18s ease, background .18s ease, border-color .18s ease;
+    }
+
+    .tab:hover, .load-more:hover, .icon-action:hover { transform: translateY(-1px); }
+    .tab.active {
+      background: var(--ink);
+      border-color: var(--ink);
+      color: #fff;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+      gap: clamp(10px, 2vw, 18px);
+      align-items: start;
+    }
+
+    .tile {
+      position: relative;
+      overflow: hidden;
+      aspect-ratio: 3 / 4;
+      border-radius: 8px;
+      background: #e9e5dc;
+      border: 1px solid rgba(23,26,34,.08);
+      box-shadow: 0 10px 30px rgba(23,26,34,.08);
+      animation: tileIn .42s ease both;
+      transition: transform .22s ease, box-shadow .22s ease;
+    }
+
+    .tile:hover {
+      transform: translateY(-3px) scale(1.01);
+      box-shadow: var(--shadow);
+    }
+
+    .tile img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transform: scale(1.02);
+      transition: transform .28s ease, filter .28s ease;
+    }
+
+    .tile:hover img { transform: scale(1.07); }
+
+    .tile-meta {
+      position: absolute;
+      inset: auto 0 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 38px 10px 10px;
+      color: #fff;
+      background: linear-gradient(to top, rgba(0,0,0,.62), transparent);
+      font-size: 13px;
+    }
+
+    .tile-actions {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: flex;
+      gap: 6px;
+      opacity: 0;
+      transform: translateY(-5px);
+      transition: opacity .18s ease, transform .18s ease;
+    }
+
+    .tile:hover .tile-actions { opacity: 1; transform: translateY(0); }
+
+    .mini {
+      min-width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.92);
+      color: var(--ink);
+      box-shadow: 0 8px 24px rgba(0,0,0,.18);
+    }
+
+    .mini.danger { color: var(--danger); }
+    .mini.ok { color: var(--accent); }
+
+    .empty, .error {
+      margin-top: 24px;
+      padding: 28px 0;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: center;
+      padding: 24px 0 6px;
+    }
+
+    .load-more {
+      background: var(--accent);
+      color: #fff;
+      border-color: transparent;
+      font-weight: 700;
+    }
+
+    .modal {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: none;
+      place-items: center;
+      padding: 18px;
+      background: rgba(12, 14, 18, .74);
+      backdrop-filter: blur(14px);
+    }
+
+    .modal.open { display: grid; animation: fade .16s ease both; }
+
+    .modal-inner {
+      width: min(880px, 100%);
+      max-height: 92vh;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 220px;
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .modal-image {
+      max-height: 92vh;
+      width: 100%;
+      object-fit: contain;
+      border-radius: 8px;
+      background: #0f1117;
+      box-shadow: var(--shadow);
+    }
+
+    .inspector {
+      border-radius: 8px;
+      background: rgba(255,255,255,.94);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: var(--shadow);
+    }
+
+    .inspector strong { font-size: 18px; }
+    .inspector span { color: var(--muted); font-size: 13px; }
+    .icon-action.danger { color: #fff; background: var(--danger); border-color: var(--danger); }
+    .icon-action.ok { color: #fff; background: var(--accent); border-color: var(--accent); }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes tileIn {
+      from { opacity: 0; transform: translateY(18px) scale(.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes fade {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @media (max-width: 680px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .status { text-align: left; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .modal-inner { grid-template-columns: 1fr; }
+      .inspector { min-height: 0; }
+      .tile-actions { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <h1>Арты</h1>
+        <p class="lead">Галерея Roshidere с быстрым просмотром, случайным выбором и аккуратной модерацией для админов.</p>
+      </div>
+      <div id="status" class="status">Загрузка...</div>
+    </header>
+
+    <nav id="tabs" class="tabs">
+      <button class="tab active" data-view="all">Все</button>
+      <button class="tab" data-view="suggestions" hidden>Предложка</button>
+      <button class="tab" data-view="hidden" hidden>Скрытые</button>
+      <button class="tab" data-action="random">Случайный</button>
+    </nav>
+
+    <section id="grid" class="grid" aria-live="polite"></section>
+    <div id="empty" class="empty" hidden></div>
+    <div class="footer"><button id="loadMore" class="load-more" hidden>Показать еще</button></div>
+  </main>
+
+  <div id="modal" class="modal">
+    <div class="modal-inner">
+      <img id="modalImage" class="modal-image" alt="" />
+      <aside class="inspector">
+        <strong id="modalTitle"></strong>
+        <span id="modalMeta"></span>
+        <button id="modalClose" class="icon-action">Закрыть</button>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    if (tg) {
+      tg.ready();
+      tg.expand();
+      tg.setHeaderColor('#f7f4ee');
+      tg.setBackgroundColor('#f7f4ee');
+    }
+
+    const initData = tg && tg.initData ? tg.initData : '';
+    const authHeaders = initData ? { Authorization: `tma ${initData}` } : {};
+    const state = { view: 'all', offset: 0, limit: 18, total: 0, isAdmin: false, items: [] };
+    const grid = document.getElementById('grid');
+    const statusEl = document.getElementById('status');
+    const emptyEl = document.getElementById('empty');
+    const loadMore = document.getElementById('loadMore');
+    const modal = document.getElementById('modal');
+    const modalImage = document.getElementById('modalImage');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalMeta = document.getElementById('modalMeta');
+
+    function mediaUrl(url) {
+      if (!initData) return url;
+      const sep = url.includes('?') ? '&' : '?';
+      return `${url}${sep}initData=${encodeURIComponent(initData)}`;
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: { ...authHeaders, ...(options.headers || {}) },
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(json.error || `HTTP ${response.status}`);
+      return json;
+    }
+
+    function setEmpty(text) {
+      emptyEl.textContent = text;
+      emptyEl.hidden = !text;
+    }
+
+    function renderTabs() {
+      document.querySelector('[data-view="suggestions"]').hidden = !state.isAdmin;
+      document.querySelector('[data-view="hidden"]').hidden = !state.isAdmin;
+      document.querySelectorAll('.tab[data-view]').forEach((tab) => {
+        tab.classList.toggle('active', tab.dataset.view === state.view);
+      });
+    }
+
+    function tile(item, index) {
+      const node = document.createElement('article');
+      node.className = 'tile';
+      node.style.animationDelay = `${Math.min(index * 22, 220)}ms`;
+      node.innerHTML = `
+        <img src="${mediaUrl(item.media_url)}" alt="Арт #${item.id}" loading="lazy">
+        <div class="tile-meta"><b>#${item.id}</b><span>${item.source || 'art'}</span></div>
+        <div class="tile-actions"></div>
+      `;
+      const actions = node.querySelector('.tile-actions');
+      if (state.view === 'suggestions') {
+        actions.innerHTML = `
+          <button class="mini ok" title="Принять" data-approve="${item.id}">✓</button>
+          <button class="mini danger" title="Отклонить" data-reject="${item.id}">×</button>
+        `;
+      } else if (state.isAdmin && state.view === 'hidden') {
+        actions.innerHTML = `
+          <button class="mini ok" title="Вернуть" data-unhide="${item.id}">↩</button>
+          <button class="mini danger" title="Удалить" data-delete="${item.id}">×</button>
+        `;
+      } else if (state.isAdmin) {
+        actions.innerHTML = `<button class="mini danger" title="Скрыть" data-hide="${item.id}">×</button>`;
+      }
+      node.addEventListener('click', (event) => {
+        if (event.target.closest('button')) return;
+        openModal(item);
+      });
+      return node;
+    }
+
+    function render(append = false) {
+      renderTabs();
+      if (!append) grid.innerHTML = '';
+      state.items.forEach((item, index) => grid.appendChild(tile(item, index)));
+      const shown = grid.children.length;
+      statusEl.textContent = state.view === 'suggestions'
+        ? `На проверке: ${state.total}`
+        : `Показано ${shown} из ${state.total}`;
+      setEmpty(shown ? '' : (state.view === 'suggestions' ? 'Предложка пустая.' : 'Пока здесь нет артов.'));
+      loadMore.hidden = shown >= state.total || state.total === 0;
+    }
+
+    async function load(reset = true) {
+      if (reset) {
+        state.offset = 0;
+        state.items = [];
+        grid.innerHTML = '';
+      }
+      statusEl.textContent = 'Загрузка...';
+      try {
+        let payload;
+        if (state.view === 'suggestions') {
+          payload = await api(`/api/arts/suggestions?limit=${state.limit}&offset=${state.offset}`);
+        } else {
+          const view = state.view === 'hidden' ? '&view=hidden' : '';
+          payload = await api(`/api/arts?limit=${state.limit}&offset=${state.offset}${view}`);
+        }
+        state.isAdmin = Boolean(payload.is_admin || state.view === 'suggestions');
+        state.total = payload.total || 0;
+        state.items = payload.items || [];
+        state.offset += state.items.length;
+        render(!reset);
+      } catch (error) {
+        statusEl.textContent = 'Нет доступа';
+        setEmpty('Откройте галерею из Telegram, чтобы авторизация подтянулась автоматически.');
+      }
+    }
+
+    function openModal(item) {
+      modalImage.src = mediaUrl(item.media_url);
+      modalTitle.textContent = `Арт #${item.id}`;
+      modalMeta.textContent = `${item.created_at || 'без даты'} · ${item.source || 'gallery'}`;
+      modal.classList.add('open');
+    }
+
+    async function mutate(button, path, options = {}) {
+      button.disabled = true;
+      await api(path, options);
+      await load(true);
+    }
+
+    document.getElementById('tabs').addEventListener('click', async (event) => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      if (button.dataset.action === 'random') {
+        const source = state.items.length ? state.items : [];
+        if (!source.length) return;
+        openModal(source[Math.floor(Math.random() * source.length)]);
+        return;
+      }
+      state.view = button.dataset.view || 'all';
+      await load(true);
+    });
+
+    grid.addEventListener('click', async (event) => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      if (button.dataset.delete) await mutate(button, `/api/arts/${button.dataset.delete}`, { method: 'DELETE' });
+      if (button.dataset.hide) await mutate(button, `/api/arts/${button.dataset.hide}/hide`, { method: 'POST' });
+      if (button.dataset.unhide) await mutate(button, `/api/arts/${button.dataset.unhide}/unhide`, { method: 'POST' });
+      if (button.dataset.approve) await mutate(button, `/api/arts/suggestions/${button.dataset.approve}/approve`, { method: 'POST' });
+      if (button.dataset.reject) await mutate(button, `/api/arts/suggestions/${button.dataset.reject}/reject`, { method: 'POST' });
+    });
+
+    loadMore.addEventListener('click', () => load(false));
+    document.getElementById('modalClose').addEventListener('click', () => modal.classList.remove('open'));
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal) modal.classList.remove('open');
+    });
+
+    load(true);
+  </script>
+</body>
+</html>

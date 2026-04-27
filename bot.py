@@ -1475,11 +1475,19 @@ async def process_section_arts(callback: types.CallbackQuery):
             await callback.message.answer("<i>Арты доступны в ЛС бота:</i>", parse_mode="HTML", reply_markup=builder.as_markup())
         return await callback.answer()
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
+    arts_url = build_webapp_url("arts.html")
+    builder.row(types.InlineKeyboardButton(text="🌐 Открыть галерею", web_app=WebAppInfo(url=arts_url)))
+    builder.row(
+        types.InlineKeyboardButton(text="🎲 Случайный арт", callback_data="user_art_random"),
+        types.InlineKeyboardButton(text="🎚 Telegram-слайдер", callback_data="view_arts"),
+    )
     builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
     builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="main_menu"))
     await safe_edit_or_reply(
-        callback, "🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup()
+        callback,
+        "🎨 <b>Арты</b>\nОткройте удобную WebApp-галерею, посмотрите случайный арт или предложите свой.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
     )
 
 
@@ -1683,11 +1691,18 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
     if deep_link == "arts":
         builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
+        arts_url = build_webapp_url("arts.html")
+        builder.row(types.InlineKeyboardButton(text="🌐 Открыть галерею", web_app=WebAppInfo(url=arts_url)))
+        builder.row(
+            types.InlineKeyboardButton(text="🎲 Случайный арт", callback_data="user_art_random"),
+            types.InlineKeyboardButton(text="🎚 Telegram-слайдер", callback_data="view_arts"),
+        )
         builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
         builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
         return await message.answer(
-            "🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup()
+            "🎨 <b>Арты</b>\nОткройте удобную WebApp-галерею, посмотрите случайный арт или предложите свой.",
+            parse_mode="HTML",
+            reply_markup=builder.as_markup(),
         )
     elif deep_link == "ai":
         builder = InlineKeyboardBuilder()
@@ -1761,10 +1776,19 @@ async def handle_reply_arts(message: types.Message, state: FSMContext):
     if message.chat.type in ["group", "supergroup"]:
         return await _redirect_to_dm(message, "arts", "Арты")
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="🎨 Галерея артов", callback_data="view_arts"))
+    arts_url = build_webapp_url("arts.html")
+    builder.row(types.InlineKeyboardButton(text="🌐 Открыть галерею", web_app=WebAppInfo(url=arts_url)))
+    builder.row(
+        types.InlineKeyboardButton(text="🎲 Случайный арт", callback_data="user_art_random"),
+        types.InlineKeyboardButton(text="🎚 Telegram-слайдер", callback_data="view_arts"),
+    )
     builder.row(types.InlineKeyboardButton(text="📥 Предложить арт", callback_data="suggest_art_menu"))
     builder.row(types.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
-    await message.answer("🎨 <b>Арты:</b>\nСмотрите галерею или предложите свой арт:", parse_mode="HTML", reply_markup=builder.as_markup())
+    await message.answer(
+        "🎨 <b>Арты</b>\nОткройте удобную WebApp-галерею, посмотрите случайный арт или предложите свой.",
+        parse_mode="HTML",
+        reply_markup=builder.as_markup(),
+    )
 
 
 @dp.message(F.text == "🤖 ИИ чаты", StateFilter("*"))
@@ -4799,6 +4823,17 @@ from services.telemetry_api import handle_telemetry_post  # noqa: E402,F401
 
 
 from services.giveaway_webapp_api import handle_giveaway_status  # noqa: E402,F401
+from services.art_webapp_api import (  # noqa: E402,F401
+    handle_art_delete,
+    handle_art_hide,
+    handle_art_media,
+    handle_art_suggestion_approve,
+    handle_art_suggestion_media,
+    handle_art_suggestion_reject,
+    handle_art_suggestions_list,
+    handle_art_unhide,
+    handle_arts_list,
+)
 
 
 # Reader API handlers вынесены в services/reader_api.py (Фаза 3 шаг 10).
@@ -5280,12 +5315,30 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_get("/api/chapter-content", handle_chapter_content)
     app.router.add_post("/api/telemetry", handle_telemetry_post)
     app.router.add_get("/api/giveaway/status", handle_giveaway_status)
+    app.router.add_get("/api/arts", handle_arts_list)
+    app.router.add_get("/api/arts/media/{id}", handle_art_media)
+    app.router.add_get("/api/arts/suggestions", handle_art_suggestions_list)
+    app.router.add_get("/api/arts/suggestions/{id}/media", handle_art_suggestion_media)
+    app.router.add_post("/api/arts/suggestions/{id}/approve", handle_art_suggestion_approve)
+    app.router.add_post("/api/arts/suggestions/{id}/reject", handle_art_suggestion_reject)
+    app.router.add_route("DELETE", "/api/arts/{id}", handle_art_delete)
+    app.router.add_post("/api/arts/{id}/hide", handle_art_hide)
+    app.router.add_post("/api/arts/{id}/unhide", handle_art_unhide)
 
     app.router.add_get("/", handle_root_redirect)
     app.router.add_options("/api/reader", handle_cors_preflight)
     app.router.add_options("/api/chapter-content", handle_cors_preflight)
     app.router.add_options("/api/telemetry", handle_cors_preflight)
     app.router.add_options("/api/giveaway/status", handle_cors_preflight)
+    app.router.add_options("/api/arts", handle_cors_preflight)
+    app.router.add_options("/api/arts/media/{id}", handle_cors_preflight)
+    app.router.add_options("/api/arts/suggestions", handle_cors_preflight)
+    app.router.add_options("/api/arts/suggestions/{id}/media", handle_cors_preflight)
+    app.router.add_options("/api/arts/suggestions/{id}/approve", handle_cors_preflight)
+    app.router.add_options("/api/arts/suggestions/{id}/reject", handle_cors_preflight)
+    app.router.add_options("/api/arts/{id}", handle_cors_preflight)
+    app.router.add_options("/api/arts/{id}/hide", handle_cors_preflight)
+    app.router.add_options("/api/arts/{id}/unhide", handle_cors_preflight)
 
     app.router.add_get("/api/likes", handle_likes_get)
     app.router.add_post("/api/likes", handle_likes_post)

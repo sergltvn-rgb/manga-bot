@@ -48,6 +48,60 @@ async def repair_akashic_volume_11_illustrations(db):
     )
 
 
+async def _ensure_column(db, table: str, column: str, definition: str) -> None:
+    async with db.execute(f"PRAGMA table_info({table})") as cursor:
+        columns = {row[1] for row in await cursor.fetchall()}
+    if column not in columns:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+
+
+async def ensure_art_schema(db) -> None:
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS arts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_id TEXT NOT NULL,
+            added_by INTEGER DEFAULT NULL,
+            source TEXT DEFAULT 'legacy',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            accepted_at TEXT DEFAULT NULL,
+            is_hidden INTEGER DEFAULT 0,
+            tags TEXT DEFAULT '',
+            note TEXT DEFAULT ''
+        )"""
+    )
+    await _ensure_column(db, "arts", "added_by", "added_by INTEGER DEFAULT NULL")
+    await _ensure_column(db, "arts", "source", "source TEXT DEFAULT 'legacy'")
+    await _ensure_column(db, "arts", "created_at", "created_at TEXT DEFAULT NULL")
+    await _ensure_column(db, "arts", "accepted_at", "accepted_at TEXT DEFAULT NULL")
+    await _ensure_column(db, "arts", "is_hidden", "is_hidden INTEGER DEFAULT 0")
+    await _ensure_column(db, "arts", "tags", "tags TEXT DEFAULT ''")
+    await _ensure_column(db, "arts", "note", "note TEXT DEFAULT ''")
+    await db.execute("UPDATE arts SET source = 'legacy' WHERE source IS NULL OR source = ''")
+    await db.execute("UPDATE arts SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL OR created_at = ''")
+
+    await db.execute(
+        """CREATE TABLE IF NOT EXISTS suggested_arts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            file_id TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            reviewed_by INTEGER DEFAULT NULL,
+            reviewed_at TEXT DEFAULT NULL,
+            accepted_art_id INTEGER DEFAULT NULL,
+            reject_reason TEXT DEFAULT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )"""
+    )
+    await _ensure_column(db, "suggested_arts", "status", "status TEXT DEFAULT 'pending'")
+    await _ensure_column(db, "suggested_arts", "reviewed_by", "reviewed_by INTEGER DEFAULT NULL")
+    await _ensure_column(db, "suggested_arts", "reviewed_at", "reviewed_at TEXT DEFAULT NULL")
+    await _ensure_column(db, "suggested_arts", "accepted_art_id", "accepted_art_id INTEGER DEFAULT NULL")
+    await _ensure_column(db, "suggested_arts", "reject_reason", "reject_reason TEXT DEFAULT NULL")
+    await _ensure_column(db, "suggested_arts", "created_at", "created_at TEXT DEFAULT NULL")
+    await db.execute("UPDATE suggested_arts SET status = 'pending' WHERE status IS NULL OR status = ''")
+    await db.execute("UPDATE suggested_arts SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL OR created_at = ''")
+
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('PRAGMA journal_mode=WAL;')
@@ -64,8 +118,7 @@ async def init_db():
         await db.execute(
             'CREATE TABLE IF NOT EXISTS british_ranobe (volume INTEGER, chapter TEXT, url TEXT, PRIMARY KEY (volume, chapter))'
         )
-        await db.execute('CREATE TABLE IF NOT EXISTS arts (id INTEGER PRIMARY KEY AUTOINCREMENT, file_id TEXT)')
-        await db.execute('CREATE TABLE IF NOT EXISTS suggested_arts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, file_id TEXT)')
+        await ensure_art_schema(db)
         await db.execute('CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)')
         await db.execute(
             'CREATE TABLE IF NOT EXISTS marriages (chat_id INTEGER, user1_id INTEGER, user1_name TEXT, user2_id INTEGER, user2_name TEXT, date TEXT)'
@@ -460,12 +513,14 @@ async def clear_ai_memory(chat_id: int, user_id: int, char_id: str | None = None
 
 async def get_all_arts() -> list:
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute('SELECT id, file_id FROM arts') as cursor:
+        await ensure_art_schema(db)
+        async with db.execute('SELECT id, file_id FROM arts WHERE COALESCE(is_hidden, 0) = 0 ORDER BY id') as cursor:
             return await cursor.fetchall() or []
 
 
 async def delete_art_by_id(art_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
+        await ensure_art_schema(db)
         async with db.execute('SELECT 1 FROM arts WHERE id = ?', (art_id,)) as cursor:
             if not await cursor.fetchone():
                 return False

@@ -119,6 +119,7 @@ def _build_admin_menu_kb() -> types.InlineKeyboardMarkup:
     )
     b.row(
         types.InlineKeyboardButton(text="🎁 Розыгрыши", callback_data="admin_giveaways"),
+        types.InlineKeyboardButton(text="🎨 Арты", callback_data="admin_arts"),
     )
     b.row(
         types.InlineKeyboardButton(text="⚙ Настройки", callback_data="admin_settings"),
