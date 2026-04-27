@@ -55,9 +55,9 @@ class TestGiveawayTimeParsing:
     def test_quick_create_accepts_leading_pipe_format(self):
         from services.giveaways import _parse_quick_create
 
-        ends_at, winners_count, prize, post_text = _parse_quick_create("/giveaway_create | 27.04.2026 20:00 | 3 | VIP | Участвуем")
+        ends_at, winners_count, prize, post_text = _parse_quick_create("/giveaway_create | 27.04.2027 20:00 | 3 | VIP | Участвуем")
 
-        assert ends_at == datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc)
+        assert ends_at == datetime(2027, 4, 27, 17, 0, tzinfo=timezone.utc)
         assert winners_count == 3
         assert prize == "VIP"
         assert post_text == "Участвуем"
@@ -66,11 +66,11 @@ class TestGiveawayTimeParsing:
         from services.giveaways import _parse_quick_create_with_channel, split_place_prizes
 
         channel_id, ends_at, winners_count, prize, post_text = _parse_quick_create_with_channel(
-            "/giveaway_create @test_channel | 27.04.2026 20:00 | 1 место: VIP; 2 место: 500 монет | Текст"
+            "/giveaway_create @test_channel | 27.04.2027 20:00 | 1 место: VIP; 2 место: 500 монет | Текст"
         )
 
         assert channel_id == "@test_channel"
-        assert ends_at == datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc)
+        assert ends_at == datetime(2027, 4, 27, 17, 0, tzinfo=timezone.utc)
         assert winners_count == 2
         assert split_place_prizes(prize) == ["VIP", "500 монет"]
         assert post_text == "Текст"
@@ -260,8 +260,9 @@ class TestGiveawayDb:
 
         csv_text = run(giveaways.build_giveaway_entries_csv(giveaway_id))
 
-        assert "giveaway_id,user_id,username,first_name,status,is_winner" in csv_text
-        assert f"{giveaway_id},1001,alice,Alice,joined,1" in csv_text
+        assert "giveaway_id,user_id,username,first_name,joined_at_utc,joined_at_msk,status,is_winner" in csv_text
+        assert f"{giveaway_id},1001,alice,Alice," in csv_text
+        assert ",joined,1" in csv_text
 
     def test_clone_giveaway_copies_content_and_required_channels_without_entries(self, tmp_path, monkeypatch):
         import database

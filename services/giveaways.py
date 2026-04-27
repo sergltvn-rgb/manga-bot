@@ -87,6 +87,7 @@ class GiveawayEntry:
     first_name: str | None
     status: str
     is_winner: bool
+    joined_at_utc: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -482,7 +483,7 @@ async def get_giveaway_entries(giveaway_id: int) -> list[GiveawayEntry]:
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(
             """
-            SELECT giveaway_id, user_id, username, first_name, status, is_winner
+            SELECT giveaway_id, user_id, username, first_name, status, is_winner, joined_at
             FROM giveaway_entries
             WHERE giveaway_id = ?
             ORDER BY joined_at, user_id
@@ -498,6 +499,7 @@ async def get_giveaway_entries(giveaway_id: int) -> list[GiveawayEntry]:
             first_name=row[3],
             status=str(row[4]),
             is_winner=bool(row[5]),
+            joined_at_utc=_dt_from_db(str(row[6])) if row[6] else None,
         )
         for row in rows
     ]
@@ -613,14 +615,18 @@ async def build_giveaway_entries_csv(giveaway_id: int) -> str:
     entries = await get_giveaway_entries(giveaway_id)
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(["giveaway_id", "user_id", "username", "first_name", "status", "is_winner"])
+    writer.writerow(["giveaway_id", "user_id", "username", "first_name", "joined_at_utc", "joined_at_msk", "status", "is_winner"])
     for entry in entries:
+        joined_at_utc = entry.joined_at_utc.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if entry.joined_at_utc else ""
+        joined_at_msk = entry.joined_at_utc.astimezone(MSK_TZ).strftime("%d.%m.%Y %H:%M:%S") if entry.joined_at_utc else ""
         writer.writerow(
             [
                 entry.giveaway_id,
                 entry.user_id,
                 entry.username or "",
                 entry.first_name or "",
+                joined_at_utc,
+                joined_at_msk,
                 entry.status,
                 1 if entry.is_winner else 0,
             ]
