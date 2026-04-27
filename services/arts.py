@@ -318,9 +318,10 @@ async def get_art_counts() -> dict[str, int]:
     }
 
 
-def _art_to_payload(item: ArtItem, *, include_file_id: bool = False) -> dict[str, Any]:
+def _art_to_payload(item: ArtItem, *, display_number: int, include_file_id: bool = False) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "id": item.id,
+        "display_number": display_number,
         "source": item.source,
         "created_at": item.created_at,
         "is_hidden": item.is_hidden,
@@ -368,7 +369,7 @@ async def get_arts_webapp_payload(
         "total": page.total,
         "page": page.page,
         "total_pages": page.total_pages,
-        "items": [_art_to_payload(item, include_file_id=is_admin) for item in page.items],
+        "items": [_art_to_payload(item, display_number=offset + idx + 1, include_file_id=is_admin) for idx, item in enumerate(page.items)],
     }
 
 

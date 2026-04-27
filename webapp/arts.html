@@ -12,11 +12,12 @@
       --ink: #171a22;
       --muted: #667085;
       --line: rgba(23, 26, 34, .12);
-      --panel: rgba(255, 255, 255, .78);
+      --panel: rgba(255, 255, 255, .84);
       --accent: #0e9f86;
       --danger: #dc3f5f;
       --gold: #c98a18;
       --shadow: 0 20px 60px rgba(23, 26, 34, .16);
+      --soft-shadow: 0 12px 34px rgba(23, 26, 34, .10);
     }
 
     * { box-sizing: border-box; }
@@ -44,7 +45,7 @@
     .shell {
       width: min(1180px, 100%);
       margin: 0 auto;
-      padding: 18px clamp(14px, 4vw, 32px) 30px;
+      padding: 18px clamp(14px, 4vw, 32px) calc(30px + env(safe-area-inset-bottom));
     }
 
     .topbar {
@@ -76,19 +77,30 @@
       text-align: right;
       color: var(--muted);
       font-size: 14px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--soft-shadow);
     }
 
     .tabs {
+      position: sticky;
+      top: 0;
+      z-index: 4;
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      padding: 12px 0 18px;
+      margin: 0 -8px 8px;
+      padding: 12px 8px 18px;
       border-top: 1px solid var(--line);
+      background: linear-gradient(to bottom, rgba(247,244,238,.96), rgba(247,244,238,.82));
+      backdrop-filter: blur(14px);
       animation: rise .5s ease both;
     }
 
-    .tab, .load-more, .icon-action {
-      min-height: 42px;
+    .tab, .load-more, .icon-action, .action-pill {
+      min-height: 44px;
       padding: 0 16px;
       border-radius: 8px;
       background: rgba(255,255,255,.72);
@@ -105,7 +117,7 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
       gap: clamp(10px, 2vw, 18px);
       align-items: start;
     }
@@ -117,7 +129,7 @@
       border-radius: 8px;
       background: #e9e5dc;
       border: 1px solid rgba(23,26,34,.08);
-      box-shadow: 0 10px 30px rgba(23,26,34,.08);
+      box-shadow: var(--soft-shadow);
       animation: tileIn .42s ease both;
       transition: transform .22s ease, box-shadow .22s ease;
     }
@@ -136,45 +148,77 @@
       transition: transform .28s ease, filter .28s ease;
     }
 
+    .tile::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,.18) 36%, transparent 64%),
+        linear-gradient(to bottom, rgba(0,0,0,.20), transparent 28%);
+    }
+
     .tile:hover img { transform: scale(1.07); }
+
+    .number-badge {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 2;
+      min-width: 54px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 12px;
+      border-radius: 8px;
+      color: #fff;
+      background: rgba(23, 26, 34, .72);
+      border: 1px solid rgba(255,255,255,.26);
+      backdrop-filter: blur(12px);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
 
     .tile-meta {
       position: absolute;
       inset: auto 0 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      z-index: 2;
+      display: grid;
       gap: 8px;
-      padding: 38px 10px 10px;
+      padding: 52px 10px 10px;
       color: #fff;
-      background: linear-gradient(to top, rgba(0,0,0,.62), transparent);
       font-size: 13px;
     }
 
+    .tile-meta span {
+      display: block;
+      margin-top: 2px;
+      color: rgba(255,255,255,.74);
+      font-size: 12px;
+    }
+
     .tile-actions {
-      position: absolute;
-      top: 8px;
-      right: 8px;
       display: flex;
-      gap: 6px;
-      opacity: 0;
-      transform: translateY(-5px);
-      transition: opacity .18s ease, transform .18s ease;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
     }
 
-    .tile:hover .tile-actions { opacity: 1; transform: translateY(0); }
-
-    .mini {
-      min-width: 34px;
-      height: 34px;
-      border-radius: 8px;
-      background: rgba(255,255,255,.92);
-      color: var(--ink);
-      box-shadow: 0 8px 24px rgba(0,0,0,.18);
+    .action-pill {
+      min-height: 40px;
+      padding: 0 12px;
+      color: #fff;
+      background: rgba(255,255,255,.18);
+      border-color: rgba(255,255,255,.24);
+      backdrop-filter: blur(12px);
+      font-size: 13px;
+      font-weight: 700;
     }
 
-    .mini.danger { color: var(--danger); }
-    .mini.ok { color: var(--accent); }
+    .action-pill.danger { background: rgba(220, 63, 95, .92); border-color: rgba(255,255,255,.18); }
+    .action-pill.ok { background: rgba(14, 159, 134, .92); border-color: rgba(255,255,255,.18); }
+    .action-pill.warn { background: rgba(201, 138, 24, .92); border-color: rgba(255,255,255,.18); }
 
     .empty, .error {
       margin-top: 24px;
@@ -243,6 +287,28 @@
     .icon-action.danger { color: #fff; background: var(--danger); border-color: var(--danger); }
     .icon-action.ok { color: #fff; background: var(--accent); border-color: var(--accent); }
 
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: calc(18px + env(safe-area-inset-bottom));
+      z-index: 20;
+      max-width: min(420px, calc(100vw - 28px));
+      padding: 12px 14px;
+      border-radius: 8px;
+      color: #fff;
+      background: rgba(23, 26, 34, .92);
+      box-shadow: var(--shadow);
+      transform: translate(-50%, 18px);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform .2s ease, opacity .2s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
     @keyframes rise {
       from { opacity: 0; transform: translateY(12px); }
       to { opacity: 1; transform: translateY(0); }
@@ -264,7 +330,7 @@
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .modal-inner { grid-template-columns: 1fr; }
       .inspector { min-height: 0; }
-      .tile-actions { opacity: 1; transform: none; }
+      .action-pill { flex: 1 1 auto; padding: 0 8px; }
     }
   </style>
 </head>
@@ -300,6 +366,7 @@
       </aside>
     </div>
   </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <script>
     const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
@@ -321,6 +388,19 @@
     const modalImage = document.getElementById('modalImage');
     const modalTitle = document.getElementById('modalTitle');
     const modalMeta = document.getElementById('modalMeta');
+    const toast = document.getElementById('toast');
+    let toastTimer = null;
+
+    function artNumber(item) {
+      return item.display_number || item.id;
+    }
+
+    function showToast(text) {
+      toast.textContent = text;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+    }
 
     function mediaUrl(url) {
       if (!initData) return url;
@@ -355,24 +435,32 @@
       const node = document.createElement('article');
       node.className = 'tile';
       node.style.animationDelay = `${Math.min(index * 22, 220)}ms`;
+      const number = artNumber(item);
+      const adminId = state.isAdmin ? `<span>DB id: ${item.id}</span>` : `<span>${item.source || 'gallery'}</span>`;
       node.innerHTML = `
-        <img src="${mediaUrl(item.media_url)}" alt="Арт #${item.id}" loading="lazy">
-        <div class="tile-meta"><b>#${item.id}</b><span>${item.source || 'art'}</span></div>
-        <div class="tile-actions"></div>
+        <img src="${mediaUrl(item.media_url)}" alt="Арт №${number}" loading="lazy">
+        <div class="number-badge">№${number}</div>
+        <div class="tile-meta">
+          <div><b>Арт №${number}</b>${adminId}</div>
+          <div class="tile-actions"></div>
+        </div>
       `;
       const actions = node.querySelector('.tile-actions');
       if (state.view === 'suggestions') {
         actions.innerHTML = `
-          <button class="mini ok" title="Принять" data-approve="${item.id}">✓</button>
-          <button class="mini danger" title="Отклонить" data-reject="${item.id}">×</button>
+          <button class="action-pill ok" title="Принять" data-approve="${item.id}">Принять</button>
+          <button class="action-pill danger" title="Отклонить" data-reject="${item.id}">Отклонить</button>
         `;
       } else if (state.isAdmin && state.view === 'hidden') {
         actions.innerHTML = `
-          <button class="mini ok" title="Вернуть" data-unhide="${item.id}">↩</button>
-          <button class="mini danger" title="Удалить" data-delete="${item.id}">×</button>
+          <button class="action-pill ok" title="Вернуть" data-unhide="${item.id}">Вернуть</button>
+          <button class="action-pill danger" title="Удалить" data-delete="${item.id}" data-number="${number}">Удалить</button>
         `;
       } else if (state.isAdmin) {
-        actions.innerHTML = `<button class="mini danger" title="Скрыть" data-hide="${item.id}">×</button>`;
+        actions.innerHTML = `
+          <button class="action-pill warn" title="Скрыть" data-hide="${item.id}">Скрыть</button>
+          <button class="action-pill danger" title="Удалить" data-delete="${item.id}" data-number="${number}">Удалить</button>
+        `;
       }
       node.addEventListener('click', (event) => {
         if (event.target.closest('button')) return;
@@ -421,15 +509,23 @@
 
     function openModal(item) {
       modalImage.src = mediaUrl(item.media_url);
-      modalTitle.textContent = `Арт #${item.id}`;
-      modalMeta.textContent = `${item.created_at || 'без даты'} · ${item.source || 'gallery'}`;
+      modalTitle.textContent = `Арт №${artNumber(item)}`;
+      modalMeta.textContent = state.isAdmin
+        ? `DB id ${item.id} · ${item.created_at || 'без даты'} · ${item.source || 'gallery'}`
+        : `${item.created_at || 'без даты'} · ${item.source || 'gallery'}`;
       modal.classList.add('open');
     }
 
-    async function mutate(button, path, options = {}) {
+    async function mutate(button, path, options = {}, successText = 'Готово') {
       button.disabled = true;
-      await api(path, options);
-      await load(true);
+      try {
+        await api(path, options);
+        showToast(successText);
+        await load(true);
+      } catch (error) {
+        button.disabled = false;
+        showToast(`Ошибка: ${error.message}`);
+      }
     }
 
     document.getElementById('tabs').addEventListener('click', async (event) => {
@@ -448,11 +544,15 @@
     grid.addEventListener('click', async (event) => {
       const button = event.target.closest('button');
       if (!button) return;
-      if (button.dataset.delete) await mutate(button, `/api/arts/${button.dataset.delete}`, { method: 'DELETE' });
-      if (button.dataset.hide) await mutate(button, `/api/arts/${button.dataset.hide}/hide`, { method: 'POST' });
-      if (button.dataset.unhide) await mutate(button, `/api/arts/${button.dataset.unhide}/unhide`, { method: 'POST' });
-      if (button.dataset.approve) await mutate(button, `/api/arts/suggestions/${button.dataset.approve}/approve`, { method: 'POST' });
-      if (button.dataset.reject) await mutate(button, `/api/arts/suggestions/${button.dataset.reject}/reject`, { method: 'POST' });
+      if (button.dataset.delete) {
+        const number = button.dataset.number || button.dataset.delete;
+        if (!confirm(`Удалить арт №${number} окончательно?`)) return;
+        await mutate(button, `/api/arts/${button.dataset.delete}`, { method: 'DELETE' }, `Арт №${number} удален`);
+      }
+      if (button.dataset.hide) await mutate(button, `/api/arts/${button.dataset.hide}/hide`, { method: 'POST' }, 'Арт скрыт');
+      if (button.dataset.unhide) await mutate(button, `/api/arts/${button.dataset.unhide}/unhide`, { method: 'POST' }, 'Арт возвращен');
+      if (button.dataset.approve) await mutate(button, `/api/arts/suggestions/${button.dataset.approve}/approve`, { method: 'POST' }, 'Предложка принята');
+      if (button.dataset.reject) await mutate(button, `/api/arts/suggestions/${button.dataset.reject}/reject`, { method: 'POST' }, 'Предложка отклонена');
     });
 
     loadMore.addEventListener('click', () => load(false));

@@ -129,6 +129,57 @@ def test_public_art_payload_excludes_hidden_items(tmp_path, monkeypatch):
     assert [item["id"] for item in payload["items"]] == [visible_id]
 
 
+def test_art_webapp_payload_uses_gallery_numbers_not_database_ids(tmp_path, monkeypatch):
+    import database
+
+    from services import arts
+
+    db_path = str(tmp_path / "arts.db")
+    monkeypatch.setattr(database, "DB_PATH", db_path)
+
+    async def seed_with_gaps():
+        async with aiosqlite.connect(db_path) as db:
+            await database.ensure_art_schema(db)
+            for idx in range(6):
+                await db.execute(
+                    "INSERT INTO arts (file_id, source, is_hidden) VALUES (?, 'admin_upload', 0)",
+                    (f"file-{idx}",),
+                )
+            await db.execute("DELETE FROM arts WHERE id IN (2, 4)")
+            await db.commit()
+
+    run(seed_with_gaps())
+
+    payload = run(arts.get_arts_webapp_payload(user_id=100, is_admin=False, limit=3, offset=0))
+    next_page = run(arts.get_arts_webapp_payload(user_id=100, is_admin=False, limit=3, offset=3))
+
+    assert [item["id"] for item in payload["items"]] == [6, 5, 3]
+    assert [item["display_number"] for item in payload["items"]] == [1, 2, 3]
+    assert [item["display_number"] for item in next_page["items"]] == [4]
+
+
+def test_arts_api_delete_removes_art_for_admin(tmp_path, monkeypatch):
+    import database
+    from aiohttp.test_utils import make_mocked_request
+
+    from services import art_webapp_api, arts
+
+    db_path = str(tmp_path / "arts.db")
+    monkeypatch.setattr(database, "DB_PATH", db_path)
+    monkeypatch.setattr(art_webapp_api, "get_auth_user", lambda _request: {"id": 10})
+    monkeypatch.setattr(art_webapp_api, "get_admins", lambda: asyncio.sleep(0, result=[10]))
+    monkeypatch.setattr(arts, "get_admins", lambda: asyncio.sleep(0, result=[10]))
+    run(database.init_db())
+    art_id = run(arts.add_art("delete-me", added_by=10, source="admin_upload"))
+
+    request = make_mocked_request("DELETE", f"/api/arts/{art_id}", match_info={"id": str(art_id)})
+    response = run(art_webapp_api.handle_art_delete(request))
+    page = run(arts.list_arts_page(limit=10, offset=0, include_hidden=True))
+
+    assert response.status == 200
+    assert page.total == 0
+
+
 def test_arts_api_requires_authenticated_user(monkeypatch):
     from aiohttp.test_utils import make_mocked_request
 
