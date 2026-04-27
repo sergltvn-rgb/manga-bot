@@ -818,10 +818,44 @@ class TestGiveawayPublishing:
         markup = _preview_markup()
         buttons = [button.text for row in markup.inline_keyboard for button in row]
 
-        assert "Опубликовать" in buttons
-        assert "Изменить текст" in buttons
-        assert "Изменить призы" in buttons
-        assert "Отменить" in buttons
+        assert "✅ Опубликовать" in buttons
+        assert "✍️ Текст поста" in buttons
+        assert "🏆 Призы" in buttons
+        assert "❌ Отменить" in buttons
+
+    def test_subscription_scope_explains_primary_channel_when_no_extra_channels(self):
+        from services.giveaways import _format_subscription_scope
+
+        text = _format_subscription_scope("@main_channel", [])
+
+        assert "Основной канал: @main_channel" in text
+        assert "проверяется всегда" in text
+        assert "Доп. каналы: не указаны" in text
+        assert "нет" not in text
+
+    def test_admin_giveaway_card_explains_subscription_and_prize_lines(self):
+        from services.giveaways import GIVEAWAY_STATUS_ACTIVE, Giveaway, _format_admin_giveaway_card
+
+        giveaway = Giveaway(
+            id=9,
+            status=GIVEAWAY_STATUS_ACTIVE,
+            channel_id="@main_channel",
+            message_id=123,
+            prize="1 место: VIP; 2 место: 500 монет",
+            post_text="Post",
+            winners_count=2,
+            ends_at_utc=datetime(2026, 5, 1, 20, 28, tzinfo=timezone.utc),
+            created_by=6210312655,
+        )
+
+        text = _format_admin_giveaway_card(giveaway, entries_count=179, required_channels=[])
+
+        assert "Основной канал: @main_channel" in text
+        assert "проверяется всегда" in text
+        assert "Доп. каналы: не указаны" in text
+        assert "1 место" in text
+        assert "VIP" in text
+        assert "\n2 место" in text
 
     def test_admin_giveaway_menu_has_participants_button(self):
         from services.giveaways import _admin_giveaway_menu

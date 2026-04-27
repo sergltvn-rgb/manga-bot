@@ -1116,7 +1116,14 @@ async def validate_publish_channel(bot, channel_id: str) -> None:
 
 
 def _format_required_channels(channel_ids: list[str]) -> str:
-    return ", ".join(channel_ids) if channel_ids else "нет"
+    return ", ".join(channel_ids) if channel_ids else "не указаны"
+
+
+def _format_subscription_scope(channel_id: str, required_channel_ids: list[str] | None = None) -> str:
+    extra_channels = _normalize_required_channel_ids(required_channel_ids or [], primary_channel_id=channel_id)
+    lines = [f"Основной канал: {channel_id} (проверяется всегда)"]
+    lines.append(f"Доп. каналы: {_format_required_channels(extra_channels)}")
+    return "\n".join(lines)
 
 
 def build_giveaway_mini_app_deeplink(bot_username: str, giveaway_id: int, app_short_name: str = "") -> str | None:
@@ -1189,13 +1196,13 @@ def _participation_markup(
 
 def _preview_markup() -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Опубликовать", callback_data="giveaway_preview_publish")
-    builder.button(text="Изменить время публикации", callback_data="giveaway_preview_edit_publish")
-    builder.button(text="Изменить текст", callback_data="giveaway_preview_edit_text")
-    builder.button(text="Изменить призы", callback_data="giveaway_preview_edit_prizes")
-    builder.button(text="Изменить каналы проверки", callback_data="giveaway_preview_edit_required")
-    builder.button(text="Изменить медиа", callback_data="giveaway_preview_edit_media")
-    builder.button(text="Отменить", callback_data="giveaway_preview_cancel")
+    builder.button(text="✅ Опубликовать", callback_data="giveaway_preview_publish")
+    builder.button(text="🕒 Время публикации", callback_data="giveaway_preview_edit_publish")
+    builder.button(text="✍️ Текст поста", callback_data="giveaway_preview_edit_text")
+    builder.button(text="🏆 Призы", callback_data="giveaway_preview_edit_prizes")
+    builder.button(text="📌 Каналы подписки", callback_data="giveaway_preview_edit_required")
+    builder.button(text="🖼 Медиа", callback_data="giveaway_preview_edit_media")
+    builder.button(text="❌ Отменить", callback_data="giveaway_preview_cancel")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -1536,17 +1543,19 @@ def _giveaway_status_icon(status: str) -> str:
 
 
 def _format_admin_giveaway_card(item: Giveaway, *, entries_count: int, required_channels: list[str] | None = None) -> str:
-    required = _format_required_channels(required_channels or [])
+    subscription_scope = _format_subscription_scope(item.channel_id, required_channels or [])
+    prizes = _format_prizes_block(item.prize, item.winners_count)
     lines = [
-        f"{_giveaway_status_icon(item.status)} <b>#{item.id} · {escape_html_text(item.prize)}</b>",
+        f"{_giveaway_status_icon(item.status)} <b>Розыгрыш #{item.id}</b>",
         f"Статус: <b>{escape_html_text(_giveaway_status_label(item.status))}</b>",
+        f"Канал публикации: {escape_html_text(item.channel_id)}",
+        f"Подписка:\n{escape_html_text(subscription_scope)}",
         f"Участники: <b>{entries_count}</b> · мест: <b>{item.winners_count}</b>",
         f"Финиш: <b>{format_giveaway_end(item.ends_at_utc)} МСК</b>",
-        f"Канал: <code>{escape_html_text(item.channel_id)}</code>",
-        f"Проверка подписки: <b>{escape_html_text(required)}</b>",
+        f"Призы:\n{escape_html_text(prizes)}",
     ]
     if item.status == GIVEAWAY_STATUS_SCHEDULED:
-        lines.insert(3, f"Публикация: <b>{format_giveaway_publish(item.publish_at_utc)} МСК</b>")
+        lines.insert(2, f"Публикация: <b>{format_giveaway_publish(item.publish_at_utc)} МСК</b>")
     if item.replacements_count:
         lines.append(f"Перевыборов: <b>{item.replacements_count}</b>")
     return "\n".join(lines)
@@ -1796,17 +1805,18 @@ async def _show_giveaway_preview(message: types.Message, state: FSMContext):
         media_file_id=data.get("media_file_id"),
     )
     required_channel_ids = list(data.get("required_channel_ids") or [])
-    media_note = f"\n\nМедиа: {giveaway.media_type}" if giveaway.media_type else "\n\nМедиа: нет"
-    required_note = f"\nКаналы проверки: {_format_required_channels(required_channel_ids)}"
+    media_label = giveaway.media_type or "нет"
+    subscription_scope = _format_subscription_scope(giveaway.channel_id, required_channel_ids)
     await state.set_state(GiveawayCreate.waiting_for_preview)
     await message.answer(
-        "Предпросмотр перед публикацией:\n\n"
-        + f"Основной канал: {giveaway.channel_id}\n"
-        + f"Публикация: {format_giveaway_publish(giveaway.publish_at_utc)} МСК\n"
-        + required_note
-        + "\n\n"
-        + _giveaway_post_text(giveaway, required_channel_ids)
-        + media_note,
+        "🧾 <b>Предпросмотр перед публикацией</b>\n\n"
+        + "<b>Настройки розыгрыша:</b>\n"
+        + f"• Канал публикации: {escape_html_text(giveaway.channel_id)}\n"
+        + f"• Публикация: {format_giveaway_publish(giveaway.publish_at_utc)} МСК\n"
+        + f"• Подписка:\n{escape_html_text(subscription_scope)}\n"
+        + f"• Медиа: {escape_html_text(media_label)}\n\n"
+        + "<b>Так будет выглядеть пост:</b>\n\n"
+        + _giveaway_post_text(giveaway, required_channel_ids),
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_markup=_preview_markup(),
@@ -1958,14 +1968,16 @@ async def admin_giveaway_participants(callback: types.CallbackQuery):
         total = sum(item.entries_count for item in stats)
         lines = ["📈 <b>Участники активных розыгрышей</b>", f"Всего участников: <b>{total}</b>"]
         for item in stats:
-            required = _format_required_channels(await get_required_channel_ids(item.giveaway_id))
+            subscription_scope = _format_subscription_scope(item.channel_id, await get_required_channel_ids(item.giveaway_id))
+            prizes = _format_prizes_block(item.prize, item.winners_count)
             lines.append("")
             lines.append(
-                f"🎁 <b>#{item.giveaway_id} · {escape_html_text(item.prize)}</b>\n"
+                f"🎁 <b>Розыгрыш #{item.giveaway_id}</b>\n"
+                f"Канал публикации: {escape_html_text(item.channel_id)}\n"
+                f"Подписка:\n{escape_html_text(subscription_scope)}\n"
                 f"Участники: <b>{item.entries_count}</b> · мест: <b>{item.winners_count}</b>\n"
                 f"Финиш: <b>{format_giveaway_end(item.ends_at_utc)} МСК</b>\n"
-                f"Канал: <code>{escape_html_text(item.channel_id)}</code>\n"
-                f"Проверка подписки: <b>{escape_html_text(required)}</b>"
+                f"Призы:\n{escape_html_text(prizes)}"
             )
         text = "\n".join(lines)
     try:
