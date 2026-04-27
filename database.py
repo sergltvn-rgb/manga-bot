@@ -127,6 +127,7 @@ async def init_db():
         )
 
         await db.execute('CREATE TABLE IF NOT EXISTS ai_disabled_groups (chat_id INTEGER PRIMARY KEY)')
+        await db.execute('CREATE TABLE IF NOT EXISTS rp_only_groups (chat_id INTEGER PRIMARY KEY)')
         await db.execute('CREATE TABLE IF NOT EXISTS alya_settings (bot_id INTEGER PRIMARY KEY, mode TEXT DEFAULT "normal")')
         await db.execute('CREATE TABLE IF NOT EXISTS ai_blacklist (user_id INTEGER PRIMARY KEY)')
         await db.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT)')
@@ -584,6 +585,22 @@ async def is_ai_enabled(chat_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute('SELECT 1 FROM ai_disabled_groups WHERE chat_id = ?', (chat_id,)) as cursor:
             return not bool(await cursor.fetchone())
+
+
+async def set_rp_only_group(chat_id: int, enabled: bool) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        if enabled:
+            await db.execute('INSERT OR IGNORE INTO rp_only_groups (chat_id) VALUES (?)', (chat_id,))
+        else:
+            await db.execute('DELETE FROM rp_only_groups WHERE chat_id = ?', (chat_id,))
+        await db.commit()
+    return enabled
+
+
+async def is_rp_only_group(chat_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT 1 FROM rp_only_groups WHERE chat_id = ?', (chat_id,)) as cursor:
+            return bool(await cursor.fetchone())
 
 
 async def update_rp_stat(user_id: int, stat_name: str):

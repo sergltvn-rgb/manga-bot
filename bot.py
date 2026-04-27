@@ -126,6 +126,8 @@ from database import (
     get_user_referred_by,
     get_setting,
     set_setting,
+    is_rp_only_group,
+    set_rp_only_group,
     get_custom_name,
     upsert_user_profile,
     get_user_profile_by_username,
@@ -143,6 +145,7 @@ dp = Dispatcher()
 # повторного импорта bot.py).
 from services.shared_state import ART_CACHE  # noqa: E402,F401
 from services.telegram_helpers import escape_html_text, format_user_tag, get_back_button  # noqa: E402,F401
+from services.group_rp_only import GroupRpOnlyMiddleware  # noqa: E402,F401
 from services.admin_helpers import MAIN_ADMIN_ID, _fake_admin_message, _is_bot_admin, _require_admin  # noqa: E402,F401
 from services.admin_builders import (  # noqa: E402,F401
     _build_admin_menu_kb,
@@ -5544,6 +5547,42 @@ async def cmd_clean(message: types.Message):
 # Бот должен быть админом группы с правом can_restrict_members.
 # ============================================================================
 
+
+@dp.message(Command("rp_only"))
+async def cmd_rp_only(message: types.Message):
+    if message.chat.type not in ("group", "supergroup"):
+        return await temp_reply(message, "Команда работает только в группах.", delay=TTL_ERROR)
+
+    if not await is_moderator(bot, message.chat.id, message.from_user.id):
+        return await temp_reply(message, "🚫 Нужны права админа чата или админа бота.", delay=TTL_ERROR)
+
+    parts = (message.text or "").split(maxsplit=1)
+    arg = parts[1].strip().lower() if len(parts) > 1 else "status"
+
+    if arg in {"on", "вкл", "enable", "enabled"}:
+        await set_rp_only_group(message.chat.id, True)
+        return await reply_and_forget(
+            message,
+            "✅ РП-режим включён: в этой группе бот реагирует только на РП-команды.",
+            ttl=TTL_MENU,
+        )
+
+    if arg in {"off", "выкл", "disable", "disabled"}:
+        await set_rp_only_group(message.chat.id, False)
+        return await reply_and_forget(
+            message,
+            "✅ РП-режим выключен: команды снова доступны в этой группе.",
+            ttl=TTL_MENU,
+        )
+
+    if arg in {"status", "статус"}:
+        enabled = await is_rp_only_group(message.chat.id)
+        status = "включён" if enabled else "выключен"
+        return await reply_and_forget(message, f"ℹ️ РП-режим сейчас {status}.", ttl=TTL_MENU)
+
+    return await temp_reply(message, "Формат: /rp_only on, /rp_only off или /rp_only status", delay=TTL_ERROR)
+
+
 MUTED_PERMISSIONS = types.ChatPermissions(
     can_send_messages=False,
     can_send_audios=False,
@@ -5897,6 +5936,7 @@ async def main():
     dp.include_router(giveaway_router)
     await init_db()
 
+    dp.message.outer_middleware(GroupRpOnlyMiddleware())
     dp.message.outer_middleware(StatsMiddleware())
 
     # Register bot commands
