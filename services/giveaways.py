@@ -88,6 +88,7 @@ class GiveawayEntry:
     status: str
     is_winner: bool
     joined_at_utc: datetime | None = None
+    winner_place: int | None = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,13 @@ class GiveawaySubscriptionCheck:
 class WinnerSelectionResult:
     winners: list[GiveawayEntry]
     replaced_count: int
+
+
+@dataclass(frozen=True)
+class GiveawayRerollResult:
+    place: int
+    old_winner: GiveawayEntry
+    new_winner: GiveawayEntry
 
 
 @dataclass(frozen=True)
@@ -483,7 +491,7 @@ async def get_giveaway_entries(giveaway_id: int) -> list[GiveawayEntry]:
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(
             """
-            SELECT giveaway_id, user_id, username, first_name, status, is_winner, joined_at
+            SELECT giveaway_id, user_id, username, first_name, status, is_winner, joined_at, winner_place
             FROM giveaway_entries
             WHERE giveaway_id = ?
             ORDER BY joined_at, user_id
@@ -500,6 +508,7 @@ async def get_giveaway_entries(giveaway_id: int) -> list[GiveawayEntry]:
             status=str(row[4]),
             is_winner=bool(row[5]),
             joined_at_utc=_dt_from_db(str(row[6])) if row[6] else None,
+            winner_place=int(row[7]) if row[7] is not None else None,
         )
         for row in rows
     ]
@@ -615,7 +624,9 @@ async def build_giveaway_entries_csv(giveaway_id: int) -> str:
     entries = await get_giveaway_entries(giveaway_id)
     output = io.StringIO()
     writer = csv.writer(output, lineterminator="\n")
-    writer.writerow(["giveaway_id", "user_id", "username", "first_name", "joined_at_utc", "joined_at_msk", "status", "is_winner"])
+    writer.writerow(
+        ["giveaway_id", "user_id", "username", "first_name", "joined_at_utc", "joined_at_msk", "status", "is_winner", "winner_place"]
+    )
     for entry in entries:
         joined_at_utc = entry.joined_at_utc.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if entry.joined_at_utc else ""
         joined_at_msk = entry.joined_at_utc.astimezone(MSK_TZ).strftime("%d.%m.%Y %H:%M:%S") if entry.joined_at_utc else ""
@@ -629,6 +640,7 @@ async def build_giveaway_entries_csv(giveaway_id: int) -> str:
                 joined_at_msk,
                 entry.status,
                 1 if entry.is_winner else 0,
+                entry.winner_place or "",
             ]
         )
     return output.getvalue()
@@ -723,13 +735,50 @@ async def verify_giveaway_answer(giveaway_id: int, user_id: int, answer: str) ->
 
 async def mark_winners(giveaway_id: int, winners: list[GiveawayEntry]) -> None:
     async with aiosqlite.connect(database.DB_PATH) as db:
-        await db.execute("UPDATE giveaway_entries SET is_winner = 0 WHERE giveaway_id = ?", (giveaway_id,))
-        for winner in winners:
+        await db.execute("UPDATE giveaway_entries SET is_winner = 0, winner_place = NULL WHERE giveaway_id = ?", (giveaway_id,))
+        for place, winner in enumerate(winners, 1):
             await db.execute(
-                "UPDATE giveaway_entries SET is_winner = 1 WHERE giveaway_id = ? AND user_id = ?",
-                (giveaway_id, winner.user_id),
+                "UPDATE giveaway_entries SET is_winner = 1, winner_place = ? WHERE giveaway_id = ? AND user_id = ?",
+                (place, giveaway_id, winner.user_id),
             )
         await db.commit()
+
+
+async def get_giveaway_winners(giveaway_id: int) -> list[GiveawayEntry]:
+    entries = await get_giveaway_entries(giveaway_id)
+    winners = [entry for entry in entries if entry.is_winner]
+    winners.sort(
+        key=lambda entry: (
+            entry.winner_place if entry.winner_place is not None else 999999,
+            entry.joined_at_utc or datetime.min.replace(tzinfo=timezone.utc),
+            entry.user_id,
+        )
+    )
+    return [
+        GiveawayEntry(
+            giveaway_id=entry.giveaway_id,
+            user_id=entry.user_id,
+            username=entry.username,
+            first_name=entry.first_name,
+            status=entry.status,
+            is_winner=entry.is_winner,
+            joined_at_utc=entry.joined_at_utc,
+            winner_place=entry.winner_place if entry.winner_place is not None else place,
+        )
+        for place, entry in enumerate(winners, 1)
+    ]
+
+
+async def _normalize_winner_places(giveaway_id: int) -> list[GiveawayEntry]:
+    winners = await get_giveaway_winners(giveaway_id)
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        for place, winner in enumerate(winners, 1):
+            await db.execute(
+                "UPDATE giveaway_entries SET winner_place = ? WHERE giveaway_id = ? AND user_id = ? AND is_winner = 1",
+                (place, giveaway_id, winner.user_id),
+            )
+        await db.commit()
+    return await get_giveaway_winners(giveaway_id)
 
 
 async def select_winners(
@@ -757,6 +806,70 @@ async def select_winners(
         else:
             replaced_count += 1
     return WinnerSelectionResult(winners=winners, replaced_count=replaced_count)
+
+
+async def reroll_giveaway_place(
+    bot,
+    giveaway: Giveaway,
+    place: int,
+    *,
+    shuffle: Callable[[list[GiveawayEntry]], list[GiveawayEntry] | None] | None = None,
+) -> GiveawayRerollResult:
+    if giveaway.status != GIVEAWAY_STATUS_FINISHED:
+        raise GiveawayValidationError("Перевыбор доступен только после завершения розыгрыша.")
+    if place < 1 or place > giveaway.winners_count:
+        raise GiveawayValidationError("Некорректное место для перевыбора.")
+
+    winners = await _normalize_winner_places(giveaway.id)
+    if place > len(winners):
+        raise GiveawayValidationError("Для этого места нет текущего победителя.")
+    old_winner = winners[place - 1]
+    current_winner_ids = {winner.user_id for winner in winners}
+    entries = [entry for entry in await get_giveaway_entries(giveaway.id) if entry.user_id not in current_winner_ids]
+    if shuffle is None:
+        random.shuffle(entries)
+    else:
+        shuffled = shuffle(entries)
+        if shuffled is not None:
+            entries = list(shuffled)
+
+    required_channel_ids = await get_required_channel_ids(giveaway.id)
+    new_winner = None
+    for entry in entries:
+        subscription = await check_giveaway_required_subscriptions(bot, giveaway, required_channel_ids, entry.user_id)
+        if subscription.is_allowed:
+            new_winner = entry
+            break
+    if new_winner is None:
+        raise GiveawayValidationError("Нет подходящего участника для замены.")
+
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        await db.execute(
+            "UPDATE giveaway_entries SET is_winner = 0, winner_place = NULL WHERE giveaway_id = ? AND user_id = ?",
+            (giveaway.id, old_winner.user_id),
+        )
+        await db.execute(
+            "UPDATE giveaway_entries SET is_winner = 1, winner_place = ? WHERE giveaway_id = ? AND user_id = ?",
+            (place, giveaway.id, new_winner.user_id),
+        )
+        await db.commit()
+
+    result = GiveawayRerollResult(
+        place=place,
+        old_winner=old_winner,
+        new_winner=GiveawayEntry(
+            giveaway_id=new_winner.giveaway_id,
+            user_id=new_winner.user_id,
+            username=new_winner.username,
+            first_name=new_winner.first_name,
+            status=new_winner.status,
+            is_winner=True,
+            joined_at_utc=new_winner.joined_at_utc,
+            winner_place=place,
+        ),
+    )
+    await publish_giveaway_reroll_result(bot, giveaway, result)
+    return result
 
 
 async def is_channel_subscriber(bot, channel_id: str, user_id: int) -> bool:
@@ -1143,6 +1256,20 @@ def format_winner_lines(winners: list[GiveawayEntry], prize_text: str) -> str:
         prize = prizes[idx - 1] if idx - 1 < len(prizes) else (prizes[-1] if prizes else "Приз")
         lines.append(f"{idx} место — {_format_winner(entry)}\n🏆 {escape_html_text(prize)}")
     return "\n\n".join(lines)
+
+
+async def publish_giveaway_reroll_result(bot, giveaway: Giveaway, result: GiveawayRerollResult) -> None:
+    prizes = split_place_prizes(giveaway.prize)
+    prize = prizes[result.place - 1] if result.place - 1 < len(prizes) else (prizes[-1] if prizes else "Приз")
+    text = (
+        "🔁 <b>Перевыбор победителя</b>\n\n"
+        f"<b>Место:</b> {result.place}\n"
+        f"<b>Приз:</b> {escape_html_text(prize)}\n\n"
+        f"Было: {_format_winner(result.old_winner)}\n"
+        f"Стало: {_format_winner(result.new_winner)}"
+    )
+    await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+    await _notify_giveaway_creator(bot, giveaway, f"Перевыбор {result.place} места в розыгрыше #{giveaway.id} выполнен.\n\n{text}")
 
 
 async def _notify_giveaway_creator(bot, giveaway: Giveaway, text: str) -> None:
@@ -1604,9 +1731,11 @@ async def admin_giveaway_active(callback: types.CallbackQuery):
     for item in active[:10]:
         if item.status == GIVEAWAY_STATUS_ACTIVE:
             builder.button(text=f"Завершить #{item.id}", callback_data=f"giveaway_finish:{item.id}")
+            builder.button(text=f"Кнопка #{item.id}", callback_data=f"giveaway_refresh_markup:{item.id}")
         builder.button(text=f"Отменить #{item.id}", callback_data=f"giveaway_cancel:{item.id}")
+    builder.button(text="Обновить кнопки активных", callback_data="giveaway_refresh_markups")
     builder.button(text="Назад", callback_data="admin_giveaways")
-    builder.adjust(2, 1)
+    builder.adjust(2, 2, 1, 1)
     try:
         await callback.message.edit_text(text, reply_markup=builder.as_markup())
     except TelegramAPIError as exc:
@@ -1678,6 +1807,8 @@ async def _render_giveaway_history(
                 f"#{item.id}: {item.status} · {item.channel_id} · участников {count} · мест {item.winners_count} · до {format_giveaway_end(item.ends_at_utc)}"
             )
             builder.button(text=f"CSV #{item.id}", callback_data=f"giveaway_export:{item.id}")
+            if item.status == GIVEAWAY_STATUS_FINISHED:
+                builder.button(text=f"Перевыбор #{item.id}", callback_data=f"giveaway_reroll_menu:{item.id}")
             builder.button(text=f"Повторить #{item.id}", callback_data=f"giveaway_repeat:{item.id}")
         text = "\n".join(lines)
     builder.button(text="Обновить", callback_data=refresh_callback)
@@ -1730,6 +1861,50 @@ async def admin_giveaway_repeat(callback: types.CallbackQuery, state: FSMContext
     await callback.answer()
 
 
+@giveaway_router.callback_query(F.data.startswith("giveaway_reroll_menu:"))
+async def admin_giveaway_reroll_menu(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    giveaway_id = int(callback.data.split(":", 1)[1])
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None or giveaway.status != GIVEAWAY_STATUS_FINISHED:
+        return await callback.answer("Перевыбор доступен только для завершенного розыгрыша.", show_alert=True)
+    winners = await _normalize_winner_places(giveaway_id)
+    if not winners:
+        return await callback.answer("В этом розыгрыше нет победителей для перевыбора.", show_alert=True)
+    builder = InlineKeyboardBuilder()
+    lines = [f"Перевыбор места в розыгрыше #{giveaway_id}:"]
+    for winner in winners:
+        place = winner.winner_place or 1
+        lines.append(f"{place} место: {winner.first_name or winner.username or winner.user_id}")
+        builder.button(text=f"{place} место", callback_data=f"giveaway_reroll:{giveaway_id}:{place}")
+    builder.button(text="Назад", callback_data="admin_giveaway_history")
+    builder.adjust(2, 1)
+    await callback.message.edit_text("\n".join(lines), reply_markup=builder.as_markup())
+    await callback.answer()
+
+
+@giveaway_router.callback_query(F.data.startswith("giveaway_reroll:"))
+async def admin_giveaway_reroll_place(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    _, giveaway_id_raw, place_raw = callback.data.split(":", 2)
+    giveaway_id = int(giveaway_id_raw)
+    place = int(place_raw)
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return await callback.answer("Розыгрыш не найден.", show_alert=True)
+    try:
+        result = await reroll_giveaway_place(callback.bot, giveaway, place)
+    except GiveawayValidationError as exc:
+        return await callback.answer(str(exc), show_alert=True)
+    await callback.message.answer(
+        f"Перевыбор {result.place} места выполнен: {result.old_winner.first_name or result.old_winner.username} → "
+        f"{result.new_winner.first_name or result.new_winner.username}."
+    )
+    await callback.answer("Готово.")
+
+
 @giveaway_router.callback_query(F.data.startswith("giveaway_finish:"))
 async def admin_giveaway_finish_now(callback: types.CallbackQuery):
     if not await _require_admin(callback):
@@ -1741,6 +1916,30 @@ async def admin_giveaway_finish_now(callback: types.CallbackQuery):
     await finalize_giveaway(callback.bot, giveaway)
     await callback.answer("Розыгрыш завершён.")
     await admin_giveaway_active(callback)
+
+
+@giveaway_router.callback_query(F.data.startswith("giveaway_refresh_markup:"))
+async def admin_giveaway_refresh_markup(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    giveaway_id = int(callback.data.split(":", 1)[1])
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None or giveaway.status != GIVEAWAY_STATUS_ACTIVE:
+        return await callback.answer("Можно обновлять только активный опубликованный розыгрыш.", show_alert=True)
+    await refresh_giveaway_participation_markup(callback.bot, giveaway)
+    await callback.answer("Кнопка обновлена.")
+
+
+@giveaway_router.callback_query(F.data == "giveaway_refresh_markups")
+async def admin_giveaway_refresh_markups(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    updated = 0
+    for giveaway in await list_active_giveaways():
+        if giveaway.status == GIVEAWAY_STATUS_ACTIVE:
+            await refresh_giveaway_participation_markup(callback.bot, giveaway)
+            updated += 1
+    await callback.answer(f"Обновлено активных кнопок: {updated}.", show_alert=True)
 
 
 @giveaway_router.callback_query(F.data.startswith("giveaway_cancel:"))

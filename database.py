@@ -273,8 +273,13 @@ async def init_db():
             joined_at TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'joined',
             is_winner INTEGER NOT NULL DEFAULT 0,
+            winner_place INTEGER DEFAULT NULL,
             PRIMARY KEY (giveaway_id, user_id)
         )''')
+        try:
+            await db.execute('ALTER TABLE giveaway_entries ADD COLUMN winner_place INTEGER DEFAULT NULL')
+        except sqlite3.OperationalError:
+            pass
         await db.execute('''CREATE TABLE IF NOT EXISTS giveaway_required_channels (
             giveaway_id INTEGER NOT NULL,
             channel_id TEXT NOT NULL,

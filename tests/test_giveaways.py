@@ -260,9 +260,37 @@ class TestGiveawayDb:
 
         csv_text = run(giveaways.build_giveaway_entries_csv(giveaway_id))
 
-        assert "giveaway_id,user_id,username,first_name,joined_at_utc,joined_at_msk,status,is_winner" in csv_text
+        assert "giveaway_id,user_id,username,first_name,joined_at_utc,joined_at_msk,status,is_winner,winner_place" in csv_text
         assert f"{giveaway_id},1001,alice,Alice," in csv_text
         assert ",joined,1" in csv_text
+
+    def test_mark_winners_stores_winner_places(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="VIP; Coins",
+                post_text="Post",
+                winners_count=2,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1002, "bob", "Bob"))
+
+        entries = run(giveaways.get_giveaway_entries(giveaway_id))
+        run(giveaways.mark_winners(giveaway_id, entries))
+        winners = run(giveaways.get_giveaway_winners(giveaway_id))
+
+        assert [(winner.user_id, winner.winner_place) for winner in winners] == [(1001, 1), (1002, 2)]
 
     def test_clone_giveaway_copies_content_and_required_channels_without_entries(self, tmp_path, monkeypatch):
         import database
@@ -355,6 +383,55 @@ class TestGiveawayWinnerSelection:
 
         assert [entry.user_id for entry in result.winners] == [20]
         assert result.replaced_count == 0
+
+    def test_rerolls_requested_place_and_keeps_other_winners(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class Member:
+            status = "member"
+
+        class BotStub:
+            def __init__(self):
+                self.calls = []
+
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member()
+
+            async def send_message(self, **kwargs):
+                self.calls.append(("send_message", kwargs))
+                return type("Msg", (), {"message_id": 88})()
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="VIP; Coins",
+                post_text="Post",
+                winners_count=2,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 123))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1002, "bob", "Bob"))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1003, "cara", "Cara"))
+        entries = run(giveaways.get_giveaway_entries(giveaway_id))
+        run(giveaways.mark_winners(giveaway_id, entries[:2]))
+        run(giveaways.mark_giveaway_finished(giveaway_id))
+        giveaway = run(giveaways.get_giveaway(giveaway_id))
+
+        result = run(giveaways.reroll_giveaway_place(BotStub(), giveaway, 1, shuffle=lambda values: values))
+        winners = run(giveaways.get_giveaway_winners(giveaway_id))
+
+        assert result.old_winner.user_id == 1001
+        assert result.new_winner.user_id == 1003
+        assert [(winner.user_id, winner.winner_place) for winner in winners] == [(1003, 1), (1002, 2)]
 
     def test_winner_lines_include_place_specific_prizes(self):
         from services.giveaways import GiveawayEntry, format_winner_lines
@@ -566,6 +643,45 @@ class TestGiveawayPublishing:
         assert buttons[0].callback_data == "giveaway_join:42"
         assert buttons[1].callback_data == "giveaway_count:42"
         assert "7" in buttons[1].text
+
+    def test_refresh_giveaway_participation_markup_updates_old_post_counter(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(giveaways, "GIVEAWAY_MINI_APP_SHORT_NAME", "")
+
+        class BotStub:
+            def __init__(self):
+                self.calls = []
+
+            async def edit_message_reply_markup(self, **kwargs):
+                self.calls.append(("edit_message_reply_markup", kwargs))
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 123))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        giveaway = run(giveaways.get_giveaway(giveaway_id))
+        bot = BotStub()
+
+        run(giveaways.refresh_giveaway_participation_markup(bot, giveaway))
+
+        buttons = [button for row in bot.calls[0][1]["reply_markup"].inline_keyboard for button in row]
+        assert bot.calls[0][1]["chat_id"] == "@main_channel"
+        assert bot.calls[0][1]["message_id"] == 123
+        assert any(button.callback_data == "giveaway_count:1" and "1" in button.text for button in buttons)
 
     def test_finalize_sends_result_without_editing_original_post(self, tmp_path, monkeypatch):
         import database
