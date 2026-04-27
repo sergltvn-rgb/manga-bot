@@ -52,30 +52,20 @@
     }
 
     .mascot {
-      width: min(100%, 280px);
-      aspect-ratio: 16 / 9;
+      width: min(100%, 220px);
+      aspect-ratio: 1 / 1;
       margin: 0 auto 24px;
       border-radius: 16px;
       overflow: hidden;
-      background: #f5f7fb center / cover no-repeat;
-      background-image: url("assets/giveaway-waiting.jpg");
+      background: #f5f7fb;
       box-shadow: 0 14px 36px rgba(31, 41, 55, 0.14);
     }
 
-    .mascot[data-state="success"] {
-      background-image: url("assets/giveaway-success.jpg");
-    }
-
-    .mascot video,
     .mascot img {
       display: block;
       width: 100%;
       height: 100%;
       object-fit: cover;
-    }
-
-    .mascot.video-failed video {
-      display: none;
     }
 
     h1 {
@@ -155,10 +145,8 @@
   <main class="shell">
     <section class="stage">
       <div class="panel">
-        <div id="mascot-frame" class="mascot" data-state="waiting" aria-hidden="true">
-          <video id="mascot" autoplay loop muted playsinline preload="auto" poster="assets/giveaway-waiting.jpg">
-            <source id="mascot-source" src="assets/giveaway-waiting.mp4" type="video/mp4">
-          </video>
+        <div class="mascot" aria-hidden="true">
+          <img id="mascot" src="assets/giveaway-waiting.jpg" alt="">
         </div>
         <h1 id="title">&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1103;&#1077;&#1084; &#1087;&#1086;&#1076;&#1087;&#1080;&#1089;&#1082;&#1091;...</h1>
         <p id="text">&#1069;&#1090;&#1086; &#1079;&#1072;&#1081;&#1084;&#1077;&#1090; &#1087;&#1072;&#1088;&#1091; &#1089;&#1077;&#1082;&#1091;&#1085;&#1076;.</p>
@@ -210,14 +198,8 @@
     const channels = document.getElementById('channels');
     const retry = document.getElementById('retry');
     const closeBtn = document.getElementById('close');
-    const mascotFrame = document.getElementById('mascot-frame');
     const mascot = document.getElementById('mascot');
-    const mascotSource = document.getElementById('mascot-source');
-    const mascotVideos = {
-      waiting: 'assets/giveaway-waiting.mp4',
-      success: 'assets/giveaway-success.mp4',
-    };
-    const mascotPosters = {
+    const mascotImages = {
       waiting: 'assets/giveaway-waiting.jpg',
       success: 'assets/giveaway-success.jpg',
     };
@@ -228,21 +210,8 @@
     }
 
     function setMascot(state) {
-      const nextSrc = mascotVideos[state] || mascotVideos.waiting;
-      const nextPoster = mascotPosters[state] || mascotPosters.waiting;
-      const currentSrc = mascotSource.getAttribute('src');
-      mascotFrame.dataset.state = state === 'success' ? 'success' : 'waiting';
-      mascotFrame.classList.remove('video-failed');
-      mascot.setAttribute('poster', nextPoster);
-      if (currentSrc === nextSrc) return;
-      mascotSource.setAttribute('src', nextSrc);
-      mascot.load();
-      mascot.play().catch(() => {});
+      mascot.src = mascotImages[state] || mascotImages.waiting;
     }
-
-    mascot.addEventListener('error', () => {
-      mascotFrame.classList.add('video-failed');
-    });
 
     function openUrl(url) {
       if (tg && typeof tg.openTelegramLink === 'function' && /^https:\/\/t\.me\//i.test(url)) {
