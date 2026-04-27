@@ -7,6 +7,8 @@ the aiogram router. It intentionally does not import ``bot.py``.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import logging
 import random
@@ -42,6 +44,7 @@ def _load_moscow_tz():
 
 MSK_TZ = _load_moscow_tz()
 GIVEAWAY_STATUS_DRAFT = "draft"
+GIVEAWAY_STATUS_SCHEDULED = "scheduled"
 GIVEAWAY_STATUS_ACTIVE = "active"
 GIVEAWAY_STATUS_FINISHING = "finishing"
 GIVEAWAY_STATUS_FINISHED = "finished"
@@ -70,6 +73,7 @@ class Giveaway:
     winners_count: int
     ends_at_utc: datetime
     created_by: int
+    publish_at_utc: datetime | None = None
     media_type: str | None = None
     media_file_id: str | None = None
     replacements_count: int = 0
@@ -125,6 +129,7 @@ class GiveawayVerificationChallenge:
 class GiveawayCreate(StatesGroup):
     waiting_for_channel = State()
     waiting_for_required_channels = State()
+    waiting_for_publish = State()
     waiting_for_prize = State()
     waiting_for_end = State()
     waiting_for_winners = State()
@@ -177,6 +182,19 @@ def parse_giveaway_end(raw: str, *, now: datetime | None = None) -> datetime:
 
 def format_giveaway_end(ends_at_utc: datetime) -> str:
     return ends_at_utc.astimezone(MSK_TZ).strftime("%d.%m.%Y %H:%M")
+
+
+def parse_giveaway_publish(raw: str, *, now: datetime | None = None) -> datetime | None:
+    text = (raw or "").strip().lower()
+    if text in {"/now", "now", "сейчас", "сразу", "/skip"}:
+        return None
+    return parse_giveaway_end(raw, now=now)
+
+
+def format_giveaway_publish(publish_at_utc: datetime | None) -> str:
+    if publish_at_utc is None:
+        return "сразу"
+    return format_giveaway_end(publish_at_utc)
 
 
 def _channel_url(channel_id: str) -> str:
@@ -251,7 +269,8 @@ def _row_to_giveaway(row) -> Giveaway:
         winners_count=int(row[8]),
         ends_at_utc=_dt_from_db(str(row[9])),
         created_by=int(row[10]),
-        replacements_count=int(row[11] or 0),
+        publish_at_utc=_dt_from_db(str(row[11])) if row[11] else None,
+        replacements_count=int(row[12] or 0),
     )
 
 
@@ -263,6 +282,7 @@ async def create_giveaway(
     winners_count: int,
     ends_at_utc: datetime,
     created_by: int,
+    publish_at_utc: datetime | None = None,
     media_type: str | None = None,
     media_file_id: str | None = None,
 ) -> int:
@@ -279,9 +299,9 @@ async def create_giveaway(
             """
             INSERT INTO giveaways (
                 status, channel_id, prize, post_text, media_type, media_file_id,
-                winners_count, ends_at_utc, created_by, created_at
+                winners_count, ends_at_utc, created_by, created_at, publish_at_utc
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 GIVEAWAY_STATUS_DRAFT,
@@ -294,6 +314,7 @@ async def create_giveaway(
                 _dt_to_db(ends_at_utc),
                 created_by,
                 now,
+                _dt_to_db(publish_at_utc) if publish_at_utc else None,
             ),
         )
         await db.commit()
@@ -305,7 +326,7 @@ async def get_giveaway(giveaway_id: int) -> Giveaway | None:
         async with db.execute(
             """
             SELECT id, status, channel_id, message_id, prize, post_text, media_type,
-                   media_file_id, winners_count, ends_at_utc, created_by, replacements_count
+                   media_file_id, winners_count, ends_at_utc, created_by, publish_at_utc, replacements_count
             FROM giveaways WHERE id = ?
             """,
             (giveaway_id,),
@@ -320,11 +341,45 @@ async def set_giveaway_published(giveaway_id: int, message_id: int) -> None:
             """
             UPDATE giveaways
             SET status = ?, message_id = ?, published_at = ?
-            WHERE id = ? AND status = ?
+            WHERE id = ? AND status IN (?, ?)
             """,
-            (GIVEAWAY_STATUS_ACTIVE, message_id, _dt_to_db(_utcnow()), giveaway_id, GIVEAWAY_STATUS_DRAFT),
+            (
+                GIVEAWAY_STATUS_ACTIVE,
+                message_id,
+                _dt_to_db(_utcnow()),
+                giveaway_id,
+                GIVEAWAY_STATUS_DRAFT,
+                GIVEAWAY_STATUS_SCHEDULED,
+            ),
         )
         await db.commit()
+
+
+async def schedule_giveaway_publication(giveaway_id: int) -> bool:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE giveaways SET status = ? WHERE id = ? AND status = ?",
+            (GIVEAWAY_STATUS_SCHEDULED, giveaway_id, GIVEAWAY_STATUS_DRAFT),
+        )
+        await db.commit()
+        return cursor.rowcount == 1
+
+
+async def list_due_publication_giveaways(now: datetime | None = None) -> list[Giveaway]:
+    now_db = _dt_to_db(now or _utcnow())
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT id, status, channel_id, message_id, prize, post_text, media_type,
+                   media_file_id, winners_count, ends_at_utc, created_by, publish_at_utc, replacements_count
+            FROM giveaways
+            WHERE status = ? AND publish_at_utc IS NOT NULL AND publish_at_utc <= ?
+            ORDER BY publish_at_utc, id
+            """,
+            (GIVEAWAY_STATUS_SCHEDULED, now_db),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [_row_to_giveaway(row) for row in rows]
 
 
 async def list_due_giveaways(now: datetime | None = None) -> list[Giveaway]:
@@ -333,7 +388,7 @@ async def list_due_giveaways(now: datetime | None = None) -> list[Giveaway]:
         async with db.execute(
             """
             SELECT id, status, channel_id, message_id, prize, post_text, media_type,
-                   media_file_id, winners_count, ends_at_utc, created_by, replacements_count
+                   media_file_id, winners_count, ends_at_utc, created_by, publish_at_utc, replacements_count
             FROM giveaways
             WHERE status = ? AND ends_at_utc <= ?
             ORDER BY ends_at_utc, id
@@ -349,12 +404,12 @@ async def list_active_giveaways() -> list[Giveaway]:
         async with db.execute(
             """
             SELECT id, status, channel_id, message_id, prize, post_text, media_type,
-                   media_file_id, winners_count, ends_at_utc, created_by, replacements_count
+                   media_file_id, winners_count, ends_at_utc, created_by, publish_at_utc, replacements_count
             FROM giveaways
-            WHERE status IN (?, ?)
+            WHERE status IN (?, ?, ?)
             ORDER BY ends_at_utc, id
             """,
-            (GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING),
+            (GIVEAWAY_STATUS_SCHEDULED, GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING),
         ) as cursor:
             rows = await cursor.fetchall()
     return [_row_to_giveaway(row) for row in rows]
@@ -394,8 +449,15 @@ async def mark_giveaway_finished(giveaway_id: int, *, replacements_count: int = 
 async def cancel_giveaway(giveaway_id: int) -> bool:
     async with aiosqlite.connect(database.DB_PATH) as db:
         cursor = await db.execute(
-            "UPDATE giveaways SET status = ?, finished_at = ? WHERE id = ? AND status IN (?, ?)",
-            (GIVEAWAY_STATUS_CANCELLED, _dt_to_db(_utcnow()), giveaway_id, GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_DRAFT),
+            "UPDATE giveaways SET status = ?, finished_at = ? WHERE id = ? AND status IN (?, ?, ?)",
+            (
+                GIVEAWAY_STATUS_CANCELLED,
+                _dt_to_db(_utcnow()),
+                giveaway_id,
+                GIVEAWAY_STATUS_ACTIVE,
+                GIVEAWAY_STATUS_DRAFT,
+                GIVEAWAY_STATUS_SCHEDULED,
+            ),
         )
         await db.commit()
         return cursor.rowcount == 1
@@ -498,6 +560,74 @@ async def get_required_channel_ids(giveaway_id: int) -> list[str]:
     return [item.channel_id for item in await get_giveaway_required_channels(giveaway_id)]
 
 
+async def list_recent_giveaways(*, created_by: int | None = None, limit: int = 20) -> list[Giveaway]:
+    limit = max(1, min(int(limit), 50))
+    params: list[object] = []
+    where = ""
+    if created_by is not None:
+        where = "WHERE created_by = ?"
+        params.append(created_by)
+    params.append(limit)
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            f"""
+            SELECT id, status, channel_id, message_id, prize, post_text, media_type,
+                   media_file_id, winners_count, ends_at_utc, created_by, publish_at_utc, replacements_count
+            FROM giveaways
+            {where}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            params,
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [_row_to_giveaway(row) for row in rows]
+
+
+async def clone_giveaway(
+    source_giveaway_id: int,
+    *,
+    created_by: int,
+    ends_at_utc: datetime,
+    publish_at_utc: datetime | None = None,
+) -> int:
+    source = await get_giveaway(source_giveaway_id)
+    if source is None:
+        raise GiveawayValidationError("Giveaway was not found.")
+    cloned_id = await create_giveaway(
+        channel_id=source.channel_id,
+        prize=source.prize,
+        post_text=source.post_text,
+        winners_count=source.winners_count,
+        ends_at_utc=ends_at_utc,
+        created_by=created_by,
+        publish_at_utc=publish_at_utc,
+        media_type=source.media_type,
+        media_file_id=source.media_file_id,
+    )
+    await set_giveaway_required_channels(cloned_id, await get_required_channel_ids(source_giveaway_id))
+    return cloned_id
+
+
+async def build_giveaway_entries_csv(giveaway_id: int) -> str:
+    entries = await get_giveaway_entries(giveaway_id)
+    output = io.StringIO()
+    writer = csv.writer(output, lineterminator="\n")
+    writer.writerow(["giveaway_id", "user_id", "username", "first_name", "status", "is_winner"])
+    for entry in entries:
+        writer.writerow(
+            [
+                entry.giveaway_id,
+                entry.user_id,
+                entry.username or "",
+                entry.first_name or "",
+                entry.status,
+                1 if entry.is_winner else 0,
+            ]
+        )
+    return output.getvalue()
+
+
 async def list_giveaway_participant_stats() -> list[GiveawayParticipantStats]:
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(
@@ -505,11 +635,11 @@ async def list_giveaway_participant_stats() -> list[GiveawayParticipantStats]:
             SELECT g.id, g.channel_id, g.prize, g.winners_count, g.ends_at_utc, COUNT(e.user_id)
             FROM giveaways g
             LEFT JOIN giveaway_entries e ON e.giveaway_id = g.id
-            WHERE g.status IN (?, ?)
+            WHERE g.status IN (?, ?, ?)
             GROUP BY g.id, g.channel_id, g.prize, g.winners_count, g.ends_at_utc
             ORDER BY g.ends_at_utc, g.id
             """,
-            (GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING),
+            (GIVEAWAY_STATUS_SCHEDULED, GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING),
         ) as cursor:
             rows = await cursor.fetchall()
     return [
@@ -760,9 +890,16 @@ def _giveaway_post_text(giveaway: Giveaway, required_channel_ids: list[str] | No
     )
 
 
-def _participation_markup(giveaway_id: int, *, mini_app_url: str | None = None) -> types.InlineKeyboardMarkup:
+def _participation_markup(
+    giveaway_id: int,
+    *,
+    mini_app_url: str | None = None,
+    entries_count: int | None = None,
+) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Участвовать", callback_data=f"giveaway_join:{giveaway_id}")
+    if entries_count is not None:
+        builder.button(text=f"Участников: {entries_count}", callback_data=f"giveaway_count:{giveaway_id}")
     if mini_app_url:
         builder.button(text="Проверить подписку", url=mini_app_url)
     else:
@@ -774,6 +911,7 @@ def _participation_markup(giveaway_id: int, *, mini_app_url: str | None = None) 
 def _preview_markup() -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="Опубликовать", callback_data="giveaway_preview_publish")
+    builder.button(text="Изменить время публикации", callback_data="giveaway_preview_edit_publish")
     builder.button(text="Изменить текст", callback_data="giveaway_preview_edit_text")
     builder.button(text="Изменить призы", callback_data="giveaway_preview_edit_prizes")
     builder.button(text="Изменить каналы проверки", callback_data="giveaway_preview_edit_required")
@@ -805,7 +943,11 @@ async def publish_giveaway_post(bot, giveaway: Giveaway, required_channel_ids: l
             mini_app_url = build_giveaway_mini_app_deeplink(me.username, giveaway.id, GIVEAWAY_MINI_APP_SHORT_NAME)
         except Exception as exc:  # noqa: BLE001 - regular participation button must still publish.
             logging.debug("giveaway: failed to build mini app link: %s", exc)
-    markup = _participation_markup(giveaway.id, mini_app_url=mini_app_url)
+    try:
+        entries_count = await count_giveaway_entries(giveaway.id) if giveaway.id else 0
+    except aiosqlite.Error:
+        entries_count = 0
+    markup = _participation_markup(giveaway.id, mini_app_url=mini_app_url, entries_count=entries_count)
     if giveaway.media_type == "photo":
         msg = await bot.send_photo(
             chat_id=giveaway.channel_id, photo=giveaway.media_file_id, caption=text, parse_mode="HTML", reply_markup=markup
@@ -839,6 +981,31 @@ async def publish_giveaway_post(bot, giveaway: Giveaway, required_channel_ids: l
             reply_markup=markup,
         )
     return int(msg.message_id)
+
+
+async def refresh_giveaway_participation_markup(bot, giveaway: Giveaway) -> None:
+    if not giveaway.message_id or giveaway.status != GIVEAWAY_STATUS_ACTIVE:
+        return
+    mini_app_url = None
+    if GIVEAWAY_MINI_APP_SHORT_NAME:
+        try:
+            me = await bot.get_me()
+            mini_app_url = build_giveaway_mini_app_deeplink(me.username, giveaway.id, GIVEAWAY_MINI_APP_SHORT_NAME)
+        except Exception as exc:  # noqa: BLE001 - callback flow must not fail because of the Mini App link.
+            logging.debug("giveaway: failed to build mini app link during refresh: %s", exc)
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=giveaway.channel_id,
+            message_id=giveaway.message_id,
+            reply_markup=_participation_markup(
+                giveaway.id,
+                mini_app_url=mini_app_url,
+                entries_count=await count_giveaway_entries(giveaway.id),
+            ),
+        )
+    except TelegramAPIError as exc:
+        if "message is not modified" not in _telegram_error_text(exc).lower():
+            logging.info("giveaway: failed to refresh participation markup id=%s error=%s", giveaway.id, _telegram_error_text(exc))
 
 
 def extract_media_from_message(message: types.Message | None) -> tuple[str | None, str | None]:
@@ -903,11 +1070,14 @@ async def create_and_publish_giveaway(
     media_type: str | None = None,
     media_file_id: str | None = None,
     required_channel_ids: list[str] | None = None,
+    publish_at_utc: datetime | None = None,
 ) -> int:
     await validate_publish_channel(bot, channel_id)
     normalized_required_channel_ids = _normalize_required_channel_ids(required_channel_ids or [], primary_channel_id=channel_id)
     for required_channel_id in normalized_required_channel_ids:
         await validate_subscription_channel(bot, required_channel_id)
+    if publish_at_utc and ends_at_utc <= publish_at_utc:
+        raise GiveawayValidationError("Giveaway end time must be after publication time.")
     giveaway_id = await create_giveaway(
         channel_id=channel_id,
         prize=prize,
@@ -915,6 +1085,7 @@ async def create_and_publish_giveaway(
         winners_count=winners_count,
         ends_at_utc=ends_at_utc,
         created_by=created_by,
+        publish_at_utc=publish_at_utc,
         media_type=media_type,
         media_file_id=media_file_id,
     )
@@ -922,6 +1093,9 @@ async def create_and_publish_giveaway(
     giveaway = await get_giveaway(giveaway_id)
     if giveaway is None:
         raise RuntimeError("Giveaway was not created.")
+    if publish_at_utc and publish_at_utc > _utcnow():
+        await schedule_giveaway_publication(giveaway_id)
+        return giveaway_id
     try:
         message_id = await publish_giveaway_post(bot, giveaway, normalized_required_channel_ids)
     except Exception:
@@ -929,6 +1103,26 @@ async def create_and_publish_giveaway(
         raise
     await set_giveaway_published(giveaway_id, message_id)
     return giveaway_id
+
+
+async def publish_scheduled_giveaway(bot, giveaway: Giveaway) -> bool:
+    if giveaway.status != GIVEAWAY_STATUS_SCHEDULED:
+        return False
+    required_channel_ids = await get_required_channel_ids(giveaway.id)
+    try:
+        message_id = await publish_giveaway_post(bot, giveaway, required_channel_ids)
+    except Exception as exc:  # noqa: BLE001 - scheduler must keep running; admin gets details.
+        logging.exception("scheduled giveaway publish failed: id=%s error=%s", giveaway.id, exc)
+        await cancel_giveaway(giveaway.id)
+        await _notify_giveaway_creator(
+            bot,
+            giveaway,
+            f"Не удалось опубликовать запланированный розыгрыш #{giveaway.id}:\n{_format_publish_error(exc)}",
+        )
+        return False
+    await set_giveaway_published(giveaway.id, message_id)
+    await _notify_giveaway_creator(bot, giveaway, f"Запланированный розыгрыш #{giveaway.id} опубликован в {giveaway.channel_id}.")
+    return True
 
 
 def _format_winner(entry: GiveawayEntry) -> str:
@@ -943,6 +1137,13 @@ def format_winner_lines(winners: list[GiveawayEntry], prize_text: str) -> str:
         prize = prizes[idx - 1] if idx - 1 < len(prizes) else (prizes[-1] if prizes else "Приз")
         lines.append(f"{idx} место — {_format_winner(entry)}\n🏆 {escape_html_text(prize)}")
     return "\n\n".join(lines)
+
+
+async def _notify_giveaway_creator(bot, giveaway: Giveaway, text: str) -> None:
+    try:
+        await bot.send_message(chat_id=giveaway.created_by, text=text, parse_mode="HTML", disable_web_page_preview=True)
+    except TelegramAPIError as exc:
+        logging.info("giveaway: failed to notify creator id=%s error=%s", giveaway.id, _telegram_error_text(exc))
 
 
 async def finalize_giveaway(bot, giveaway: Giveaway) -> bool:
@@ -977,13 +1178,25 @@ async def finalize_giveaway(bot, giveaway: Giveaway) -> bool:
             f"👥 Участников: <b>{participants_count}</b>\n"
             "Победителей нет: не нашлось участников с актуальной подпиской."
         )
-    await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+    try:
+        await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+    except TelegramAPIError as exc:
+        logging.warning("giveaway result post failed: id=%s error=%s", giveaway.id, _telegram_error_text(exc))
+        await _notify_giveaway_creator(
+            bot,
+            giveaway,
+            f"Итоги розыгрыша #{giveaway.id} посчитаны, но пост в канал отправить не удалось:\n{escape_html_text(_telegram_error_text(exc))}\n\n{text}",
+        )
+        return True
+    await _notify_giveaway_creator(bot, giveaway, f"Розыгрыш #{giveaway.id} завершен.\n\n{text}")
     return True
 
 
 async def run_giveaway_scheduler(bot, *, interval_seconds: int = 30) -> None:
     while True:
         try:
+            for giveaway in await list_due_publication_giveaways():
+                await publish_scheduled_giveaway(bot, giveaway)
             for giveaway in await list_due_giveaways():
                 try:
                     await finalize_giveaway(bot, giveaway)
@@ -999,6 +1212,8 @@ def _admin_giveaway_menu() -> types.InlineKeyboardMarkup:
     builder.button(text="Создать розыгрыш", callback_data="admin_giveaway_create")
     builder.button(text="Активные розыгрыши", callback_data="admin_giveaway_active")
     builder.button(text="Участники", callback_data="admin_giveaway_participants")
+    builder.button(text="Мои розыгрыши", callback_data="admin_giveaway_mine")
+    builder.button(text="История", callback_data="admin_giveaway_history")
     builder.button(text="Назад", callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -1022,6 +1237,7 @@ async def cmd_giveaway_create(message: types.Message, state: FSMContext):
         media_type=media_type,
         media_file_id=media_file_id,
         required_channel_ids=[],
+        publish_at_utc=None,
     )
     await _show_giveaway_preview(message, state)
 
@@ -1050,7 +1266,12 @@ async def admin_giveaway_create(callback: types.CallbackQuery, state: FSMContext
 
 
 @giveaway_router.message(
-    StateFilter(GiveawayCreate.waiting_for_channel, GiveawayCreate.waiting_for_required_channels, GiveawayCreate.waiting_for_media),
+    StateFilter(
+        GiveawayCreate.waiting_for_channel,
+        GiveawayCreate.waiting_for_required_channels,
+        GiveawayCreate.waiting_for_publish,
+        GiveawayCreate.waiting_for_media,
+    ),
     Command("skip"),
 )
 async def giveaway_create_skip(message: types.Message, state: FSMContext):
@@ -1063,6 +1284,16 @@ async def giveaway_create_skip(message: types.Message, state: FSMContext):
         await state.update_data(required_channel_ids=[])
         data = await state.get_data()
         if data.get("preview_edit") == "required_channels":
+            await state.update_data(preview_edit=None)
+            return await _show_giveaway_preview(message, state)
+        await state.set_state(GiveawayCreate.waiting_for_publish)
+        return await message.answer(
+            "Когда опубликовать розыгрыш? Отправьте /skip или /now для публикации сразу. Можно 30m, 12h, 3d или 27.04.2026 20:00 по МСК."
+        )
+    if current_state == GiveawayCreate.waiting_for_publish.state:
+        await state.update_data(publish_at_utc=None)
+        data = await state.get_data()
+        if data.get("preview_edit") == "publish":
             await state.update_data(preview_edit=None)
             return await _show_giveaway_preview(message, state)
         await state.set_state(GiveawayCreate.waiting_for_end)
@@ -1104,6 +1335,25 @@ async def giveaway_create_required_channels(message: types.Message, state: FSMCo
     if data.get("preview_edit") == "required_channels":
         await state.update_data(preview_edit=None)
         return await _show_giveaway_preview(message, state)
+    await state.set_state(GiveawayCreate.waiting_for_publish)
+    await message.answer(
+        "Когда опубликовать розыгрыш? Отправьте /skip или /now для публикации сразу. Можно 30m, 12h, 3d или 27.04.2026 20:00 по МСК."
+    )
+
+
+@giveaway_router.message(StateFilter(GiveawayCreate.waiting_for_publish))
+async def giveaway_create_publish_time(message: types.Message, state: FSMContext):
+    if not await _is_bot_admin(message.from_user.id):
+        return await state.clear()
+    try:
+        publish_at = parse_giveaway_publish(message.text or "")
+    except GiveawayValidationError as exc:
+        return await message.answer(str(exc))
+    await state.update_data(publish_at_utc=_dt_to_db(publish_at) if publish_at else None)
+    data = await state.get_data()
+    if data.get("preview_edit") == "publish":
+        await state.update_data(preview_edit=None)
+        return await _show_giveaway_preview(message, state)
     await state.set_state(GiveawayCreate.waiting_for_end)
     await message.answer("Когда завершить розыгрыш? Время указывайте по МСК. Например: 27.04.2026 20:00, 12h или 3d.")
 
@@ -1132,7 +1382,13 @@ async def giveaway_create_end(message: types.Message, state: FSMContext):
         ends_at = parse_giveaway_end(message.text or "")
     except GiveawayValidationError as exc:
         return await message.answer(str(exc))
+    data = await state.get_data()
+    publish_at = _dt_from_db(data["publish_at_utc"]) if data.get("publish_at_utc") else None
+    if publish_at and ends_at <= publish_at:
+        return await message.answer("Время завершения должно быть позже времени публикации.")
     await state.update_data(ends_at_utc=_dt_to_db(ends_at))
+    if data.get("repeat_source_id"):
+        return await _show_giveaway_preview(message, state)
     await state.set_state(GiveawayCreate.waiting_for_winners)
     await message.answer("Сколько победителей выбрать? Введите число от 1.")
 
@@ -1197,6 +1453,7 @@ async def _show_giveaway_preview(message: types.Message, state: FSMContext):
         winners_count=int(data["winners_count"]),
         ends_at_utc=_dt_from_db(data["ends_at_utc"]),
         created_by=message.from_user.id,
+        publish_at_utc=_dt_from_db(data["publish_at_utc"]) if data.get("publish_at_utc") else None,
         media_type=data.get("media_type"),
         media_file_id=data.get("media_file_id"),
     )
@@ -1207,6 +1464,7 @@ async def _show_giveaway_preview(message: types.Message, state: FSMContext):
     await message.answer(
         "Предпросмотр перед публикацией:\n\n"
         + f"Основной канал: {giveaway.channel_id}\n"
+        + f"Публикация: {format_giveaway_publish(giveaway.publish_at_utc)} МСК\n"
         + required_note
         + "\n\n"
         + _giveaway_post_text(giveaway, required_channel_ids)
@@ -1231,6 +1489,7 @@ async def _publish_giveaway_from_state(message: types.Message, state: FSMContext
             media_type=data.get("media_type"),
             media_file_id=data.get("media_file_id"),
             required_channel_ids=list(data.get("required_channel_ids") or []),
+            publish_at_utc=_dt_from_db(data["publish_at_utc"]) if data.get("publish_at_utc") else None,
         )
     except GiveawayPublishError as exc:
         logging.warning("giveaway publish failed: %s", exc)
@@ -1239,7 +1498,13 @@ async def _publish_giveaway_from_state(message: types.Message, state: FSMContext
         logging.exception("giveaway wizard failed")
         return await message.answer(f"Не удалось опубликовать розыгрыш:\n{_format_publish_error(exc)}")
     await state.clear()
-    await message.answer(f"Розыгрыш #{giveaway_id} опубликован в {data.get('channel_id') or GIVEAWAY_CHANNEL_ID}.")
+    publish_at = _dt_from_db(data["publish_at_utc"]) if data.get("publish_at_utc") else None
+    if publish_at and publish_at > _utcnow():
+        await message.answer(
+            f"Розыгрыш #{giveaway_id} запланирован на {format_giveaway_publish(publish_at)} МСК в {data.get('channel_id') or GIVEAWAY_CHANNEL_ID}."
+        )
+    else:
+        await message.answer(f"Розыгрыш #{giveaway_id} опубликован в {data.get('channel_id') or GIVEAWAY_CHANNEL_ID}.")
 
 
 @giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_publish")
@@ -1247,6 +1512,16 @@ async def giveaway_preview_publish(callback: types.CallbackQuery, state: FSMCont
     if not await _require_admin(callback):
         return
     await _publish_giveaway_from_state(callback.message, state)
+    await callback.answer()
+
+
+@giveaway_router.callback_query(StateFilter(GiveawayCreate.waiting_for_preview), F.data == "giveaway_preview_edit_publish")
+async def giveaway_preview_edit_publish(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    await state.update_data(preview_edit="publish")
+    await state.set_state(GiveawayCreate.waiting_for_publish)
+    await callback.message.answer("Отправьте новое время публикации: /now для публикации сразу, 30m, 12h, 3d или DD.MM.YYYY HH:MM по МСК.")
     await callback.answer()
 
 
@@ -1310,13 +1585,19 @@ async def admin_giveaway_active(callback: types.CallbackQuery):
         for item in active:
             count = await count_giveaway_entries(item.id)
             required = _format_required_channels(await get_required_channel_ids(item.id))
+            status_note = "запланирован" if item.status == GIVEAWAY_STATUS_SCHEDULED else "активен"
+            publish_note = (
+                f" · публикация {format_giveaway_publish(item.publish_at_utc)} МСК" if item.status == GIVEAWAY_STATUS_SCHEDULED else ""
+            )
             lines.append(
-                f"#{item.id}: {item.prize} · участников {count} · до {format_giveaway_end(item.ends_at_utc)} " f"· проверка: {required}"
+                f"#{item.id}: {status_note} · {item.prize} · участников {count}{publish_note} · до {format_giveaway_end(item.ends_at_utc)} "
+                f"· проверка: {required}"
             )
         text = "\n".join(lines)
     builder = InlineKeyboardBuilder()
     for item in active[:10]:
-        builder.button(text=f"Завершить #{item.id}", callback_data=f"giveaway_finish:{item.id}")
+        if item.status == GIVEAWAY_STATUS_ACTIVE:
+            builder.button(text=f"Завершить #{item.id}", callback_data=f"giveaway_finish:{item.id}")
         builder.button(text=f"Отменить #{item.id}", callback_data=f"giveaway_cancel:{item.id}")
     builder.button(text="Назад", callback_data="admin_giveaways")
     builder.adjust(2, 1)
@@ -1354,6 +1635,92 @@ async def admin_giveaway_participants(callback: types.CallbackQuery):
     except TelegramAPIError as exc:
         if "message is not modified" not in _telegram_error_text(exc).lower():
             raise
+    await callback.answer()
+
+
+@giveaway_router.callback_query(F.data == "admin_giveaway_history")
+async def admin_giveaway_history(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    items = await list_recent_giveaways(limit=10)
+    await _render_giveaway_history(callback, items, title="История розыгрышей:", refresh_callback="admin_giveaway_history")
+
+
+@giveaway_router.callback_query(F.data == "admin_giveaway_mine")
+async def admin_giveaway_mine(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    items = await list_recent_giveaways(created_by=callback.from_user.id, limit=10)
+    await _render_giveaway_history(callback, items, title="Мои розыгрыши:", refresh_callback="admin_giveaway_mine")
+
+
+async def _render_giveaway_history(
+    callback: types.CallbackQuery,
+    items: list[Giveaway],
+    *,
+    title: str,
+    refresh_callback: str,
+) -> None:
+    builder = InlineKeyboardBuilder()
+    if not items:
+        text = f"{title}\nПока пусто."
+    else:
+        lines = [title]
+        for item in items:
+            count = await count_giveaway_entries(item.id)
+            lines.append(
+                f"#{item.id}: {item.status} · {item.channel_id} · участников {count} · мест {item.winners_count} · до {format_giveaway_end(item.ends_at_utc)}"
+            )
+            builder.button(text=f"CSV #{item.id}", callback_data=f"giveaway_export:{item.id}")
+            builder.button(text=f"Повторить #{item.id}", callback_data=f"giveaway_repeat:{item.id}")
+        text = "\n".join(lines)
+    builder.button(text="Обновить", callback_data=refresh_callback)
+    builder.button(text="Назад", callback_data="admin_giveaways")
+    builder.adjust(2, 1, 1)
+    try:
+        await callback.message.edit_text(text, reply_markup=builder.as_markup())
+    except TelegramAPIError as exc:
+        if "message is not modified" not in _telegram_error_text(exc).lower():
+            raise
+    await callback.answer()
+
+
+@giveaway_router.callback_query(F.data.startswith("giveaway_export:"))
+async def admin_giveaway_export(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    giveaway_id = int(callback.data.split(":", 1)[1])
+    csv_text = await build_giveaway_entries_csv(giveaway_id)
+    filename = f"giveaway_{giveaway_id}_entries.csv"
+    await callback.message.answer_document(
+        types.BufferedInputFile(csv_text.encode("utf-8-sig"), filename=filename),
+        caption=f"Участники розыгрыша #{giveaway_id}",
+    )
+    await callback.answer("CSV готов.")
+
+
+@giveaway_router.callback_query(F.data.startswith("giveaway_repeat:"))
+async def admin_giveaway_repeat(callback: types.CallbackQuery, state: FSMContext):
+    if not await _require_admin(callback):
+        return
+    giveaway_id = int(callback.data.split(":", 1)[1])
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return await callback.answer("Розыгрыш не найден.", show_alert=True)
+    await state.update_data(
+        repeat_source_id=giveaway_id,
+        channel_id=giveaway.channel_id,
+        required_channel_ids=await get_required_channel_ids(giveaway_id),
+        winners_count=giveaway.winners_count,
+        prize=giveaway.prize,
+        post_text=giveaway.post_text,
+        media_type=giveaway.media_type,
+        media_file_id=giveaway.media_file_id,
+    )
+    await state.set_state(GiveawayCreate.waiting_for_publish)
+    await callback.message.answer(
+        f"Повтор розыгрыша #{giveaway_id}. Когда опубликовать новый пост? Отправьте /skip или /now для публикации сразу."
+    )
     await callback.answer()
 
 
@@ -1419,7 +1786,16 @@ async def giveaway_join(callback: types.CallbackQuery):
         callback.from_user.username,
         callback.from_user.first_name,
     )
+    if added:
+        await refresh_giveaway_participation_markup(callback.bot, giveaway)
     await callback.answer("Вы участвуете!" if added else "Вы уже участвуете.", show_alert=False)
+
+
+@giveaway_router.callback_query(F.data.startswith("giveaway_count:"))
+async def giveaway_count(callback: types.CallbackQuery):
+    giveaway_id = int(callback.data.split(":", 1)[1])
+    count = await count_giveaway_entries(giveaway_id)
+    await callback.answer(f"Участников: {count}", show_alert=False)
 
 
 @giveaway_router.callback_query(F.data.startswith("giveaway_check:"))
@@ -1472,6 +1848,8 @@ async def giveaway_verify(callback: types.CallbackQuery):
         callback.from_user.username,
         callback.from_user.first_name,
     )
+    if added:
+        await refresh_giveaway_participation_markup(callback.bot, giveaway)
     text = "Проверка пройдена, вы добавлены в участники." if added else "Проверка пройдена, вы уже участвуете."
     try:
         await callback.message.edit_text(text)

@@ -258,8 +258,13 @@ async def init_db():
             created_at TEXT NOT NULL,
             published_at TEXT DEFAULT NULL,
             finished_at TEXT DEFAULT NULL,
+            publish_at_utc TEXT DEFAULT NULL,
             replacements_count INTEGER NOT NULL DEFAULT 0
         )''')
+        try:
+            await db.execute('ALTER TABLE giveaways ADD COLUMN publish_at_utc TEXT DEFAULT NULL')
+        except sqlite3.OperationalError:
+            pass
         await db.execute('''CREATE TABLE IF NOT EXISTS giveaway_entries (
             giveaway_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
@@ -322,6 +327,7 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_web_sessions_user ON web_sessions(user_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_web_sessions_expires ON web_sessions(expires_at)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaways_status_ends ON giveaways(status, ends_at_utc)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaways_status_publish ON giveaways(status, publish_at_utc)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_entries_giveaway ON giveaway_entries(giveaway_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_required_channels_giveaway ON giveaway_required_channels(giveaway_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_verifications_verified ON giveaway_verifications(giveaway_id, verified)')

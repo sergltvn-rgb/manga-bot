@@ -204,6 +204,107 @@ class TestGiveawayDb:
         assert [item.channel_id for item in channels] == ["@extra_one", "@extra_two"]
         assert [item.title for item in channels] == ["@extra_one", "@extra_two"]
 
+    def test_scheduled_giveaway_due_publication_roundtrip(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        publish_at = datetime(2026, 4, 25, 10, 0, tzinfo=timezone.utc)
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+                publish_at_utc=publish_at,
+            )
+        )
+        run(giveaways.schedule_giveaway_publication(giveaway_id))
+
+        early = run(giveaways.list_due_publication_giveaways(datetime(2026, 4, 25, 9, 59, tzinfo=timezone.utc)))
+        due = run(giveaways.list_due_publication_giveaways(datetime(2026, 4, 25, 10, 0, tzinfo=timezone.utc)))
+        giveaway = run(giveaways.get_giveaway(giveaway_id))
+
+        assert early == []
+        assert [item.id for item in due] == [giveaway_id]
+        assert giveaway.status == giveaways.GIVEAWAY_STATUS_SCHEDULED
+        assert giveaway.publish_at_utc == publish_at
+
+    def test_export_entries_csv_contains_participants_and_winners(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        run(giveaways.mark_winners(giveaway_id, [giveaways.GiveawayEntry(giveaway_id, 1001, "alice", "Alice", "joined", True)]))
+
+        csv_text = run(giveaways.build_giveaway_entries_csv(giveaway_id))
+
+        assert "giveaway_id,user_id,username,first_name,status,is_winner" in csv_text
+        assert f"{giveaway_id},1001,alice,Alice,joined,1" in csv_text
+
+    def test_clone_giveaway_copies_content_and_required_channels_without_entries(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        run(database.init_db())
+        source_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=2,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=111,
+                media_type="photo",
+                media_file_id="photo-file",
+            )
+        )
+        run(giveaways.set_giveaway_required_channels(source_id, ["@extra_channel"]))
+        run(giveaways.add_giveaway_entry(source_id, 1001, "alice", "Alice"))
+
+        cloned_id = run(
+            giveaways.clone_giveaway(
+                source_id,
+                created_by=222,
+                ends_at_utc=datetime(2026, 5, 1, 17, 0, tzinfo=timezone.utc),
+            )
+        )
+        cloned = run(giveaways.get_giveaway(cloned_id))
+
+        assert cloned.channel_id == "@main_channel"
+        assert cloned.prize == "Prize"
+        assert cloned.post_text == "Post"
+        assert cloned.winners_count == 2
+        assert cloned.media_file_id == "photo-file"
+        assert cloned.created_by == 222
+        assert run(giveaways.get_required_channel_ids(cloned_id)) == ["@extra_channel"]
+        assert run(giveaways.get_giveaway_entries(cloned_id)) == []
+
     def test_verification_challenge_passes_only_correct_answer(self, tmp_path, monkeypatch):
         import database
 
@@ -455,6 +556,16 @@ class TestGiveawayPublishing:
         assert [button.callback_data for button in buttons] == ["giveaway_join:42", "giveaway_check:42"]
         assert all(button.url is None for button in buttons)
 
+    def test_participation_markup_can_show_participant_count(self):
+        from services.giveaways import _participation_markup
+
+        markup = _participation_markup(42, entries_count=7)
+        buttons = [button for row in markup.inline_keyboard for button in row]
+
+        assert buttons[0].callback_data == "giveaway_join:42"
+        assert buttons[1].callback_data == "giveaway_count:42"
+        assert "7" in buttons[1].text
+
     def test_finalize_sends_result_without_editing_original_post(self, tmp_path, monkeypatch):
         import database
 
@@ -498,7 +609,51 @@ class TestGiveawayPublishing:
 
         assert run(giveaways.finalize_giveaway(bot, giveaway)) is True
 
-        assert [call[0] for call in bot.calls] == ["send_message"]
+        assert "edit_message_reply_markup" not in [call[0] for call in bot.calls]
+        assert bot.calls[0][0] == "send_message"
+        assert bot.calls[0][1]["chat_id"] == "@main_channel"
+
+    def test_finalize_sends_private_admin_summary(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class Member:
+            status = "member"
+
+        class BotStub:
+            def __init__(self):
+                self.calls = []
+
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member()
+
+            async def send_message(self, **kwargs):
+                self.calls.append(("send_message", kwargs))
+                return type("Msg", (), {"message_id": 77})()
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 24, 11, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 123))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        giveaway = run(giveaways.get_giveaway(giveaway_id))
+        bot = BotStub()
+
+        assert run(giveaways.finalize_giveaway(bot, giveaway)) is True
+
+        assert [call[1]["chat_id"] for call in bot.calls] == ["@main_channel", 6210312655]
 
     def test_preview_markup_has_publish_and_edit_buttons(self):
         from services.giveaways import _preview_markup
