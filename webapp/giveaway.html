@@ -57,15 +57,25 @@
       margin: 0 auto 24px;
       border-radius: 16px;
       overflow: hidden;
-      background: #f5f7fb;
+      background: #f5f7fb center / cover no-repeat;
+      background-image: url("assets/giveaway-waiting.jpg");
       box-shadow: 0 14px 36px rgba(31, 41, 55, 0.14);
     }
 
-    .mascot video {
+    .mascot[data-state="success"] {
+      background-image: url("assets/giveaway-success.jpg");
+    }
+
+    .mascot video,
+    .mascot img {
       display: block;
       width: 100%;
       height: 100%;
       object-fit: cover;
+    }
+
+    .mascot.video-failed video {
+      display: none;
     }
 
     h1 {
@@ -145,8 +155,8 @@
   <main class="shell">
     <section class="stage">
       <div class="panel">
-        <div class="mascot" aria-hidden="true">
-          <video id="mascot" autoplay loop muted playsinline preload="auto">
+        <div id="mascot-frame" class="mascot" data-state="waiting" aria-hidden="true">
+          <video id="mascot" autoplay loop muted playsinline preload="auto" poster="assets/giveaway-waiting.jpg">
             <source id="mascot-source" src="assets/giveaway-waiting.mp4" type="video/mp4">
           </video>
         </div>
@@ -200,11 +210,16 @@
     const channels = document.getElementById('channels');
     const retry = document.getElementById('retry');
     const closeBtn = document.getElementById('close');
+    const mascotFrame = document.getElementById('mascot-frame');
     const mascot = document.getElementById('mascot');
     const mascotSource = document.getElementById('mascot-source');
     const mascotVideos = {
       waiting: 'assets/giveaway-waiting.mp4',
       success: 'assets/giveaway-success.mp4',
+    };
+    const mascotPosters = {
+      waiting: 'assets/giveaway-waiting.jpg',
+      success: 'assets/giveaway-success.jpg',
     };
 
     function setCopy(nextTitle, nextText) {
@@ -214,12 +229,20 @@
 
     function setMascot(state) {
       const nextSrc = mascotVideos[state] || mascotVideos.waiting;
+      const nextPoster = mascotPosters[state] || mascotPosters.waiting;
       const currentSrc = mascotSource.getAttribute('src');
+      mascotFrame.dataset.state = state === 'success' ? 'success' : 'waiting';
+      mascotFrame.classList.remove('video-failed');
+      mascot.setAttribute('poster', nextPoster);
       if (currentSrc === nextSrc) return;
       mascotSource.setAttribute('src', nextSrc);
       mascot.load();
       mascot.play().catch(() => {});
     }
+
+    mascot.addEventListener('error', () => {
+      mascotFrame.classList.add('video-failed');
+    });
 
     function openUrl(url) {
       if (tg && typeof tg.openTelegramLink === 'function' && /^https:\/\/t\.me\//i.test(url)) {
