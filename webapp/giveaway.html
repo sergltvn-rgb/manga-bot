@@ -73,6 +73,7 @@
       box-shadow: var(--shadow);
       text-align: center;
       backdrop-filter: blur(18px);
+      animation: panel-in 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
     }
 
     .eyebrow {
@@ -90,24 +91,43 @@
     }
 
     .mascot {
-      width: min(100%, 344px);
+      position: relative;
+      width: min(100%, 342px);
       aspect-ratio: 1 / 1;
       margin: 8px auto 10px;
       border-radius: 26px;
       overflow: hidden;
-      background: linear-gradient(180deg, #ffffff, #f8f4ff);
+      background:
+        radial-gradient(circle at 50% 44%, rgba(236, 72, 153, 0.13), transparent 34%),
+        radial-gradient(circle at 50% 60%, rgba(139, 92, 246, 0.13), transparent 45%),
+        linear-gradient(180deg, #ffffff, #f8f4ff);
       border: 1px solid rgba(139, 92, 246, 0.1);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      animation: mascot-float 4.8s ease-in-out 720ms infinite;
+    }
+
+    .mascot::after {
+      content: "";
+      position: absolute;
+      inset: 13%;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(139, 92, 246, 0.15), transparent 68%);
+      transform: translateY(26%);
+      filter: blur(12px);
+      animation: glow-pulse 3.8s ease-in-out infinite;
     }
 
     .mascot img {
+      position: relative;
+      z-index: 1;
       display: block;
       width: 100%;
       height: 100%;
       object-fit: contain;
       object-position: center;
-      transform: scale(1.04);
+      transform: scale(1.08) translateY(2px);
       filter: saturate(1.05) contrast(1.02);
+      animation: mascot-pop 640ms cubic-bezier(0.16, 1, 0.3, 1) 120ms both;
     }
 
     .state-pill {
@@ -125,6 +145,7 @@
       border: 1px solid color-mix(in srgb, var(--state) 24%, transparent);
       font-size: 13px;
       font-weight: 800;
+      animation: pill-in 520ms cubic-bezier(0.16, 1, 0.3, 1) 180ms both;
     }
 
     h1 {
@@ -194,6 +215,8 @@
       font-weight: 700;
       cursor: pointer;
       box-shadow: 0 12px 26px rgba(139, 92, 246, 0.28);
+      transition: transform 160ms ease, filter 160ms ease, box-shadow 160ms ease;
+      animation: action-in 520ms cubic-bezier(0.16, 1, 0.3, 1) 260ms both;
     }
 
     button.secondary {
@@ -207,10 +230,57 @@
       transform: translateY(1px);
     }
 
+    button:hover {
+      filter: brightness(1.04);
+      box-shadow: 0 16px 30px rgba(139, 92, 246, 0.32);
+    }
+
     @media (max-height: 700px) {
       .mascot { width: min(100%, 270px); }
       .panel { padding: 14px 14px 18px; }
       h1 { font-size: 22px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .panel,
+      .mascot,
+      .mascot::after,
+      .mascot img,
+      .state-pill,
+      button {
+        animation-duration: 1ms;
+        animation-iteration-count: 1;
+      }
+    }
+
+    @keyframes panel-in {
+      from { opacity: 0; transform: translateY(18px) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes mascot-pop {
+      from { opacity: 0; transform: scale(1.02) translateY(16px); }
+      to { opacity: 1; transform: scale(1.08) translateY(2px); }
+    }
+
+    @keyframes mascot-float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-7px); }
+    }
+
+    @keyframes glow-pulse {
+      0%, 100% { opacity: 0.72; transform: translateY(26%) scale(0.94); }
+      50% { opacity: 1; transform: translateY(26%) scale(1.08); }
+    }
+
+    @keyframes pill-in {
+      from { opacity: 0; transform: translateY(8px) scale(0.94); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    @keyframes action-in {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
     .hidden { display: none; }
@@ -222,7 +292,7 @@
       <div class="panel">
         <div class="eyebrow">Alya Giveaway</div>
         <div class="mascot" aria-hidden="true">
-          <img id="mascot" src="assets/giveaway-waiting-clean.webp" srcset="assets/giveaway-waiting-clean.webp 1x, assets/giveaway-waiting.jpg 2x" alt="" decoding="async" fetchpriority="high">
+          <img id="mascot" src="assets/giveaway-waiting-clean.webp" alt="" decoding="async" fetchpriority="high">
         </div>
         <div id="state" class="state-pill">Проверка подписки</div>
         <h1 id="title">&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1103;&#1077;&#1084; &#1087;&#1086;&#1076;&#1087;&#1080;&#1089;&#1082;&#1091;...</h1>
@@ -284,11 +354,9 @@
     const mascotImages = {
       waiting: {
         src: 'assets/giveaway-waiting-clean.webp',
-        srcset: 'assets/giveaway-waiting-clean.webp 1x, assets/giveaway-waiting.jpg 2x',
       },
       success: {
         src: 'assets/giveaway-success-clean.webp',
-        srcset: 'assets/giveaway-success-clean.webp 1x, assets/giveaway-success.jpg 2x',
       },
     };
 
@@ -302,7 +370,7 @@
     function setMascot(state) {
       const image = mascotImages[state] || mascotImages.waiting;
       mascot.src = image.src;
-      mascot.srcset = image.srcset;
+      mascot.removeAttribute('srcset');
     }
 
     function openUrl(url) {
