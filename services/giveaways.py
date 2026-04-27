@@ -26,7 +26,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import database
-from config import GIVEAWAY_CHANNEL_ID, GIVEAWAY_CHANNEL_URL
+from config import GIVEAWAY_CHANNEL_ID, GIVEAWAY_CHANNEL_URL, GIVEAWAY_MINI_APP_SHORT_NAME
 from services.admin_helpers import _is_bot_admin, _require_admin
 from services.telegram_helpers import escape_html_text
 
@@ -710,9 +710,12 @@ def _format_required_channels(channel_ids: list[str]) -> str:
     return ", ".join(channel_ids) if channel_ids else "нет"
 
 
-def build_giveaway_mini_app_deeplink(bot_username: str, giveaway_id: int) -> str:
+def build_giveaway_mini_app_deeplink(bot_username: str, giveaway_id: int, app_short_name: str = "") -> str | None:
     username = str(bot_username or "").lstrip("@")
-    return f"https://t.me/{username}?startapp={quote(f'giveaway_{int(giveaway_id)}')}"
+    short_name = str(app_short_name or "").strip().strip("/")
+    if not username or not short_name:
+        return None
+    return f"https://t.me/{username}/{quote(short_name)}?startapp={quote(f'giveaway_{int(giveaway_id)}')}"
 
 
 async def get_giveaway_webapp_status(bot, giveaway_id: int, user_id: int) -> dict:
@@ -762,6 +765,8 @@ def _participation_markup(giveaway_id: int, *, mini_app_url: str | None = None) 
     builder.button(text="Участвовать", callback_data=f"giveaway_join:{giveaway_id}")
     if mini_app_url:
         builder.button(text="Проверить подписку", url=mini_app_url)
+    else:
+        builder.button(text="Проверить подписку", callback_data=f"giveaway_check:{giveaway_id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -794,11 +799,12 @@ async def publish_giveaway_post(bot, giveaway: Giveaway, required_channel_ids: l
             required_channel_ids = []
     text = _giveaway_post_text(giveaway, required_channel_ids)
     mini_app_url = None
-    try:
-        me = await bot.get_me()
-        mini_app_url = build_giveaway_mini_app_deeplink(me.username, giveaway.id)
-    except Exception as exc:  # noqa: BLE001 - regular participation button must still publish.
-        logging.debug("giveaway: failed to build mini app link: %s", exc)
+    if GIVEAWAY_MINI_APP_SHORT_NAME:
+        try:
+            me = await bot.get_me()
+            mini_app_url = build_giveaway_mini_app_deeplink(me.username, giveaway.id, GIVEAWAY_MINI_APP_SHORT_NAME)
+        except Exception as exc:  # noqa: BLE001 - regular participation button must still publish.
+            logging.debug("giveaway: failed to build mini app link: %s", exc)
     markup = _participation_markup(giveaway.id, mini_app_url=mini_app_url)
     if giveaway.media_type == "photo":
         msg = await bot.send_photo(
@@ -1414,6 +1420,29 @@ async def giveaway_join(callback: types.CallbackQuery):
         callback.from_user.first_name,
     )
     await callback.answer("Вы участвуете!" if added else "Вы уже участвуете.", show_alert=False)
+
+
+@giveaway_router.callback_query(F.data.startswith("giveaway_check:"))
+async def giveaway_check_subscription(callback: types.CallbackQuery):
+    giveaway_id = int(callback.data.split(":", 1)[1])
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None or giveaway.status != GIVEAWAY_STATUS_ACTIVE:
+        return await callback.answer("Розыгрыш уже завершён.", show_alert=True)
+    if await has_giveaway_entry(giveaway_id, callback.from_user.id):
+        return await callback.answer("Вы уже участвуете.", show_alert=True)
+
+    required_channel_ids = await get_required_channel_ids(giveaway_id)
+    subscription = await check_giveaway_required_subscriptions(callback.bot, giveaway, required_channel_ids, callback.from_user.id)
+    if not subscription.is_allowed:
+        return await callback.answer(
+            "Не хватает подписки на каналы:\n" + "\n".join(_channel_url(channel_id) for channel_id in subscription.missing_channels),
+            show_alert=True,
+        )
+
+    return await callback.answer(
+        "Подписка подтверждена. Теперь нажмите «Участвовать», чтобы пройти защиту и попасть в список.",
+        show_alert=True,
+    )
 
 
 @giveaway_router.callback_query(F.data.startswith("giveaway_verify:"))

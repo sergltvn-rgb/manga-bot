@@ -10,6 +10,7 @@ API_HOST = os.getenv("API_HOST", "")  # Публичный URL aiohttp-серв�
 ADMIN_IDS = [6210312655]  # Можно оставить тут
 GIVEAWAY_CHANNEL_ID = os.getenv("GIVEAWAY_CHANNEL_ID", "@alya_novel")
 GIVEAWAY_CHANNEL_URL = os.getenv("GIVEAWAY_CHANNEL_URL", "https://t.me/alya_novel")
+GIVEAWAY_MINI_APP_SHORT_NAME = os.getenv("GIVEAWAY_MINI_APP_SHORT_NAME", "").strip()
 
 # --- Локальный inference-сервер (Ollama через Cloudflare Tunnel) ---
 # Если GEMMA_URL пустой — бот использует только Groq (старое поведение).

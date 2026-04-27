@@ -433,10 +433,27 @@ class TestGiveawayPublishing:
         assert bot.calls[0][0] == "send_photo"
         assert bot.calls[0][1]["photo"] == "photo-file"
 
-    def test_mini_app_deeplink_uses_startapp_payload(self):
+    def test_mini_app_deeplink_uses_direct_app_payload(self):
         from services.giveaways import build_giveaway_mini_app_deeplink
 
-        assert build_giveaway_mini_app_deeplink("Alyamangapage_bot", 42) == "https://t.me/Alyamangapage_bot?startapp=giveaway_42"
+        assert (
+            build_giveaway_mini_app_deeplink("Alyamangapage_bot", 42, "randomizer")
+            == "https://t.me/Alyamangapage_bot/randomizer?startapp=giveaway_42"
+        )
+
+    def test_mini_app_deeplink_requires_short_name(self):
+        from services.giveaways import build_giveaway_mini_app_deeplink
+
+        assert build_giveaway_mini_app_deeplink("Alyamangapage_bot", 42) is None
+
+    def test_participation_markup_falls_back_to_callback_check(self):
+        from services.giveaways import _participation_markup
+
+        markup = _participation_markup(42)
+        buttons = [button for row in markup.inline_keyboard for button in row]
+
+        assert [button.callback_data for button in buttons] == ["giveaway_join:42", "giveaway_check:42"]
+        assert all(button.url is None for button in buttons)
 
     def test_finalize_sends_result_without_editing_original_post(self, tmp_path, monkeypatch):
         import database
