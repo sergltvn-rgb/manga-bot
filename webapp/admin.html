@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Админка</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="admin.css" />
+  <link rel="stylesheet" href="admin.css?v=20260428-admin-detail-1" />
 </head>
 <body>
   <div class="app">
@@ -48,7 +48,7 @@
             </div>
           </div>
           <div class="panel">
-            <div class="panel-head"><h3>Последние ошибки</h3></div>
+            <div class="panel-head"><h3 id="errorsTitle">Последние ошибки</h3></div>
             <div id="errorList" class="empty">Загрузка...</div>
           </div>
         </div>
@@ -282,21 +282,42 @@
       ];
       document.getElementById('healthRows').innerHTML = rows.map(([key, value]) => `<tr><th>${escapeHtml(key)}</th><td>${escapeHtml(value)}</td></tr>`).join('');
       const errors = health.recent_errors || [];
+      const hours = Number(health.recent_errors_window_hours || 24);
+      document.getElementById('errorsTitle').textContent = `Ошибки за ${hours}ч`;
       document.getElementById('errorList').innerHTML = errors.length
         ? errors.map((item) => `<p><span class="badge rose">${escapeHtml(item.event_type)}</span><br>${escapeHtml(item.message || 'без сообщения')}<br><span class="label">${escapeHtml(item.created_at)}</span></p>`).join('')
-        : 'Ошибок не найдено.';
+        : '<div class="empty-state"><b>Свежих ошибок нет</b><span>Архивные события не показываются как текущие.</span></div>';
+    }
+
+    function chapterUrls(chapter) {
+      const raw = [];
+      if (Array.isArray(chapter.urls)) raw.push(...chapter.urls);
+      if (Array.isArray(chapter.source_urls)) raw.push(...chapter.source_urls);
+      if (Array.isArray(chapter.sources)) {
+        chapter.sources.forEach((source) => {
+          if (typeof source === 'string') raw.push(source);
+          else if (source && typeof source === 'object') raw.push(source.url || source.link || source.href || '');
+        });
+      }
+      raw.push(chapter.url || chapter.link || chapter.href || '');
+      return [...new Set(raw.map((item) => String(item || '').trim()).filter((item) => /^https?:\/\//i.test(item)))];
     }
 
     function readerSeries() {
       return asArray(state.reader && state.reader.series).flatMap((series) => {
         const volumes = asArray(series.volumes).length ? asArray(series.volumes) : [{ volume: series.volume || '', chapters: series.chapters || series.items || [] }];
-        return volumes.flatMap((volume) => asArray(volume.chapters).map((chapter) => ({
-          series_id: series.id || series.series_id || '',
-          title: series.title || series.name || series.id || 'Тайтл',
-          volume: volume.volume || '',
-          chapter: chapter.chapter || chapter.number || chapter.title || '',
-          url: chapter.url || chapter.link || ''
-        })));
+        return volumes.flatMap((volume) => asArray(volume.chapters).map((chapter) => {
+          const urls = chapterUrls(chapter);
+          return {
+            series_id: series.id || series.series_id || '',
+            title: series.title || series.name || series.id || 'Тайтл',
+            volume: volume.volume || '',
+            chapter: chapter.chapter || chapter.number || chapter.title || '',
+            chapter_name: chapter.custom_name || chapter.name || '',
+            urls,
+            url: urls[0] || ''
+          };
+        }));
       });
     }
 
@@ -308,14 +329,14 @@
       const selected = select.value;
       const rows = readerSeries().filter((item) => {
         const matchesSeries = !selected || item.series_id === selected;
-        const haystack = `${item.title} ${item.volume} ${item.chapter} ${item.url}`.toLowerCase();
+        const haystack = `${item.title} ${item.volume} ${item.chapter} ${item.chapter_name} ${item.urls.join(' ')}`.toLowerCase();
         return matchesSeries && (!query || haystack.includes(query));
       }).slice(0, 120);
       document.getElementById('contentRows').innerHTML = rows.length ? rows.map((item) => `
         <tr>
           <td><b>${escapeHtml(item.title)}</b><br><span class="label">${escapeHtml(item.series_id)}${item.volume ? ` · том ${escapeHtml(item.volume)}` : ''}</span></td>
-          <td>${escapeHtml(item.chapter)}</td>
-          <td>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Открыть</a>` : '<span class="label">нет ссылки</span>'}</td>
+          <td>${escapeHtml(item.chapter_name || item.chapter)}${item.chapter_name ? `<br><span class="label">ID: ${escapeHtml(item.chapter)}</span>` : ''}</td>
+          <td>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Открыть${item.urls.length > 1 ? ` (${item.urls.length})` : ''}</a>` : '<span class="label">нет ссылки</span>'}</td>
           <td><button class="btn danger" data-delete-chapter="${escapeHtml(item.series_id)}" data-volume="${escapeHtml(item.volume)}" data-chapter="${escapeHtml(item.chapter)}">Удалить</button></td>
         </tr>
       `).join('') : '<tr><td colspan="4">Главы не найдены.</td></tr>';
@@ -353,13 +374,17 @@
             <b>#${escapeHtml(item.id)} · ${escapeHtml(statusLabel(item.status))}</b>
             <span class="badge violet">${escapeHtml(item.participants)} участников</span>
           </div>
-          <p>${escapeHtml(shortText(item.prize, 120))}</p>
+          <p>${escapeHtml(shortText(item.post_text || item.prize, 180))}</p>
+          ${prizesHtml(item)}
           <div class="meta-grid">
-            <span>Канал<b>${escapeHtml(item.channel_id)}</b></span>
+            <span>Канал<b>${linkHtml(item.channel_url, item.channel_id)}</b></span>
             <span>Финиш<b>${escapeHtml(item.ends_at)} МСК</b></span>
             <span>Победителей<b>${escapeHtml(item.winners_count)}</b></span>
-            <span>Подписки<b>${escapeHtml(item.required_channels_count || 0)}</b></span>
+            <span>Публикация<b>${escapeHtml(publishLabel(item.publish_at))}</b></span>
+            <span>Пост<b>${item.post_url ? linkHtml(item.post_url, `#${item.message_id}`) : 'еще нет ссылки'}</b></span>
+            <span>Подписка<b>${escapeHtml(item.subscription || 'только основной канал')}</b></span>
           </div>
+          ${requiredChannelsHtml(item)}
         </article>
       `).join('') : `
         <div class="empty-state">
@@ -370,16 +395,17 @@
       const recentHtml = recent.length ? `
         <div class="table-wrap compact-table">
           <table>
-            <thead><tr><th>ID</th><th>Статус</th><th>Приз</th><th>Участники</th><th>Финиш</th><th>Подписки</th></tr></thead>
+            <thead><tr><th>ID</th><th>Статус</th><th>Приз</th><th>Канал</th><th>Участники</th><th>Финиш</th><th>Пост</th></tr></thead>
             <tbody>
               ${recent.map((item) => `
                 <tr>
                   <td><b>#${escapeHtml(item.id)}</b></td>
                   <td><span class="badge ${statusTone(item.status)}">${escapeHtml(statusLabel(item.status))}</span></td>
                   <td>${escapeHtml(shortText(item.prize, 80))}</td>
+                  <td>${linkHtml(item.channel_url, item.channel_id)}</td>
                   <td>${escapeHtml(item.participants)}</td>
                   <td>${escapeHtml(item.ends_at)} МСК</td>
-                  <td>${escapeHtml(item.required_channels_count || 0)}</td>
+                  <td>${item.post_url ? linkHtml(item.post_url, 'Открыть') : '<span class="label">нет поста</span>'}</td>
                 </tr>
               `).join('')}
             </tbody>
@@ -420,6 +446,43 @@
     function shortText(value, limit) {
       const text = String(value || '').trim();
       return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+    }
+
+    function publishLabel(value) {
+      const text = String(value || '').trim();
+      if (!text || text.toLowerCase() === 'сразу') return 'сразу';
+      return `${text} МСК`;
+    }
+
+    function linkHtml(url, label) {
+      const safeUrl = String(url || '').trim();
+      const safeLabel = escapeHtml(label || url || 'Открыть');
+      if (!/^https?:\/\//i.test(safeUrl)) return safeLabel;
+      return `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener">${safeLabel}</a>`;
+    }
+
+    function prizesHtml(item) {
+      const prizes = asArray(item.prizes).filter(Boolean);
+      if (!prizes.length) return `<div class="detail-list"><span>Приз</span><b>${escapeHtml(item.prize || 'не указан')}</b></div>`;
+      return `
+        <div class="detail-list">
+          <span>Призы</span>
+          ${prizes.map((prize, idx) => `<b>${idx + 1} место — ${escapeHtml(prize)}</b>`).join('')}
+        </div>
+      `;
+    }
+
+    function requiredChannelsHtml(item) {
+      const channels = asArray(item.required_channels);
+      if (!channels.length) {
+        return '<div class="detail-list muted"><span>Проверка подписки</span><b>Основной канал проверяется всегда, дополнительных каналов нет.</b></div>';
+      }
+      return `
+        <div class="detail-list">
+          <span>Дополнительные каналы подписки</span>
+          ${channels.map((channel) => `<b>${linkHtml(channel.url, channel.title || channel.channel_id)}</b>`).join('')}
+        </div>
+      `;
     }
 
     function appendAudit(payload, reset = false) {

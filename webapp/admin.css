@@ -458,6 +458,32 @@ th {
   line-height: 1.45;
 }
 
+.detail-list {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.detail-list span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.detail-list b {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.detail-list.muted b {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

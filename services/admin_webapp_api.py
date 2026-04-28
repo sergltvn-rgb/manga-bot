@@ -18,14 +18,17 @@ from services.giveaways import (
     count_recent_giveaways,
     format_giveaway_end,
     format_giveaway_publish,
-    get_required_channel_ids,
+    get_giveaway_required_channels,
     list_active_giveaways,
     list_recent_giveaways,
+    split_place_prizes,
 )
 from services.webapp_cors import CORS_HEADERS
 
 
 STARTED_AT = time.time()
+WEBAPP_ERROR_WINDOW_HOURS = 24
+WEBAPP_ERROR_TYPES = ("client_runtime_error", "client_unhandled_rejection", "client_state_contract_violation")
 
 
 def _json(payload: dict[str, Any], *, status: int = 200) -> aiohttp.web.Response:
@@ -88,8 +91,10 @@ async def _admin_summary_counts() -> dict[str, int]:
                 db,
                 """
                 SELECT COUNT(*) FROM webapp_telemetry
-                WHERE event_type IN ('client_runtime_error', 'client_unhandled_rejection', 'client_state_contract_violation')
+                WHERE event_type IN (?, ?, ?)
+                  AND datetime(created_at) >= datetime('now', ?)
                 """,
+                (*WEBAPP_ERROR_TYPES, f"-{WEBAPP_ERROR_WINDOW_HOURS} hours"),
             ),
         }
 
@@ -132,11 +137,12 @@ async def _recent_webapp_errors(limit: int = 5) -> list[dict[str, str]]:
             """
             SELECT event_type, message, source_module, created_at
             FROM webapp_telemetry
-            WHERE event_type IN ('client_runtime_error', 'client_unhandled_rejection', 'client_state_contract_violation')
+            WHERE event_type IN (?, ?, ?)
+              AND datetime(created_at) >= datetime('now', ?)
             ORDER BY id DESC
             LIMIT ?
             """,
-            (limit,),
+            (*WEBAPP_ERROR_TYPES, f"-{WEBAPP_ERROR_WINDOW_HOURS} hours", limit),
         ) as cursor:
             rows = await cursor.fetchall()
     return [
@@ -173,6 +179,7 @@ async def handle_admin_health(request: aiohttp.web.Request) -> aiohttp.web.Respo
             "gemma": {"configured": bool(os.getenv("GEMMA_URL", "").strip())},
             "groq": {"configured": bool(os.getenv("GROQ_API_KEY", "").strip())},
         },
+        "recent_errors_window_hours": WEBAPP_ERROR_WINDOW_HOURS,
         "recent_errors": await _recent_webapp_errors(),
     }
     return _json({"ok": True, "health": health})
@@ -211,22 +218,56 @@ async def handle_admin_audit(request: aiohttp.web.Request) -> aiohttp.web.Respon
     return _json({"ok": True, "total": total, "limit": limit, "offset": offset, "items": items})
 
 
+def _channel_url(channel_id: str) -> str:
+    value = str(channel_id or "").strip()
+    if value.startswith("@") and len(value) > 1:
+        return f"https://t.me/{value[1:]}"
+    return value
+
+
+def _post_url(channel_id: str, message_id: int | None) -> str:
+    if not message_id:
+        return ""
+    channel = str(channel_id or "").strip()
+    if channel.startswith("@") and len(channel) > 1:
+        return f"https://t.me/{channel[1:]}/{message_id}"
+    if channel.startswith("-100") and channel[4:].isdigit():
+        return f"https://t.me/c/{channel[4:]}/{message_id}"
+    return ""
+
+
+def _subscription_label(required_count: int) -> str:
+    if required_count <= 0:
+        return "только основной канал"
+    if required_count == 1:
+        return "1 доп. канал"
+    if 2 <= required_count <= 4:
+        return f"{required_count} доп. канала"
+    return f"{required_count} доп. каналов"
+
+
 async def _giveaway_payload(item: Giveaway) -> dict[str, Any]:
-    required_channels = await get_required_channel_ids(item.id)
+    required_channels = await get_giveaway_required_channels(item.id)
+    required_payload = [{"channel_id": channel.channel_id, "title": channel.title, "url": channel.url} for channel in required_channels]
+    prizes = split_place_prizes(item.prize)
     return {
         "id": item.id,
         "status": item.status,
         "channel_id": item.channel_id,
+        "channel_url": _channel_url(item.channel_id),
         "message_id": item.message_id,
+        "post_url": _post_url(item.channel_id, item.message_id),
         "prize": item.prize,
+        "prizes": prizes,
         "post_text": item.post_text,
         "winners_count": item.winners_count,
         "participants": await count_giveaway_entries(item.id),
         "ends_at": format_giveaway_end(item.ends_at_utc),
         "publish_at": format_giveaway_publish(item.publish_at_utc),
         "media_type": item.media_type or "",
-        "required_channels": required_channels,
-        "required_channels_count": len(required_channels),
+        "required_channels": required_payload,
+        "required_channels_count": len(required_payload),
+        "subscription": _subscription_label(len(required_payload)),
         "replacements_count": item.replacements_count,
     }
 

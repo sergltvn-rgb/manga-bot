@@ -35,8 +35,21 @@ async def seed_admin_api_db(db_path):
             VALUES ('active', '@channel', 'VIP', 'Post', 1, '2099-01-01T00:00:00+00:00', 10, '2026-01-01T00:00:00+00:00')
             """
         )
+        await db.execute("UPDATE giveaways SET message_id = 321 WHERE channel_id = '@channel'")
+        await db.execute(
+            """
+            INSERT INTO giveaway_required_channels (giveaway_id, channel_id, title, url)
+            VALUES (1, '@required', '@required', 'https://t.me/required')
+            """
+        )
         await db.execute("INSERT INTO chapter_comments (chapter_key, user_id, user_name, text) VALUES ('manga_ru_1', '1', 'A', 'Hi')")
         await db.execute("INSERT INTO webapp_telemetry (event_type, message, stack) VALUES ('client_runtime_error', 'boom', 'trace')")
+        await db.execute(
+            """
+            INSERT INTO webapp_telemetry (event_type, message, stack, created_at)
+            VALUES ('client_runtime_error', 'old boom', 'trace', '2026-01-01 00:00:00')
+            """
+        )
         await db.execute(
             """
             INSERT INTO admin_audit_log (action, actor_user_id, target, payload_json, result, error, created_at)
@@ -125,6 +138,7 @@ def test_admin_health_does_not_expose_secrets(tmp_path, monkeypatch):
     assert "git" in payload["health"]
     assert "secret-groq-key" not in serialized
     assert "SECRET_TOKEN" not in serialized
+    assert [item["message"] for item in payload["health"]["recent_errors"]] == ["boom"]
 
 
 def test_admin_audit_is_paginated_newest_first(tmp_path, monkeypatch):
@@ -194,4 +208,8 @@ def test_admin_giveaways_returns_list_without_giveaway_id(tmp_path, monkeypatch)
     assert payload["active"][0]["id"] > 0
     assert payload["active"][0]["participants"] == 0
     assert payload["active"][0]["status"] == "active"
+    assert payload["active"][0]["channel_url"] == "https://t.me/channel"
+    assert payload["active"][0]["post_url"] == "https://t.me/channel/321"
+    assert payload["active"][0]["required_channels"][0]["url"] == "https://t.me/required"
+    assert payload["active"][0]["subscription"] == "1 доп. канал"
     assert payload["recent"][0]["prize"] == "VIP"
