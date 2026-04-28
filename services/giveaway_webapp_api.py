@@ -45,6 +45,13 @@ async def handle_giveaway_join(request: aiohttp.web.Request) -> aiohttp.web.Resp
         return aiohttp.web.json_response({"ok": False, "error": "bad_request"}, status=400, headers=CORS_HEADERS)
 
     bot = request.app["bot"]
-    payload = await join_giveaway_from_webapp(bot, giveaway_id, user, refresh_markup=True)
+    captcha_answer = data.get("captcha_answer")
+    payload = await join_giveaway_from_webapp(
+        bot,
+        giveaway_id,
+        user,
+        captcha_answer=str(captcha_answer) if captcha_answer is not None else None,
+        refresh_markup=True,
+    )
     status = 404 if payload.get("status") == "not_found" else 200
     return aiohttp.web.json_response(payload, status=status, headers=CORS_HEADERS)

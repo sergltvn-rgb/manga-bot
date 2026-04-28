@@ -582,13 +582,14 @@ class TestGiveawayWinnerSelection:
         assert status["joined"] is False
         assert status["missing_channels"] == ["@extra_channel"]
 
-    def test_webapp_join_checks_subscription_and_adds_entry(self, tmp_path, monkeypatch):
+    def test_webapp_join_requires_captcha_before_adding_entry(self, tmp_path, monkeypatch):
         import database
 
         from services import giveaways
 
         db_path = str(tmp_path / "giveaways.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
+        monkeypatch.setattr(giveaways, "_make_verification_answer", lambda: ("2 + 2", "4", ["3", "4", "5"]))
 
         class Member:
             status = "member"
@@ -610,7 +611,7 @@ class TestGiveawayWinnerSelection:
         )
         run(giveaways.set_giveaway_published(giveaway_id, 10))
 
-        result = run(
+        challenge = run(
             giveaways.join_giveaway_from_webapp(
                 BotStub(),
                 giveaway_id,
@@ -618,9 +619,41 @@ class TestGiveawayWinnerSelection:
             )
         )
 
+        assert challenge["ok"] is True
+        assert challenge["joined"] is False
+        assert challenge["added"] is False
+        assert challenge["captcha_required"] is True
+        assert challenge["captcha"]["question"] == "2 + 2"
+        assert challenge["captcha"]["options"] == ["3", "4", "5"]
+        assert challenge["entries_count"] == 0
+        assert run(giveaways.has_giveaway_entry(giveaway_id, 1001)) is False
+
+        wrong = run(
+            giveaways.join_giveaway_from_webapp(
+                BotStub(),
+                giveaway_id,
+                {"id": 1001, "username": "alice", "first_name": "Alice"},
+                captcha_answer="3",
+            )
+        )
+
+        assert wrong["captcha_required"] is True
+        assert wrong["captcha_error"] is True
+        assert run(giveaways.has_giveaway_entry(giveaway_id, 1001)) is False
+
+        result = run(
+            giveaways.join_giveaway_from_webapp(
+                BotStub(),
+                giveaway_id,
+                {"id": 1001, "username": "alice", "first_name": "Alice"},
+                captcha_answer="4",
+            )
+        )
+
         assert result["ok"] is True
         assert result["joined"] is True
         assert result["added"] is True
+        assert result["captcha_required"] is False
         assert result["entries_count"] == 1
         assert run(giveaways.has_giveaway_entry(giveaway_id, 1001)) is True
 

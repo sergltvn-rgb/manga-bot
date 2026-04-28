@@ -4,6 +4,7 @@ from pathlib import Path
 
 
 ADMIN_HTML = Path(__file__).resolve().parents[1] / "webapp" / "admin.html"
+GIVEAWAY_HTML = Path(__file__).resolve().parents[1] / "webapp" / "giveaway.html"
 
 
 def test_admin_ui_uses_russian_primary_labels():
@@ -37,3 +38,12 @@ def test_admin_audit_and_giveaway_details_are_human_readable():
     assert "data-audit-details" in html
     assert "data-giveaway-details" in html
     assert "Запланированные" in html
+
+
+def test_giveaway_webapp_contains_server_captcha_flow():
+    html = GIVEAWAY_HTML.read_text(encoding="utf-8")
+
+    assert 'id="captcha"' in html
+    assert "renderCaptcha" in html
+    assert "/api/giveaway/join" in html
+    assert "captcha_answer" in html

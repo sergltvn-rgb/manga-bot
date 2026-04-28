@@ -1207,7 +1207,14 @@ async def get_giveaway_webapp_status(bot, giveaway_id: int, user_id: int) -> dic
     }
 
 
-async def join_giveaway_from_webapp(bot, giveaway_id: int, user: dict, *, refresh_markup: bool = False) -> dict:
+async def join_giveaway_from_webapp(
+    bot,
+    giveaway_id: int,
+    user: dict,
+    *,
+    captcha_answer: str | None = None,
+    refresh_markup: bool = False,
+) -> dict:
     try:
         user_id = int(user["id"])
     except (TypeError, ValueError, KeyError):
@@ -1222,11 +1229,33 @@ async def join_giveaway_from_webapp(bot, giveaway_id: int, user: dict, *, refres
         status.update({"added": False})
         return status
     if status.get("joined"):
-        status.update({"added": False, "entries_count": await count_giveaway_entries(giveaway_id)})
+        status.update({"added": False, "captcha_required": False, "entries_count": await count_giveaway_entries(giveaway_id)})
         return status
     if not status.get("is_allowed"):
-        status.update({"added": False, "entries_count": await count_giveaway_entries(giveaway_id)})
+        status.update({"added": False, "captcha_required": False, "entries_count": await count_giveaway_entries(giveaway_id)})
         return status
+
+    captcha_error = False
+    if not await is_giveaway_verified(giveaway_id, user_id):
+        if captcha_answer is not None:
+            if await verify_giveaway_answer(giveaway_id, user_id, captcha_answer):
+                captcha_error = False
+            else:
+                captcha_error = True
+
+        if captcha_answer is None or captcha_error:
+            challenge = await create_giveaway_verification_challenge(giveaway_id, user_id)
+            status.update(
+                {
+                    "added": False,
+                    "joined": False,
+                    "captcha_required": True,
+                    "captcha_error": captcha_error,
+                    "captcha": {"question": challenge.question, "options": challenge.options},
+                    "entries_count": await count_giveaway_entries(giveaway_id),
+                }
+            )
+            return status
 
     added = await add_giveaway_entry(
         giveaway_id,
@@ -1241,6 +1270,7 @@ async def join_giveaway_from_webapp(bot, giveaway_id: int, user: dict, *, refres
             logging.debug("giveaway: failed to refresh post markup after webapp join id=%s error=%s", giveaway_id, exc)
     status["joined"] = True
     status["added"] = added
+    status["captcha_required"] = False
     status["entries_count"] = await count_giveaway_entries(giveaway_id)
     return status
 

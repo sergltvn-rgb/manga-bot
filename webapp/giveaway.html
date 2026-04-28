@@ -170,6 +170,64 @@
       gap: 8px;
     }
 
+    .captcha {
+      margin-top: 18px;
+      display: grid;
+      gap: 10px;
+      text-align: left;
+    }
+
+    .captcha-note {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 650;
+      text-align: center;
+    }
+
+    .captcha-question {
+      min-height: 54px;
+      display: grid;
+      place-items: center;
+      border-radius: 16px;
+      background: color-mix(in srgb, var(--state) 9%, #ffffff);
+      border: 1px solid color-mix(in srgb, var(--state) 18%, transparent);
+      color: var(--text);
+      font-size: 24px;
+      font-weight: 900;
+      letter-spacing: 0;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+    }
+
+    .captcha-options {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .captcha-option {
+      min-height: 48px;
+      border-radius: 14px;
+      color: var(--text);
+      background: #ffffff;
+      border: 1px solid var(--line);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .captcha-option:hover {
+      color: #ffffff;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    }
+
+    .captcha-error {
+      color: #dc2626;
+      font-size: 13px;
+      font-weight: 800;
+      text-align: center;
+    }
+
     .channel {
       min-height: 50px;
       border: 1px solid var(--line);
@@ -301,6 +359,7 @@
         <h1 id="title">&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1103;&#1077;&#1084; &#1087;&#1086;&#1076;&#1087;&#1080;&#1089;&#1082;&#1091;...</h1>
         <p id="text">&#1069;&#1090;&#1086; &#1079;&#1072;&#1081;&#1084;&#1077;&#1090; &#1087;&#1072;&#1088;&#1091; &#1089;&#1077;&#1082;&#1091;&#1085;&#1076;.</p>
         <div id="channels" class="status hidden"></div>
+        <div id="captcha" class="captcha hidden" aria-live="polite"></div>
       </div>
     </section>
     <section class="actions">
@@ -338,6 +397,10 @@
       allowedText: '\u0417\u0430\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u043c \u0432\u0430\u0441 \u0432 \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u0438 \u0440\u043e\u0437\u044b\u0433\u0440\u044b\u0448\u0430...',
       joiningTitle: '\u0417\u0430\u043f\u0438\u0441\u044b\u0432\u0430\u0435\u043c \u0443\u0447\u0430\u0441\u0442\u0438\u0435...',
       joinedNowText: '\u0412\u044b \u0432 \u0441\u043f\u0438\u0441\u043a\u0435 \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432. \u041a\u043e\u043b\u0438\u0447\u0435\u0441\u0442\u0432\u043e \u0432 \u043f\u043e\u0441\u0442\u0435 \u043e\u0431\u043d\u043e\u0432\u0438\u0442\u0441\u044f \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438.',
+      captchaTitle: '\u0411\u044b\u0441\u0442\u0440\u0430\u044f \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430',
+      captchaText: '\u0412\u044b\u0431\u0435\u0440\u0438\u0442\u0435 \u0432\u0435\u0440\u043d\u044b\u0439 \u043e\u0442\u0432\u0435\u0442, \u0438 \u044f \u0441\u0440\u0430\u0437\u0443 \u0437\u0430\u043f\u0438\u0448\u0443 \u0432\u0430\u0441 \u0432 \u0440\u043e\u0437\u044b\u0433\u0440\u044b\u0448.',
+      captchaNote: '\u0417\u0430\u0449\u0438\u0442\u0430 \u043e\u0442 \u0430\u0432\u0442\u043e\u043a\u043b\u0438\u043a\u043e\u0432',
+      captchaError: '\u041d\u0435\u0432\u0435\u0440\u043d\u043e. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439\u0442\u0435 \u0435\u0449\u0435 \u0440\u0430\u0437.',
       missingTitle: '\u0412\u044b \u043d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d\u044b \u043d\u0430 \u0432\u0441\u0435 \u043a\u0430\u043d\u0430\u043b\u044b',
       missingText: '\u041f\u043e\u0434\u043f\u0438\u0448\u0438\u0442\u0435\u0441\u044c \u043d\u0430 \u043a\u0430\u043d\u0430\u043b\u044b \u043d\u0438\u0436\u0435 \u0438 \u043d\u0430\u0436\u043c\u0438\u0442\u0435 "\u041f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u0441\u043d\u043e\u0432\u0430".',
       unavailableTitle: '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u0430',
@@ -353,6 +416,7 @@
     const title = document.getElementById('title');
     const text = document.getElementById('text');
     const channels = document.getElementById('channels');
+    const captcha = document.getElementById('captcha');
     const retry = document.getElementById('retry');
     const closeBtn = document.getElementById('close');
     const mascot = document.getElementById('mascot');
@@ -407,12 +471,50 @@
       }
     }
 
-    async function joinGiveaway() {
+    function renderCaptcha(challenge, hasError = false) {
+      captcha.innerHTML = '';
+      if (!challenge || !Array.isArray(challenge.options) || !challenge.options.length) {
+        captcha.classList.add('hidden');
+        return;
+      }
+      captcha.classList.remove('hidden');
+      const note = document.createElement('p');
+      note.className = 'captcha-note';
+      note.textContent = copy.captchaNote;
+      const question = document.createElement('div');
+      question.className = 'captcha-question';
+      question.textContent = challenge.question || '?';
+      const options = document.createElement('div');
+      options.className = 'captcha-options';
+      for (const option of challenge.options) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'captcha-option';
+        button.textContent = option;
+        button.addEventListener('click', () => {
+          options.querySelectorAll('button').forEach((item) => { item.disabled = true; });
+          joinGiveaway(option);
+        });
+        options.appendChild(button);
+      }
+      captcha.append(note, question, options);
+      if (hasError) {
+        const error = document.createElement('div');
+        error.className = 'captcha-error';
+        error.textContent = copy.captchaError;
+        captcha.appendChild(error);
+      }
+    }
+
+    async function joinGiveaway(captchaAnswer = '') {
       retry.classList.add('hidden');
       renderChannels([]);
+      renderCaptcha(null);
       setCopy(copy.joiningTitle, copy.allowedText, copy.checkingState, 'checking');
+      const body = { giveaway_id: giveawayId };
+      if (captchaAnswer) body.captcha_answer = captchaAnswer;
       const data = sharedApi
-        ? await sharedApi.post('/api/giveaway/join', { giveaway_id: giveawayId }, { cache: 'no-store' })
+        ? await sharedApi.post('/api/giveaway/join', body, { cache: 'no-store' })
         : await fetch(`${apiBase}/api/giveaway/join`, {
             method: 'POST',
             headers: {
@@ -420,12 +522,17 @@
               'Content-Type': 'application/json',
             },
             cache: 'no-store',
-            body: JSON.stringify({ giveaway_id: giveawayId }),
+            body: JSON.stringify(body),
           }).then(async (response) => {
             const payload = await response.json().catch(() => ({}));
             if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
             return payload;
           });
+      if (data.captcha_required) {
+        setCopy(copy.captchaTitle, copy.captchaText, copy.checkingState, 'checking');
+        renderCaptcha(data.captcha, !!data.captcha_error);
+        return;
+      }
       if (data.joined) {
         setMascot('success');
         const countText = Number.isFinite(Number(data.entries_count)) ? `\n\u0423\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432: ${data.entries_count}` : '';
@@ -448,6 +555,7 @@
     async function loadStatus() {
       retry.classList.add('hidden');
       renderChannels([]);
+      renderCaptcha(null);
       setMascot('waiting');
       setCopy(copy.checkingTitle, copy.checkingText, copy.checkingState, 'checking');
       if (!giveawayId) {
