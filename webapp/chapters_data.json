@@ -242,6 +242,27 @@
       ]
     },
     {
+      "id": "british_belle",
+      "title": "Поцелуй британской красавицы",
+      "cover_url": "",
+      "volumes": [
+        {
+          "volume": 4,
+          "custom_name": "Том 4",
+          "chapters": [
+            {
+              "chapter": "Иллюстрации",
+              "custom_name": "Глава Иллюстрации",
+              "url": "https://teletype.in/@slitvin/2fdVPJVEvbT",
+              "urls": [
+                "https://teletype.in/@slitvin/2fdVPJVEvbT"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "ranobe_alya",
       "title": "Воительница Аля",
       "cover_url": "https://preview.redd.it/the-hero-alya-who-sometimes-hides-her-feeling-in-russian-v0-nadp4kreg6qg1.jpg?width=640&crop=smart&auto=webp&s=0e2e3a965b8c356e89108d38a439082d2c339516",
@@ -327,14 +348,14 @@
   ],
   "bot_username": "Alyamangapage_bot",
   "admin_ids": [
-    "1577647113",
-    "1424182136",
     "5477281591",
-    "6573251552",
-    "6210312655",
     "7623430602",
-    "999408738",
     "1747374025",
-    "8033148365"
+    "1577647113",
+    "999408738",
+    "6210312655",
+    "6573251552",
+    "8033148365",
+    "1424182136"
   ]
 }
