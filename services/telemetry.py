@@ -39,6 +39,7 @@ WEBAPP_TELEMETRY_EVENTS = {
     "client_runtime_error",
     "client_unhandled_rejection",
     "client_state_contract_violation",
+    "client_report_to_admin",
     "client_chapter_open_ms",
     "series_selected",
     "chapters_screen_opened",

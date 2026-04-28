@@ -127,6 +127,7 @@ button {
 
 .main {
   min-width: 0;
+  max-width: 1440px;
   padding: 20px clamp(14px, 3vw, 34px) 34px;
 }
 
@@ -146,6 +147,7 @@ button {
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 8px;
+  max-width: 540px;
 }
 
 .last-updated {
@@ -269,16 +271,17 @@ button {
 .command-strip {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 12px;
+  margin: 0 0 14px;
 }
 
 .command-link {
-  min-height: 82px;
+  position: relative;
+  min-height: 112px;
   display: grid;
-  align-content: center;
-  gap: 6px;
-  padding: 12px;
+  align-content: start;
+  gap: 7px;
+  padding: 14px 44px 14px 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
@@ -287,6 +290,21 @@ button {
   text-decoration: none;
   box-shadow: var(--shadow);
   transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.command-link::after {
+  content: ">";
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: #087967;
+  font-weight: 900;
 }
 
 .command-link:hover {
@@ -305,6 +323,12 @@ button {
 .command-link b {
   font-size: 15px;
   line-height: 1.25;
+}
+
+.command-link small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .ops-banner b,

@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Админка</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="shared.css?v=20260428-stability-1">
-  <script src="shared.js?v=20260428-stability-1"></script>
-  <link rel="stylesheet" href="admin.css?v=20260428-admin-detail-2" />
+  <link rel="stylesheet" href="shared.css?v=20260428-recovery-2">
+  <script src="shared.js?v=20260428-recovery-2"></script>
+  <link rel="stylesheet" href="admin.css?v=20260428-admin-polish-3" />
 </head>
 <body>
-  <div class="shared-recovery" hidden>Обновить Сообщить админу</div>
+  <div class="shared-recovery-mount" hidden>Обновить Сообщить админу</div>
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
@@ -47,10 +47,10 @@
       <section class="section active" id="overview">
         <div class="ops-banner" id="opsBanner"></div>
         <div class="command-strip" id="quickActions">
-          <button class="command-link" data-section-jump="content" type="button"><span>Контент</span><b>Главы и массовая загрузка</b></button>
-          <button class="command-link" data-section-jump="giveaways" type="button"><span>Розыгрыши</span><b>Активные кампании</b></button>
-          <a class="command-link" href="reader.html"><span>Читалка</span><b>Открыть WebApp</b></a>
-          <button class="command-link" id="copyReportBtn" type="button"><span>Отчёт</span><b>Скопировать состояние</b></button>
+          <button class="command-link" data-section-jump="content" type="button"><span>Контент</span><b>Главы и массовая загрузка</b><small>Проверка, добавление, ссылки</small></button>
+          <button class="command-link" data-section-jump="giveaways" type="button"><span>Розыгрыши</span><b>Активные кампании</b><small>Посты, участники, подписки</small></button>
+          <a class="command-link" href="reader.html"><span>Читалка</span><b>Открыть WebApp</b><small>Публичная витрина данных</small></a>
+          <button class="command-link" id="copyReportBtn" type="button"><span>Отчёт</span><b>Скопировать состояние</b><small>JSON для быстрой диагностики</small></button>
         </div>
         <div class="kpi-grid" id="kpis"></div>
         <div class="split">

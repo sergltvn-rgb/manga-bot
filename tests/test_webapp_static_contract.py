@@ -39,3 +39,19 @@ def test_service_worker_revision_is_not_hardcoded_default():
     assert "webapp-build.json" in reader
     assert "window.__WEBAPP_BUILD" in reader
     assert "|| '16'" not in reader
+
+
+def test_recovery_mounts_stay_hidden_until_rendered():
+    for page in ["arts.html", "giveaway.html", "admin.html"]:
+        assert 'class="shared-recovery" hidden' not in read(page)
+
+    assert ".shared-recovery[hidden]" in read("shared.css")
+
+
+def test_report_to_admin_has_real_client_action():
+    shared_js = read("shared.js")
+
+    assert "handleReportToAdmin" in shared_js
+    assert "client_report_to_admin" in shared_js
+    assert "openTelegramLink" in shared_js
+    assert "navigator.clipboard" in shared_js

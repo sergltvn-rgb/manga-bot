@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { JSDOM } = require('jsdom');
 
 const code = fs.readFileSync('shared.js', 'utf8');
 
@@ -63,6 +64,46 @@ async function run() {
   const legacy = forbiddenContext.AlyaWebApp.normalizeApiError({ error: 'bad_request' }, 400);
   assert.equal(legacy.message, 'Запрос не прошел проверку.');
   assert.equal(legacy.recovery, 'Проверьте введенные данные и повторите действие.');
+
+  const dom = new JSDOM('<!doctype html><body><div id="recovery"></div></body>', { url: 'https://example.test/admin.html' });
+  const reportCalls = [];
+  const openedLinks = [];
+  let clipboardText = '';
+  const reportContext = {
+    window: {},
+    document: dom.window.document,
+    navigator: {
+      sendBeacon: () => false,
+      clipboard: { writeText: async (text) => { clipboardText = text; } },
+    },
+    Telegram: { WebApp: { openTelegramLink: (url) => openedLinks.push(url) } },
+    fetch: async (_url, options) => {
+      reportCalls.push(JSON.parse(options.body));
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    },
+    AbortController,
+    Blob,
+    clearTimeout,
+    setTimeout,
+    URLSearchParams,
+    location: dom.window.location,
+    console,
+  };
+  reportContext.window = reportContext;
+  vm.createContext(reportContext);
+  vm.runInContext(code, reportContext);
+  reportContext.AlyaWebApp.renderRecovery(
+    '#recovery',
+    { code: 'forbidden', message: 'Нет доступа.', recovery: 'Откройте из Telegram.', requestId: 'abc123' },
+    { onRetry: () => {} }
+  );
+  dom.window.document.querySelector('.shared-button.secondary').click();
+  await new Promise((resolve) => setTimeout(resolve, 180));
+
+  assert.equal(reportCalls[0].event_type, 'client_report_to_admin');
+  assert.equal(reportCalls[0].payload.module, 'shared-recovery');
+  assert.match(clipboardText, /Нет доступа/);
+  assert.deepEqual(openedLinks, ['https://t.me/Alyamangapage_bot']);
 }
 
 run().catch((error) => {

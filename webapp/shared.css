@@ -52,6 +52,11 @@
   line-height: 1.45;
 }
 
+.shared-recovery[hidden],
+.shared-recovery-mount[hidden] {
+  display: none !important;
+}
+
 .shared-recovery b {
   color: var(--shared-ink);
   font-size: 16px;

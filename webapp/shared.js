@@ -162,13 +162,58 @@
     report.type = 'button';
     report.className = 'shared-button secondary';
     report.textContent = reportLabel;
-    report.addEventListener('click', () => {
-      sendTelemetry('client_report_to_admin', { error: details });
-      showToast('Сообщение админу отправлено', { tone: 'info' });
-    });
+    report.addEventListener('click', () => handleReportToAdmin(details));
     actions.appendChild(report);
     card.appendChild(actions);
     node.appendChild(card);
+  }
+
+  function reportText(details) {
+    const page = global.location && global.location.href ? global.location.href : '';
+    const request = details.requestId ? `\nКод: ${details.requestId}` : '';
+    return [
+      'Alya WebApp report',
+      `Ошибка: ${details.message || 'не указана'}`,
+      `Что делать: ${details.recovery || 'не указано'}`,
+      page ? `Страница: ${page}` : '',
+      request.trim(),
+    ].filter(Boolean).join('\n');
+  }
+
+  async function copyText(text) {
+    if (global.navigator && global.navigator.clipboard && typeof global.navigator.clipboard.writeText === 'function') {
+      await global.navigator.clipboard.writeText(text);
+      return true;
+    }
+    if (!global.document || typeof global.document.execCommand !== 'function') return false;
+    const textarea = global.document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    global.document.body.appendChild(textarea);
+    textarea.select();
+    const copied = global.document.execCommand('copy');
+    textarea.remove();
+    return copied;
+  }
+
+  async function handleReportToAdmin(details) {
+    const text = reportText(details || {});
+    sendTelemetry('client_report_to_admin', {
+      module: 'shared-recovery',
+      message: details && details.message ? details.message : 'manual report',
+      error: details,
+      report_text: text,
+    });
+    const copied = await copyText(text).catch(() => false);
+    const telegram = global.Telegram && global.Telegram.WebApp;
+    if (telegram && typeof telegram.openTelegramLink === 'function') {
+      showToast(copied ? 'Отчёт скопирован, открываю чат с админом' : 'Открываю чат с админом', { tone: 'info' });
+      global.setTimeout(() => telegram.openTelegramLink('https://t.me/Alyamangapage_bot'), 120);
+      return;
+    }
+    showToast(copied ? 'Отчёт скопирован. Отправьте его админу в Telegram.' : 'Не удалось открыть Telegram. Напишите админу: @Alyamangapage_bot', { tone: copied ? 'info' : 'error' });
   }
 
   function escapeHtml(value) {
@@ -202,6 +247,7 @@
     getTelegramInitData,
     normalizeApiError,
     renderRecovery,
+    handleReportToAdmin,
     sendTelemetry,
     showToast,
   };

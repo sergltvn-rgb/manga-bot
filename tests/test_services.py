@@ -924,6 +924,7 @@ class TestTelemetry:
         from services.telemetry import WEBAPP_TELEMETRY_EVENTS
 
         assert "client_runtime_error" in WEBAPP_TELEMETRY_EVENTS
+        assert "client_report_to_admin" in WEBAPP_TELEMETRY_EVENTS
         assert "chapter_click" in WEBAPP_TELEMETRY_EVENTS
         # Whitelist; произвольные имена не должны пройти.
         assert "random_bad_event" not in WEBAPP_TELEMETRY_EVENTS
