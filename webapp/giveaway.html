@@ -6,6 +6,8 @@
   <title>&#1055;&#1088;&#1086;&#1074;&#1077;&#1088;&#1082;&#1072; &#1088;&#1086;&#1079;&#1099;&#1075;&#1088;&#1099;&#1096;&#1072;</title>
   <meta name="theme-color" content="#8b5cf6">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="shared.css?v=20260428-stability-1">
+  <script src="shared.js?v=20260428-stability-1"></script>
   <style>
     :root {
       color-scheme: light;
@@ -287,6 +289,7 @@
   </style>
 </head>
 <body>
+  <div class="shared-recovery" hidden>Повторить Сообщить админу</div>
   <main class="shell">
     <section class="stage">
       <div class="panel">
@@ -312,6 +315,7 @@
     const startParam = tg?.initDataUnsafe?.start_param || params.get('tgWebAppStartParam') || '';
     const giveawayId = params.get('giveaway_id') || (startParam.match(/^giveaway_(\d+)$/)?.[1] || '');
     const apiBase = (params.get('api') || location.origin).replace(/\/$/, '');
+    const sharedApi = window.AlyaWebApp?.createApiClient({ baseUrl: apiBase, initData: tg?.initData || '', timeoutMs: 12000 });
 
     const copy = {
       checkingState: '\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u043f\u043e\u0434\u043f\u0438\u0441\u043a\u0438',
@@ -415,16 +419,16 @@
         return;
       }
       try {
-        const response = await fetch(`${apiBase}/api/giveaway/status?giveaway_id=${encodeURIComponent(giveawayId)}`, {
-          headers: { Authorization: `tma ${tg.initData}` },
-          cache: 'no-store',
-        });
-        const data = await response.json();
-        if (!response.ok || !data.ok) {
-          setCopy(copy.failedTitle, copy.failedText, copy.errorState, 'error');
-          retry.classList.remove('hidden');
-          return;
-        }
+        const data = sharedApi
+          ? await sharedApi.get(`/api/giveaway/status?giveaway_id=${encodeURIComponent(giveawayId)}`, { cache: 'no-store' })
+          : await fetch(`${apiBase}/api/giveaway/status?giveaway_id=${encodeURIComponent(giveawayId)}`, {
+              headers: { Authorization: `tma ${tg.initData}` },
+              cache: 'no-store',
+            }).then(async (response) => {
+              const payload = await response.json().catch(() => ({}));
+              if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+              return payload;
+            });
         if (!data.is_active) {
           setCopy(copy.endedTitle, copy.endedText, copy.errorState, 'error');
           return;

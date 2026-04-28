@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "test:jsdom": "node run_test.js",
+    "test:jsdom": "node shared.test.js",
     "test:e2e": "playwright test -c playwright.config.js",
     "test:e2e:headed": "playwright test -c playwright.config.js --headed"
   },

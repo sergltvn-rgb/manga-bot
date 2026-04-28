@@ -113,9 +113,14 @@ def test_admin_api_forbids_non_admin(tmp_path, monkeypatch):
     install_auth(monkeypatch, user_id=99, admins=(10,))
 
     response = run(admin_api.handle_admin_summary(make_mocked_request("GET", "/api/admin/summary")))
+    payload = body_json(response)
 
     assert response.status == 403
-    assert body_json(response)["error"] == "forbidden"
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "forbidden"
+    assert payload["error"]["message"]
+    assert payload["error"]["recovery"]
+    assert payload["request_id"]
 
 
 def test_admin_health_does_not_expose_secrets(tmp_path, monkeypatch):

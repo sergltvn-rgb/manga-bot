@@ -4840,6 +4840,7 @@ from services.admin_webapp_api import (  # noqa: E402,F401
     handle_admin_health,
     handle_admin_summary,
     handle_admin_sync,
+    handle_webapp_health,
 )
 
 
@@ -5336,6 +5337,7 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_get("/api/admin/audit", handle_admin_audit)
     app.router.add_get("/api/admin/giveaways", handle_admin_giveaways)
     app.router.add_post("/api/admin/sync", handle_admin_sync)
+    app.router.add_get("/api/webapp/health", handle_webapp_health)
 
     app.router.add_get("/", handle_root_redirect)
     app.router.add_options("/api/reader", handle_cors_preflight)
@@ -5356,6 +5358,7 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_options("/api/admin/audit", handle_cors_preflight)
     app.router.add_options("/api/admin/giveaways", handle_cors_preflight)
     app.router.add_options("/api/admin/sync", handle_cors_preflight)
+    app.router.add_options("/api/webapp/health", handle_cors_preflight)
 
     app.router.add_get("/api/likes", handle_likes_get)
     app.router.add_post("/api/likes", handle_likes_post)

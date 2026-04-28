@@ -24,6 +24,7 @@ from services.giveaways import (
     split_place_prizes,
 )
 from services.webapp_cors import CORS_HEADERS
+from services.webapp_api_utils import webapp_error
 
 
 STARTED_AT = time.time()
@@ -38,13 +39,13 @@ def _json(payload: dict[str, Any], *, status: int = 200) -> aiohttp.web.Response
 async def _require_admin(request: aiohttp.web.Request) -> dict[str, Any] | aiohttp.web.Response:
     user = get_auth_user(request)
     if not user:
-        return _json({"ok": False, "error": "unauthorized"}, status=401)
+        return webapp_error("unauthorized", status=401)
     try:
         user_id = int(user["id"])
     except (KeyError, TypeError, ValueError):
-        return _json({"ok": False, "error": "unauthorized"}, status=401)
+        return webapp_error("unauthorized", status=401)
     if user_id not in await get_admins():
-        return _json({"ok": False, "error": "forbidden"}, status=403)
+        return webapp_error("forbidden", status=403)
     return user
 
 
@@ -191,6 +192,57 @@ async def handle_admin_health(request: aiohttp.web.Request) -> aiohttp.web.Respo
         "recent_errors": await _recent_webapp_errors(),
     }
     return _json({"ok": True, "health": health})
+
+
+async def _reader_cache_health() -> dict[str, Any]:
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    snapshot_path = os.path.join(repo_root, "webapp", "chapters_data.json")
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        chapters_total = sum(
+            [
+                await _count(db, "SELECT COUNT(*) FROM chapters_urls"),
+                await _count(db, "SELECT COUNT(*) FROM ranobe_urls"),
+                await _count(db, "SELECT COUNT(*) FROM akashic_ranobe"),
+                await _count(db, "SELECT COUNT(*) FROM british_ranobe"),
+            ]
+        )
+    snapshot_exists = os.path.exists(snapshot_path)
+    snapshot_mtime = int(os.path.getmtime(snapshot_path)) if snapshot_exists else 0
+    return {
+        "chapters_total": chapters_total,
+        "snapshot_exists": snapshot_exists,
+        "snapshot_mtime": snapshot_mtime,
+    }
+
+
+async def handle_webapp_health(_request: aiohttp.web.Request) -> aiohttp.web.Response:
+    try:
+        async with aiosqlite.connect(database.DB_PATH) as db:
+            recent_errors = await _count(
+                db,
+                """
+                SELECT COUNT(*) FROM webapp_telemetry
+                WHERE event_type IN (?, ?, ?)
+                  AND datetime(created_at) >= datetime('now', ?)
+                """,
+                (*WEBAPP_ERROR_TYPES, f"-{WEBAPP_ERROR_WINDOW_HOURS} hours"),
+            )
+    except Exception:  # noqa: BLE001 - public health should degrade into DB down instead of leaking errors.
+        recent_errors = 0
+
+    return _json(
+        {
+            "ok": True,
+            "health": {
+                "database": {"ok": await _database_ok()},
+                "reader": await _reader_cache_health(),
+                "git": {"hash": _git_hash()},
+                "uptime_seconds": int(max(0, time.time() - STARTED_AT)),
+                "webapp_errors_window_hours": WEBAPP_ERROR_WINDOW_HOURS,
+                "recent_errors": recent_errors,
+            },
+        }
+    )
 
 
 async def handle_admin_audit(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -375,4 +427,4 @@ async def handle_admin_sync(request: aiohttp.web.Request) -> aiohttp.web.Respons
             result="error",
             error=str(exc)[:250],
         )
-        return _json({"ok": False, "error": "sync_failed"}, status=500)
+        return webapp_error("sync_failed", status=500)

@@ -1,0 +1,101 @@
+:root {
+  --shared-focus: 0 0 0 3px rgba(14, 159, 134, .22);
+  --shared-line: rgba(23, 26, 34, .12);
+  --shared-surface: #fff;
+  --shared-ink: #171a22;
+  --shared-muted: #667085;
+  --shared-accent: #0e9f86;
+  --shared-danger: #dc3f5f;
+  --shared-radius: 8px;
+  --shared-shadow: 0 14px 42px rgba(23, 26, 34, .14);
+}
+
+.shared-button:focus-visible {
+  outline: 0;
+  box-shadow: var(--shared-focus);
+}
+
+.shared-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  z-index: 1000;
+  max-width: min(440px, calc(100vw - 28px));
+  padding: 12px 14px;
+  border-radius: var(--shared-radius);
+  color: #fff;
+  background: rgba(23, 26, 34, .94);
+  box-shadow: var(--shared-shadow);
+  transform: translate(-50%, 16px);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform .2s ease, opacity .2s ease;
+}
+
+.shared-toast[data-tone="error"] {
+  background: rgba(220, 63, 95, .96);
+}
+
+.shared-toast.is-visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.shared-recovery {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--shared-line);
+  border-radius: var(--shared-radius);
+  background: rgba(255, 255, 255, .88);
+  color: var(--shared-muted);
+  line-height: 1.45;
+}
+
+.shared-recovery b {
+  color: var(--shared-ink);
+  font-size: 16px;
+}
+
+.shared-recovery small {
+  color: var(--shared-muted);
+}
+
+.shared-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.shared-button {
+  min-height: 44px;
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid var(--shared-accent);
+  border-radius: var(--shared-radius);
+  color: #fff;
+  background: var(--shared-accent);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.shared-button.secondary {
+  color: var(--shared-ink);
+  background: var(--shared-surface);
+  border-color: var(--shared-line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shared-toast,
+  .shared-button {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

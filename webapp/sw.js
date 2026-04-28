@@ -1,5 +1,5 @@
 const swUrl = new URL(self.location.href);
-const SW_REV = swUrl.searchParams.get('rev') || '16';
+const SW_REV = swUrl.searchParams.get('rev') || '20260428-stability-1';
 const CACHE_PREFIX = 'alya-reader-runtime';
 const RUNTIME_CACHE = `${CACHE_PREFIX}-${SW_REV}`;
 

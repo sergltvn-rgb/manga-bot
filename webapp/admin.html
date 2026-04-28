@@ -5,9 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Админка</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="shared.css?v=20260428-stability-1">
+  <script src="shared.js?v=20260428-stability-1"></script>
   <link rel="stylesheet" href="admin.css?v=20260428-admin-detail-2" />
 </head>
 <body>
+  <div class="shared-recovery" hidden>Обновить Сообщить админу</div>
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
@@ -328,13 +331,21 @@
       return text ? text.replace('T', ' ').replace('+00:00', '') : 'не указано';
     }
 
+    const sharedApi = window.AlyaWebApp?.createApiClient({ baseUrl: API_URL, initData, timeoutMs: 12000 });
+
     async function api(path, options = {}) {
+      if (sharedApi) return sharedApi.request(path, options);
       const headers = options.headers || {};
       if (initData) headers.Authorization = `tma ${initData}`;
       if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
       const response = await fetch(`${API_URL}${path}`, { ...options, headers });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      if (!response.ok || data.ok === false) {
+        const details = window.AlyaWebApp?.normalizeApiError(data, response.status) || { message: `HTTP ${response.status}` };
+        const error = new Error(details.message);
+        Object.assign(error, details);
+        throw error;
+      }
       return data;
     }
 

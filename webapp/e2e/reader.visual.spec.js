@@ -11,6 +11,11 @@ function chapterKey(seriesId, volume, chapter) {
   return `${seriesId}_v${volume}_ch${chapter}`;
 }
 
+function daysAgoSql(days) {
+  const date = new Date(Date.now() - (days * 24 * 60 * 60 * 1000));
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
 function createVisualState() {
   const chapterOneKey = chapterKey("manga_ru", 1, "1");
 
@@ -55,7 +60,7 @@ function createVisualState() {
           parent_id: null,
           likes: 3,
           user_reaction: "like",
-          created_at: "2026-04-21 11:30:00"
+          created_at: daysAgoSql(2)
         },
         {
           id: 2,
@@ -66,7 +71,7 @@ function createVisualState() {
           parent_id: 1,
           likes: 1,
           user_reaction: null,
-          created_at: "2026-04-21 11:34:00"
+          created_at: daysAgoSql(2)
         }
       ]
     },

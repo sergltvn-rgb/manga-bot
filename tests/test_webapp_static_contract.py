@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+WEBAPP = Path(__file__).resolve().parents[1] / "webapp"
+
+
+def read(name: str) -> str:
+    return (WEBAPP / name).read_text(encoding="utf-8")
+
+
+def test_shared_webapp_assets_exist_and_are_linked_from_operator_pages():
+    assert (WEBAPP / "shared.css").exists()
+    assert (WEBAPP / "shared.js").exists()
+
+    for page in ["reader.html", "arts.html", "giveaway.html", "admin.html"]:
+        html = read(page)
+        assert 'href="shared.css' in html
+        assert 'src="shared.js' in html
+
+
+def test_webapp_pages_have_recovery_actions_instead_of_raw_errors():
+    for page in ["arts.html", "giveaway.html", "admin.html"]:
+        html = read(page)
+        assert "Повторить" in html or "Обновить" in html
+        assert "Сообщить админу" in html
+
+    combined = "\n".join(read(page) for page in ["arts.html", "giveaway.html", "admin.html"])
+    assert "bad_request" not in combined
+    assert "Script error." not in combined
+
+
+def test_service_worker_revision_is_not_hardcoded_default():
+    sw = read("sw.js")
+    reader = read("reader.js")
+
+    assert "const SW_REV" in sw
+    assert "webapp-build.json" in reader
+    assert "window.__WEBAPP_BUILD" in reader
+    assert "|| '16'" not in reader

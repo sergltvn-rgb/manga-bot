@@ -1266,7 +1266,8 @@ if (!Object.values(LIBRARY_FILTERS).includes(libraryFilter)) {
 // Приоритет: 1) ?api=... из URL 2) window.location.origin (если бот и WebApp на одном хосте)
 // На GitHub Pages (без ?api=) остаётся '' — функции, зависящие от API, корректно отключаются
 const urlParams = new URLSearchParams(window.location.search);
-const READER_REV = String(urlParams.get('rev') || window.__READER_REV || '16').trim() || '16';
+const WEBAPP_BUILD_META = window.__WEBAPP_BUILD || {};
+const READER_REV = String(urlParams.get('rev') || window.__READER_REV || WEBAPP_BUILD_META.rev || '20260428-stability-1').trim() || '20260428-stability-1';
 const API_URL = urlParams.get('api') || (window.location.hostname.includes('github.io') ? '' : window.location.origin);
 
 function getReaderApiCacheKey(rev = READER_REV) {
@@ -1301,6 +1302,29 @@ function handleReaderCacheVersionChange() {
         tg_platform: getTelegramPlatform(),
         has_overlay: hasBlockingOverlay()
     });
+}
+
+async function checkWebAppBuildVersion() {
+    try {
+        const response = await fetch(`webapp-build.json?t=${Date.now()}`, { cache: 'no-store', signal: getTimeoutSignal(3500) });
+        if (!response.ok) return;
+        const meta = await response.json();
+        const latestRev = String(meta.rev || '').trim();
+        if (!latestRev || latestRev === READER_REV) return;
+        sendClientTelemetry('webapp_update_available', {
+            module: 'reader.js',
+            current_rev: READER_REV,
+            latest_rev: latestRev,
+            screen: getActiveScreenName(),
+        });
+        showToast('Доступна новая версия читалки. Обновите страницу.');
+    } catch (error) {
+        sendClientTelemetry('webapp_build_check_failed', {
+            module: 'reader.js',
+            message: error && error.message ? String(error.message) : 'unknown',
+            screen: getActiveScreenName(),
+        });
+    }
 }
 
 // === API Wrapper ===
@@ -5389,6 +5413,18 @@ async function saveAddChapter() {
         });
         const result = await resp.json();
         if (result.ok) {
+            if (Array.isArray(currentVolume.chapters)) {
+                const exists = currentVolume.chapters.some((item) => sameReaderKey(item.chapter, chapter));
+                if (!exists) {
+                    currentVolume.chapters.push({
+                        chapter,
+                        custom_name: name || `Глава ${chapter}`,
+                        text: '',
+                        url,
+                    });
+                    currentChapters = currentVolume.chapters;
+                }
+            }
             closeAddChapterModal();
             showToast('✅ Глава добавлена!');
             haptic('success');
@@ -6773,6 +6809,7 @@ assertReaderState('bootstrap');
 bindGlobalErrorTelemetry();
 bindNetworkStatusListeners();
 handleReaderCacheVersionChange();
+checkWebAppBuildVersion();
 registerReaderServiceWorker();
 bindReaderKeyboardAwareUI();
 bindDelegatedSelectionEvents();
