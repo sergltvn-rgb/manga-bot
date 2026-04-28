@@ -12,6 +12,16 @@ import aiosqlite
 import database
 from database import get_admins, write_admin_audit_log
 from services.auth import get_auth_user
+from services.giveaways import (
+    Giveaway,
+    count_giveaway_entries,
+    count_recent_giveaways,
+    format_giveaway_end,
+    format_giveaway_publish,
+    get_required_channel_ids,
+    list_active_giveaways,
+    list_recent_giveaways,
+)
 from services.webapp_cors import CORS_HEADERS
 
 
@@ -199,6 +209,46 @@ async def handle_admin_audit(request: aiohttp.web.Request) -> aiohttp.web.Respon
         for row in rows
     ]
     return _json({"ok": True, "total": total, "limit": limit, "offset": offset, "items": items})
+
+
+async def _giveaway_payload(item: Giveaway) -> dict[str, Any]:
+    required_channels = await get_required_channel_ids(item.id)
+    return {
+        "id": item.id,
+        "status": item.status,
+        "channel_id": item.channel_id,
+        "message_id": item.message_id,
+        "prize": item.prize,
+        "post_text": item.post_text,
+        "winners_count": item.winners_count,
+        "participants": await count_giveaway_entries(item.id),
+        "ends_at": format_giveaway_end(item.ends_at_utc),
+        "publish_at": format_giveaway_publish(item.publish_at_utc),
+        "media_type": item.media_type or "",
+        "required_channels": required_channels,
+        "required_channels_count": len(required_channels),
+        "replacements_count": item.replacements_count,
+    }
+
+
+async def handle_admin_giveaways(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    user = await _require_admin(request)
+    if isinstance(user, aiohttp.web.Response):
+        return user
+
+    limit, offset = _page_params(request, default_limit=8)
+    active_items = await list_active_giveaways()
+    recent_items = await list_recent_giveaways(limit=limit, offset=offset)
+    return _json(
+        {
+            "ok": True,
+            "active": [await _giveaway_payload(item) for item in active_items],
+            "recent": [await _giveaway_payload(item) for item in recent_items],
+            "total": await count_recent_giveaways(),
+            "limit": limit,
+            "offset": offset,
+        }
+    )
 
 
 def _parse_payload(raw: Any) -> Any:

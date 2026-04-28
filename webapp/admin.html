@@ -15,11 +15,11 @@
         <p>Операционный центр бота</p>
       </div>
       <nav class="nav" id="nav">
-        <button class="active" data-section="overview">📊 Обзор</button>
-        <button data-section="content">📚 Контент</button>
-        <button data-section="arts">🎨 Арты</button>
-        <button data-section="giveaways">🎁 Розыгрыши</button>
-        <button data-section="ops">⚙️ Операции</button>
+        <button class="active" data-section="overview"><span class="nav-icon">OV</span>Обзор</button>
+        <button data-section="content"><span class="nav-icon">CT</span>Контент</button>
+        <button data-section="arts"><span class="nav-icon">AR</span>Арты</button>
+        <button data-section="giveaways"><span class="nav-icon">GW</span>Розыгрыши</button>
+        <button data-section="ops"><span class="nav-icon">OP</span>Операции</button>
       </nav>
     </aside>
 
@@ -29,19 +29,20 @@
           <h2 id="pageTitle">Обзор</h2>
           <p id="pageLead">Сводка по боту, WebApp и активным задачам.</p>
         </div>
-        <button class="status-pill" id="refreshBtn">🔄 Обновить</button>
+        <button class="status-pill" id="refreshBtn"><span class="btn-icon">↻</span>Обновить</button>
       </header>
 
       <section class="section active" id="overview">
+        <div class="ops-banner" id="opsBanner"></div>
         <div class="kpi-grid" id="kpis"></div>
         <div class="split">
           <div class="panel">
             <div class="panel-head">
               <h3>Состояние</h3>
-              <button class="btn" id="syncBtn">🔄 Sync WebApp</button>
+              <button class="btn" id="syncBtn"><span class="btn-icon">↻</span>Sync WebApp</button>
             </div>
             <div class="table-wrap">
-              <table>
+              <table class="key-value-table">
                 <tbody id="healthRows"></tbody>
               </table>
             </div>
@@ -120,8 +121,16 @@
 
       <section class="section" id="giveaways">
         <div class="panel">
-          <div class="panel-head"><h3>Розыгрыши</h3></div>
-          <div id="giveawayStatus" class="empty">Загрузка...</div>
+          <div class="panel-head">
+            <div>
+              <h3>Розыгрыши</h3>
+              <p>Активные кампании, участники и последние запуски без длинной Telegram-ленты.</p>
+            </div>
+            <button class="btn" id="reloadGiveawaysBtn">Обновить</button>
+          </div>
+          <div id="giveawayStatus" class="giveaway-dashboard">
+            <div class="empty">Загрузка...</div>
+          </div>
         </div>
       </section>
 
@@ -161,7 +170,7 @@
     const params = new URLSearchParams(window.location.search);
     const API_URL = params.get('api') || (location.hostname === 'localhost' ? '' : location.origin);
     const initData = tg && tg.initData ? tg.initData : '';
-    const state = { summary: null, health: null, reader: null, arts: [], auditOffset: 0, auditLimit: 20 };
+    const state = { summary: null, health: null, reader: null, arts: [], giveaways: null, auditOffset: 0, auditLimit: 20 };
     const titles = {
       overview: ['Обзор', 'Сводка по боту, WebApp и активным задачам.'],
       content: ['Контент', 'Поиск, добавление, bulk preview и удаление глав.'],
@@ -232,18 +241,33 @@
 
     function renderKpis(counts = {}) {
       const items = [
-        ['Пользователи', counts.users_total || 0, 'badge'],
-        ['Главы', counts.chapters_total || 0, 'badge violet'],
-        ['Арты', (counts.arts_visible || 0) + (counts.arts_hidden || 0), 'badge amber'],
-        ['Ошибки WebApp', counts.webapp_errors || 0, 'badge rose'],
-        ['Предложка', counts.suggestions_pending || 0, 'badge'],
-        ['Розыгрыши', counts.giveaways_active || 0, 'badge violet'],
-        ['Комментарии', counts.comments_total || 0, 'badge amber'],
-        ['Сообщения', counts.messages_total || 0, 'badge']
+        ['Пользователи', counts.users_total || 0, 'Всего', 'badge'],
+        ['Главы', counts.chapters_total || 0, 'В базе', 'badge violet'],
+        ['Арты', (counts.arts_visible || 0) + (counts.arts_hidden || 0), 'Галерея', 'badge amber'],
+        ['Ошибки WebApp', counts.webapp_errors || 0, counts.webapp_errors ? 'Проверить' : 'Чисто', counts.webapp_errors ? 'badge rose' : 'badge'],
+        ['Предложка', counts.suggestions_pending || 0, 'Очередь', 'badge'],
+        ['Розыгрыши', counts.giveaways_active || 0, 'Активно', 'badge violet'],
+        ['Комментарии', counts.comments_total || 0, 'Всего', 'badge amber'],
+        ['Сообщения', counts.messages_total || 0, 'Всего', 'badge']
       ];
-      document.getElementById('kpis').innerHTML = items.map(([label, value, badge]) => `
-        <article class="kpi"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><em class="${badge}">live</em></article>
+      document.getElementById('kpis').innerHTML = items.map(([label, value, hint, badge]) => `
+        <article class="kpi"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><em class="${badge}">${escapeHtml(hint)}</em></article>
       `).join('');
+    }
+
+    function renderOpsBanner(counts = {}, health = {}) {
+      const dbOk = health.database && health.database.ok;
+      const webErrors = Number(counts.webapp_errors || 0);
+      const activeGiveaways = Number(counts.giveaways_active || 0);
+      const tone = !dbOk || webErrors > 0 ? 'warn' : 'ok';
+      document.getElementById('opsBanner').innerHTML = `
+        <div>
+          <b>${tone === 'ok' ? 'Система в порядке' : 'Нужно внимание'}</b>
+          <span>${dbOk ? 'DB отвечает' : 'DB не отвечает'} · ${activeGiveaways} активных розыгрышей · ${webErrors} ошибок WebApp</span>
+        </div>
+        <span class="badge ${tone === 'ok' ? '' : 'rose'}">${tone === 'ok' ? 'OK' : 'Проверить'}</span>
+      `;
+      document.getElementById('opsBanner').classList.toggle('is-warn', tone !== 'ok');
     }
 
     function renderHealth(health = {}) {
@@ -311,7 +335,91 @@
     }
 
     function renderGiveaway(payload) {
-      document.getElementById('giveawayStatus').innerHTML = `<pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>`;
+      const root = document.getElementById('giveawayStatus');
+      if (!payload || payload.ok === false) {
+        root.innerHTML = `
+          <div class="empty-state">
+            <b>Не удалось загрузить розыгрыши</b>
+            <span>${escapeHtml(payload && payload.error ? payload.error : 'Неизвестная ошибка')}</span>
+          </div>
+        `;
+        return;
+      }
+      const active = asArray(payload.active);
+      const recent = asArray(payload.recent);
+      const activeHtml = active.length ? active.map((item) => `
+        <article class="giveaway-card">
+          <div class="giveaway-card__top">
+            <b>#${escapeHtml(item.id)} · ${escapeHtml(statusLabel(item.status))}</b>
+            <span class="badge violet">${escapeHtml(item.participants)} участников</span>
+          </div>
+          <p>${escapeHtml(shortText(item.prize, 120))}</p>
+          <div class="meta-grid">
+            <span>Канал<b>${escapeHtml(item.channel_id)}</b></span>
+            <span>Финиш<b>${escapeHtml(item.ends_at)} МСК</b></span>
+            <span>Победителей<b>${escapeHtml(item.winners_count)}</b></span>
+            <span>Подписки<b>${escapeHtml(item.required_channels_count || 0)}</b></span>
+          </div>
+        </article>
+      `).join('') : `
+        <div class="empty-state">
+          <b>Активных розыгрышей нет</b>
+          <span>Когда появится новый запуск, он будет здесь с участниками и сроками.</span>
+        </div>
+      `;
+      const recentHtml = recent.length ? `
+        <div class="table-wrap compact-table">
+          <table>
+            <thead><tr><th>ID</th><th>Статус</th><th>Приз</th><th>Участники</th><th>Финиш</th><th>Подписки</th></tr></thead>
+            <tbody>
+              ${recent.map((item) => `
+                <tr>
+                  <td><b>#${escapeHtml(item.id)}</b></td>
+                  <td><span class="badge ${statusTone(item.status)}">${escapeHtml(statusLabel(item.status))}</span></td>
+                  <td>${escapeHtml(shortText(item.prize, 80))}</td>
+                  <td>${escapeHtml(item.participants)}</td>
+                  <td>${escapeHtml(item.ends_at)} МСК</td>
+                  <td>${escapeHtml(item.required_channels_count || 0)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : '<div class="empty-state"><b>Истории пока нет</b><span>Последние розыгрыши появятся после публикации.</span></div>';
+      root.innerHTML = `
+        <div class="giveaway-summary">
+          <div><span>Активные</span><b>${active.length}</b></div>
+          <div><span>Всего в истории</span><b>${escapeHtml(payload.total || 0)}</b></div>
+          <div><span>На странице</span><b>${recent.length}</b></div>
+        </div>
+        <h4>Сейчас идут</h4>
+        <div class="giveaway-grid">${activeHtml}</div>
+        <h4>Последние розыгрыши</h4>
+        ${recentHtml}
+      `;
+    }
+
+    function statusLabel(status) {
+      return ({
+        draft: 'Черновик',
+        scheduled: 'Запланирован',
+        active: 'Активен',
+        finishing: 'Завершается',
+        finished: 'Завершен',
+        cancelled: 'Отменен'
+      })[status] || status || 'Неизвестно';
+    }
+
+    function statusTone(status) {
+      if (status === 'active' || status === 'scheduled') return 'violet';
+      if (status === 'finished') return '';
+      if (status === 'cancelled') return 'rose';
+      return 'amber';
+    }
+
+    function shortText(value, limit) {
+      const text = String(value || '').trim();
+      return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
     }
 
     function appendAudit(payload, reset = false) {
@@ -336,13 +444,15 @@
           api('/api/admin/health'),
           api('/api/reader'),
           api('/api/arts?limit=12'),
-          api('/api/giveaway/status').catch((error) => ({ error: error.message })),
+          api('/api/admin/giveaways').catch((error) => ({ ok: false, error: error.message })),
           api(`/api/admin/audit?limit=${state.auditLimit}&offset=0`)
         ]);
         state.summary = summary;
         state.health = health;
         state.reader = reader;
+        state.giveaways = giveaway;
         renderKpis(summary.counts);
+        renderOpsBanner(summary.counts, health.health);
         renderHealth(health.health);
         renderContent();
         renderArts(arts);
@@ -371,6 +481,12 @@
       state.reader = await api('/api/reader');
       renderContent();
       showToast('Контент обновлен');
+    });
+    document.getElementById('reloadGiveawaysBtn').addEventListener('click', async () => {
+      const data = await api('/api/admin/giveaways');
+      state.giveaways = data;
+      renderGiveaway(data);
+      showToast('Розыгрыши обновлены');
     });
     document.getElementById('contentSearch').addEventListener('input', renderContent);
     document.getElementById('seriesFilter').addEventListener('change', renderContent);

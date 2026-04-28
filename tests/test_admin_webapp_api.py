@@ -173,3 +173,25 @@ def test_admin_sync_runs_job_and_writes_audit(tmp_path, monkeypatch):
                 return await cursor.fetchone()
 
     assert run(read_last_action()) == ("webapp_sync", "10", "queued")
+
+
+def test_admin_giveaways_returns_list_without_giveaway_id(tmp_path, monkeypatch):
+    from aiohttp.test_utils import make_mocked_request
+
+    import database
+    import services.admin_webapp_api as admin_api
+
+    db_path = tmp_path / "admin.db"
+    monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    run(seed_admin_api_db(db_path))
+    install_auth(monkeypatch)
+
+    response = run(admin_api.handle_admin_giveaways(make_mocked_request("GET", "/api/admin/giveaways")))
+    payload = body_json(response)
+
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["active"][0]["id"] > 0
+    assert payload["active"][0]["participants"] == 0
+    assert payload["active"][0]["status"] == "active"
+    assert payload["recent"][0]["prize"] == "VIP"
