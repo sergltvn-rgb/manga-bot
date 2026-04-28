@@ -5,21 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Админка</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="admin.css?v=20260428-admin-detail-1" />
+  <link rel="stylesheet" href="admin.css?v=20260428-admin-detail-2" />
 </head>
 <body>
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
-        <h1>Alya Admin</h1>
-        <p>Операционный центр бота</p>
+        <h1>Панель Alya</h1>
+        <p>Управление ботом</p>
       </div>
       <nav class="nav" id="nav">
-        <button class="active" data-section="overview"><span class="nav-icon">OV</span>Обзор</button>
-        <button data-section="content"><span class="nav-icon">CT</span>Контент</button>
-        <button data-section="arts"><span class="nav-icon">AR</span>Арты</button>
-        <button data-section="giveaways"><span class="nav-icon">GW</span>Розыгрыши</button>
-        <button data-section="ops"><span class="nav-icon">OP</span>Операции</button>
+        <button class="active" data-section="overview"><span class="nav-icon">ОБ</span>Обзор</button>
+        <button data-section="content"><span class="nav-icon">КН</span>Контент</button>
+        <button data-section="arts"><span class="nav-icon">АР</span>Арты</button>
+        <button data-section="giveaways"><span class="nav-icon">РЗ</span>Розыгрыши</button>
+        <button data-section="ops"><span class="nav-icon">ЖР</span>Журнал</button>
       </nav>
     </aside>
 
@@ -27,7 +27,7 @@
       <header class="topbar">
         <div>
           <h2 id="pageTitle">Обзор</h2>
-          <p id="pageLead">Сводка по боту, WebApp и активным задачам.</p>
+          <p id="pageLead">Сводка по боту, читалке и активным задачам.</p>
         </div>
         <button class="status-pill" id="refreshBtn"><span class="btn-icon">↻</span>Обновить</button>
       </header>
@@ -39,7 +39,7 @@
           <div class="panel">
             <div class="panel-head">
               <h3>Состояние</h3>
-              <button class="btn" id="syncBtn"><span class="btn-icon">↻</span>Sync WebApp</button>
+              <button class="btn" id="syncBtn"><span class="btn-icon">↻</span>Обновить данные читалки</button>
             </div>
             <div class="table-wrap">
               <table class="key-value-table">
@@ -64,6 +64,7 @@
             <input class="field" id="contentSearch" placeholder="Поиск по названию или главе" />
             <select class="field" id="seriesFilter"></select>
           </div>
+          <div class="content-quality" id="contentQuality"></div>
           <div class="table-wrap">
             <table>
               <thead>
@@ -83,20 +84,46 @@
           <div class="panel">
             <div class="panel-head"><h3>Добавить / обновить главу</h3></div>
             <form class="form-grid" id="chapterForm">
-              <input class="field" name="series_id" placeholder="series_id, например manga_ru" required />
-              <input class="field" name="volume" placeholder="Том, если нужен" />
-              <input class="field" name="chapter" placeholder="Глава" required />
-              <textarea class="field" name="url" placeholder="Ссылка или текст для Telegraph" required></textarea>
+              <label class="field-group">
+                <span>Тайтл</span>
+                <select class="field" name="series_id" data-series-select required></select>
+                <small data-series-hint>Выберите тайтл из базы, технический код подставится сам.</small>
+              </label>
+              <label class="field-group">
+                <span>Том</span>
+                <input class="field" name="volume" placeholder="Например 11, если у тайтла есть тома" />
+              </label>
+              <label class="field-group">
+                <span>Номер или название главы</span>
+                <input class="field" name="chapter" placeholder="Например 12 или Иллюстрации" required />
+              </label>
+              <label class="field-group">
+                <span>Ссылки или текст главы</span>
+                <textarea class="field" name="url" placeholder="Вставьте ссылку. Если вставить длинный текст без ссылки, бот создаст Telegraph-страницу." required></textarea>
+              </label>
               <button class="btn primary" type="submit">Сохранить главу</button>
             </form>
           </div>
           <div class="panel">
-            <div class="panel-head"><h3>Bulk preview</h3></div>
+            <div class="panel-head"><h3>Массовая проверка глав</h3></div>
             <form class="form-grid" id="bulkForm">
-              <input class="field" name="series_id" placeholder="series_id" required />
-              <input class="field" name="volume" placeholder="Том, если нужен" />
-              <input class="field" name="start_chapter" placeholder="Стартовая глава" value="1" />
-              <textarea class="field" name="urls" placeholder="Ссылки, каждая с новой строки" required></textarea>
+              <label class="field-group">
+                <span>Тайтл</span>
+                <select class="field" name="series_id" data-series-select required></select>
+                <small data-series-hint>Проверка покажет, какие главы новые, а какие уже есть.</small>
+              </label>
+              <label class="field-group">
+                <span>Том</span>
+                <input class="field" name="volume" placeholder="Например 11, если нужен" />
+              </label>
+              <label class="field-group">
+                <span>С какой главы начать</span>
+                <input class="field" name="start_chapter" placeholder="Например 1" value="1" />
+              </label>
+              <label class="field-group">
+                <span>Ссылки</span>
+                <textarea class="field" name="urls" placeholder="Каждая ссылка с новой строки" required></textarea>
+              </label>
               <button class="btn" type="submit">Проверить</button>
             </form>
             <div id="bulkPreview" class="empty">Результат проверки появится здесь.</div>
@@ -127,6 +154,12 @@
               <p>Активные кампании, участники и последние запуски без длинной Telegram-ленты.</p>
             </div>
             <button class="btn" id="reloadGiveawaysBtn">Обновить</button>
+          </div>
+          <div class="toolbar" id="giveawayFilters">
+            <button class="btn active-filter" data-giveaway-status="all">Все</button>
+            <button class="btn" data-giveaway-status="active">Активные</button>
+            <button class="btn" data-giveaway-status="scheduled">Запланированные</button>
+            <button class="btn" data-giveaway-status="finished">Завершенные</button>
           </div>
           <div id="giveawayStatus" class="giveaway-dashboard">
             <div class="empty">Загрузка...</div>
@@ -162,6 +195,15 @@
       </div>
     </div>
   </div>
+  <div class="modal" id="detailModal" role="dialog" aria-modal="true">
+    <div class="dialog dialog-large">
+      <div class="dialog-head">
+        <h3 id="detailTitle">Подробности</h3>
+        <button class="btn" id="detailClose" type="button">Закрыть</button>
+      </div>
+      <div id="detailBody"></div>
+    </div>
+  </div>
 
   <script>
     const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
@@ -170,13 +212,48 @@
     const params = new URLSearchParams(window.location.search);
     const API_URL = params.get('api') || (location.hostname === 'localhost' ? '' : location.origin);
     const initData = tg && tg.initData ? tg.initData : '';
-    const state = { summary: null, health: null, reader: null, arts: [], giveaways: null, auditOffset: 0, auditLimit: 20 };
+    const state = {
+      summary: null,
+      health: null,
+      reader: null,
+      arts: [],
+      giveaways: null,
+      giveawayStatus: 'all',
+      auditOffset: 0,
+      auditLimit: 20,
+      auditItems: [],
+      contentRows: [],
+      lastBulkPayload: null,
+      lastBulkPreview: null
+    };
     const titles = {
-      overview: ['Обзор', 'Сводка по боту, WebApp и активным задачам.'],
-      content: ['Контент', 'Поиск, добавление, bulk preview и удаление глав.'],
+      overview: ['Обзор', 'Сводка по боту, читалке и активным задачам.'],
+      content: ['Контент', 'Поиск, добавление, массовая проверка и удаление глав.'],
       arts: ['Арты', 'Быстрый контроль галереи и переход в полноценную сетку.'],
-      giveaways: ['Розыгрыши', 'Состояние giveaway mini app и активных участий.'],
-      ops: ['Операции', 'Health, sync и журнал админских действий.']
+      giveaways: ['Розыгрыши', 'Активные кампании, ссылки на посты, подписки и участники.'],
+      ops: ['Журнал', 'Состояние сервера, обновление читалки и понятная история действий.']
+    };
+
+    const actionLabels = {
+      webapp_sync: 'Обновление данных читалки',
+      chapter_add: 'Добавление главы',
+      chapter_edit: 'Изменение главы',
+      chapter_delete: 'Удаление главы',
+      chapter_bulk_preview: 'Проверка списка глав',
+      chapter_bulk_upload: 'Массовая загрузка глав',
+      rename_delete: 'Сброс названия',
+      rename_request_cache: 'Заявка на переименование',
+      sort_chapters: 'Сортировка глав',
+      series_update: 'Обновление тайтла',
+      client_runtime_error: 'Ошибка в читалке',
+      client_unhandled_rejection: 'Сбой загрузки',
+      client_state_contract_violation: 'Несовпадение данных'
+    };
+
+    const resultLabels = {
+      ok: 'Готово',
+      queued: 'В очереди',
+      error: 'Ошибка'
     };
 
     let toastTimer = null;
@@ -222,6 +299,35 @@
       });
     }
 
+    function showDetails(title, html) {
+      document.getElementById('detailTitle').textContent = title;
+      document.getElementById('detailBody').innerHTML = html;
+      document.getElementById('detailModal').classList.add('show');
+    }
+
+    function hideDetails() {
+      document.getElementById('detailModal').classList.remove('show');
+    }
+
+    function labelForAction(action) {
+      return actionLabels[action] || String(action || 'Неизвестное действие').replaceAll('_', ' ');
+    }
+
+    function labelForResult(result) {
+      return resultLabels[result] || result || 'Неизвестно';
+    }
+
+    function resultTone(result, hasError = false) {
+      if (hasError || result === 'error') return 'rose';
+      if (result === 'queued') return 'amber';
+      return '';
+    }
+
+    function formatDate(value) {
+      const text = String(value || '').trim();
+      return text ? text.replace('T', ' ').replace('+00:00', '') : 'не указано';
+    }
+
     async function api(path, options = {}) {
       const headers = options.headers || {};
       if (initData) headers.Authorization = `tma ${initData}`;
@@ -244,7 +350,7 @@
         ['Пользователи', counts.users_total || 0, 'Всего', 'badge'],
         ['Главы', counts.chapters_total || 0, 'В базе', 'badge violet'],
         ['Арты', (counts.arts_visible || 0) + (counts.arts_hidden || 0), 'Галерея', 'badge amber'],
-        ['Ошибки WebApp', counts.webapp_errors || 0, counts.webapp_errors ? 'Проверить' : 'Чисто', counts.webapp_errors ? 'badge rose' : 'badge'],
+        ['Ошибки читалки', counts.webapp_errors || 0, counts.webapp_errors ? 'Проверить' : 'Чисто', counts.webapp_errors ? 'badge rose' : 'badge'],
         ['Предложка', counts.suggestions_pending || 0, 'Очередь', 'badge'],
         ['Розыгрыши', counts.giveaways_active || 0, 'Активно', 'badge violet'],
         ['Комментарии', counts.comments_total || 0, 'Всего', 'badge amber'],
@@ -263,9 +369,9 @@
       document.getElementById('opsBanner').innerHTML = `
         <div>
           <b>${tone === 'ok' ? 'Система в порядке' : 'Нужно внимание'}</b>
-          <span>${dbOk ? 'DB отвечает' : 'DB не отвечает'} · ${activeGiveaways} активных розыгрышей · ${webErrors} ошибок WebApp</span>
+          <span>${dbOk ? 'База данных отвечает' : 'База данных не отвечает'} · ${activeGiveaways} активных розыгрышей · ${webErrors} ошибок читалки</span>
         </div>
-        <span class="badge ${tone === 'ok' ? '' : 'rose'}">${tone === 'ok' ? 'OK' : 'Проверить'}</span>
+        <span class="badge ${tone === 'ok' ? '' : 'rose'}">${tone === 'ok' ? 'В порядке' : 'Проверить'}</span>
       `;
       document.getElementById('opsBanner').classList.toggle('is-warn', tone !== 'ok');
     }
@@ -273,10 +379,10 @@
     function renderHealth(health = {}) {
       const providers = health.providers || {};
       const rows = [
-        ['DB', health.database && health.database.ok ? 'OK' : 'Проблема'],
-        ['Git', health.git ? health.git.hash : 'unknown'],
-        ['Bot', health.bot && health.bot.username ? `@${health.bot.username}` : 'нет данных'],
-        ['Uptime', `${Math.floor((health.uptime_seconds || 0) / 60)} мин`],
+        ['База данных', health.database && health.database.ok ? 'исправна' : 'проблема'],
+        ['Версия кода', health.git ? health.git.hash : 'неизвестно'],
+        ['Бот', health.bot && health.bot.username ? `@${health.bot.username}` : 'нет данных'],
+        ['Время работы', `${Math.floor((health.uptime_seconds || 0) / 60)} мин`],
         ['Gemma', providers.gemma && providers.gemma.configured ? 'настроена' : 'выключена'],
         ['Groq', providers.groq && providers.groq.configured ? 'настроен' : 'нет ключа']
       ];
@@ -285,7 +391,7 @@
       const hours = Number(health.recent_errors_window_hours || 24);
       document.getElementById('errorsTitle').textContent = `Ошибки за ${hours}ч`;
       document.getElementById('errorList').innerHTML = errors.length
-        ? errors.map((item) => `<p><span class="badge rose">${escapeHtml(item.event_type)}</span><br>${escapeHtml(item.message || 'без сообщения')}<br><span class="label">${escapeHtml(item.created_at)}</span></p>`).join('')
+        ? errors.map((item) => `<p><span class="badge rose">${escapeHtml(labelForAction(item.event_type))}</span><br>${escapeHtml(item.message || 'без сообщения')}<br><span class="label">${escapeHtml(item.source_module || 'модуль не указан')} · ${escapeHtml(item.created_at)}</span></p>`).join('')
         : '<div class="empty-state"><b>Свежих ошибок нет</b><span>Архивные события не показываются как текущие.</span></div>';
     }
 
@@ -321,6 +427,56 @@
       });
     }
 
+    function uniqueSeries() {
+      return asArray(state.reader && state.reader.series).map((series) => ({
+        id: series.id || series.series_id || '',
+        title: series.title || series.name || series.id || 'Тайтл',
+        volumes: asArray(series.volumes)
+      })).filter((series) => series.id);
+    }
+
+    function populateSeriesControls() {
+      const series = uniqueSeries();
+      const options = '<option value="">Выберите тайтл</option>' + series.map((item) => (
+        `<option value="${escapeHtml(item.id)}">${escapeHtml(item.title)}</option>`
+      )).join('');
+      document.querySelectorAll('[data-series-select]').forEach((select) => {
+        const current = select.value;
+        select.innerHTML = options;
+        if (current) select.value = current;
+      });
+      updateSeriesHints();
+    }
+
+    function updateSeriesHints() {
+      const rows = readerSeries();
+      document.querySelectorAll('[data-series-select]').forEach((select) => {
+        const selected = uniqueSeries().find((item) => item.id === select.value);
+        const hint = select.closest('.field-group').querySelector('[data-series-hint]');
+        if (!hint) return;
+        if (!selected) {
+          hint.textContent = 'Выберите тайтл из базы, технический код подставится сам.';
+          return;
+        }
+        const chapters = rows.filter((row) => row.series_id === selected.id);
+        const latest = chapters[0] ? chapters[0].chapter : 'нет глав';
+        hint.textContent = `Код: ${selected.id}. В базе: ${chapters.length}. Последняя видимая глава: ${latest}.`;
+      });
+    }
+
+    function renderContentQuality(rows) {
+      const total = rows.length;
+      const withLinks = rows.filter((item) => item.urls.length).length;
+      const withoutLinks = total - withLinks;
+      const seriesCount = uniqueSeries().length;
+      document.getElementById('contentQuality').innerHTML = `
+        <div><span>Тайтлов</span><b>${seriesCount}</b></div>
+        <div><span>Глав в списке</span><b>${total}</b></div>
+        <div><span>Со ссылками</span><b>${withLinks}</b></div>
+        <div class="${withoutLinks ? 'warn' : ''}"><span>Без ссылок</span><b>${withoutLinks}</b></div>
+      `;
+    }
+
     function renderContent() {
       const select = document.getElementById('seriesFilter');
       const series = asArray(state.reader && state.reader.series);
@@ -332,14 +488,20 @@
         const haystack = `${item.title} ${item.volume} ${item.chapter} ${item.chapter_name} ${item.urls.join(' ')}`.toLowerCase();
         return matchesSeries && (!query || haystack.includes(query));
       }).slice(0, 120);
+      state.contentRows = rows;
+      renderContentQuality(readerSeries());
       document.getElementById('contentRows').innerHTML = rows.length ? rows.map((item) => `
         <tr>
-          <td><b>${escapeHtml(item.title)}</b><br><span class="label">${escapeHtml(item.series_id)}${item.volume ? ` · том ${escapeHtml(item.volume)}` : ''}</span></td>
+          <td><b>${escapeHtml(item.title)}</b><br><span class="label">Код: ${escapeHtml(item.series_id)}${item.volume ? ` · том ${escapeHtml(item.volume)}` : ''}</span></td>
           <td>${escapeHtml(item.chapter_name || item.chapter)}${item.chapter_name ? `<br><span class="label">ID: ${escapeHtml(item.chapter)}</span>` : ''}</td>
-          <td>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Открыть${item.urls.length > 1 ? ` (${item.urls.length})` : ''}</a>` : '<span class="label">нет ссылки</span>'}</td>
-          <td><button class="btn danger" data-delete-chapter="${escapeHtml(item.series_id)}" data-volume="${escapeHtml(item.volume)}" data-chapter="${escapeHtml(item.chapter)}">Удалить</button></td>
+          <td>${item.url ? `<button class="link-button" data-open-links="${rows.indexOf(item)}">Открыть ссылки (${item.urls.length})</button>` : '<span class="label">нет ссылки</span>'}</td>
+          <td class="actions-cell">
+            <button class="btn" data-edit-chapter="${rows.indexOf(item)}">Изменить</button>
+            <button class="btn danger" data-delete-chapter="${escapeHtml(item.series_id)}" data-volume="${escapeHtml(item.volume)}" data-chapter="${escapeHtml(item.chapter)}">Удалить</button>
+          </td>
         </tr>
       `).join('') : '<tr><td colspan="4">Главы не найдены.</td></tr>';
+      populateSeriesControls();
     }
 
     function renderArts(payload) {
@@ -368,6 +530,7 @@
       }
       const active = asArray(payload.active);
       const recent = asArray(payload.recent);
+      const counts = payload.status_counts || {};
       const activeHtml = active.length ? active.map((item) => `
         <article class="giveaway-card">
           <div class="giveaway-card__top">
@@ -381,10 +544,11 @@
             <span>Финиш<b>${escapeHtml(item.ends_at)} МСК</b></span>
             <span>Победителей<b>${escapeHtml(item.winners_count)}</b></span>
             <span>Публикация<b>${escapeHtml(publishLabel(item.publish_at))}</b></span>
-            <span>Пост<b>${item.post_url ? linkHtml(item.post_url, `#${item.message_id}`) : 'еще нет ссылки'}</b></span>
+            <span>Пост<b>${item.post_url ? linkHtml(item.post_url, `#${item.message_id}`) : 'ссылка появится после публикации'}</b></span>
             <span>Подписка<b>${escapeHtml(item.subscription || 'только основной канал')}</b></span>
           </div>
           ${requiredChannelsHtml(item)}
+          <button class="btn" data-giveaway-details="${escapeHtml(item.id)}">Подробности</button>
         </article>
       `).join('') : `
         <div class="empty-state">
@@ -395,7 +559,7 @@
       const recentHtml = recent.length ? `
         <div class="table-wrap compact-table">
           <table>
-            <thead><tr><th>ID</th><th>Статус</th><th>Приз</th><th>Канал</th><th>Участники</th><th>Финиш</th><th>Пост</th></tr></thead>
+            <thead><tr><th>Номер</th><th>Статус</th><th>Приз</th><th>Канал</th><th>Участники</th><th>Финиш</th><th>Пост</th><th>Еще</th></tr></thead>
             <tbody>
               ${recent.map((item) => `
                 <tr>
@@ -406,6 +570,7 @@
                   <td>${escapeHtml(item.participants)}</td>
                   <td>${escapeHtml(item.ends_at)} МСК</td>
                   <td>${item.post_url ? linkHtml(item.post_url, 'Открыть') : '<span class="label">нет поста</span>'}</td>
+                  <td><button class="btn" data-giveaway-details="${escapeHtml(item.id)}">Карточка</button></td>
                 </tr>
               `).join('')}
             </tbody>
@@ -414,7 +579,9 @@
       ` : '<div class="empty-state"><b>Истории пока нет</b><span>Последние розыгрыши появятся после публикации.</span></div>';
       root.innerHTML = `
         <div class="giveaway-summary">
-          <div><span>Активные</span><b>${active.length}</b></div>
+          <div><span>Активные</span><b>${counts.active || active.length}</b></div>
+          <div><span>Запланированные</span><b>${counts.scheduled || 0}</b></div>
+          <div><span>Завершенные</span><b>${counts.finished || 0}</b></div>
           <div><span>Всего в истории</span><b>${escapeHtml(payload.total || 0)}</b></div>
           <div><span>На странице</span><b>${recent.length}</b></div>
         </div>
@@ -485,16 +652,107 @@
       `;
     }
 
+    function allGiveawayItems() {
+      const data = state.giveaways || {};
+      return [...asArray(data.active), ...asArray(data.recent)];
+    }
+
+    function showGiveawayDetails(id) {
+      const item = allGiveawayItems().find((entry) => String(entry.id) === String(id));
+      if (!item) return;
+      showDetails(`Розыгрыш #${item.id}`, `
+        <div class="detail-grid">
+          <div><span>Статус</span><b>${escapeHtml(statusLabel(item.status))}</b></div>
+          <div><span>Участники</span><b>${escapeHtml(item.participants)}</b></div>
+          <div><span>Победителей</span><b>${escapeHtml(item.winners_count)}</b></div>
+          <div><span>Замены победителей</span><b>${escapeHtml(item.replacements_count || 0)}</b></div>
+          <div><span>Канал</span><b>${linkHtml(item.channel_url, item.channel_id)}</b></div>
+          <div><span>Пост</span><b>${item.post_url ? linkHtml(item.post_url, `#${item.message_id}`) : 'ссылки пока нет'}</b></div>
+          <div><span>Публикация</span><b>${escapeHtml(publishLabel(item.publish_at))}</b></div>
+          <div><span>Финиш</span><b>${escapeHtml(item.ends_at)} МСК</b></div>
+        </div>
+        ${prizesHtml(item)}
+        ${requiredChannelsHtml(item)}
+        <div class="detail-list"><span>Текст поста</span><b>${escapeHtml(item.post_text || 'не указан')}</b></div>
+      `);
+    }
+
+    function renderBulkPreview(data) {
+      const preview = document.getElementById('bulkPreview');
+      const summary = data.summary || {};
+      const items = asArray(data.items);
+      const warnings = asArray(data.warnings);
+      const canSave = data.ok && Number(summary.new || 0) > 0;
+      preview.innerHTML = `
+        <div class="preview-summary">
+          <span class="badge">Всего: ${escapeHtml(summary.total || 0)}</span>
+          <span class="badge">Новых: ${escapeHtml(summary.new || 0)}</span>
+          <span class="badge amber">Дублей: ${escapeHtml(summary.duplicates || 0)}</span>
+          <span class="badge rose">Ошибок: ${escapeHtml(summary.invalid || 0)}</span>
+        </div>
+        ${warnings.length ? `<div class="warning-list">${warnings.map((item) => `<p>${escapeHtml(item)}</p>`).join('')}</div>` : ''}
+        <div class="table-wrap compact-table">
+          <table>
+            <thead><tr><th>Строка</th><th>Глава</th><th>Статус</th><th>Ссылка</th></tr></thead>
+            <tbody>${items.map((item) => `
+              <tr>
+                <td>${escapeHtml(item.index)}</td>
+                <td>${escapeHtml(item.chapter)}</td>
+                <td><span class="badge ${item.status === 'new' ? '' : 'amber'}">${item.status === 'new' ? 'новая' : 'уже есть'}</span></td>
+                <td>${linkHtml(item.url, 'Открыть')}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="4">Подходящих ссылок нет.</td></tr>'}</tbody>
+          </table>
+        </div>
+        ${canSave ? '<button class="btn primary" data-save-bulk type="button">Сохранить новые главы</button>' : '<p class="label">Сохранять нечего: исправьте ошибки или добавьте новые ссылки.</p>'}
+      `;
+    }
+
+    function describePayload(payload) {
+      if (!payload || typeof payload !== 'object') return '';
+      const labels = {
+        series_id: 'Тайтл',
+        volume: 'Том',
+        chapter: 'Глава',
+        url_count: 'Ссылок',
+        urls_count: 'Ссылок',
+        added: 'Добавлено',
+        start_chapter: 'Стартовая глава',
+        obj_id: 'Объект',
+        source: 'Источник'
+      };
+      return Object.entries(payload).map(([key, value]) => (
+        `<div><span>${escapeHtml(labels[key] || key)}</span><b>${escapeHtml(value)}</b></div>`
+      )).join('');
+    }
+
+    function showAuditDetails(id) {
+      const item = (state.auditItems || []).find((entry) => String(entry.id) === String(id));
+      if (!item) return;
+      showDetails(labelForAction(item.action), `
+        <div class="detail-grid">
+          <div><span>Время</span><b>${escapeHtml(formatDate(item.created_at))}</b></div>
+          <div><span>Администратор</span><b>ID ${escapeHtml(item.actor_user_id)}</b></div>
+          <div><span>Результат</span><b>${escapeHtml(labelForResult(item.result))}</b></div>
+          <div><span>Цель</span><b>${escapeHtml(item.target || 'не указана')}</b></div>
+          ${describePayload(item.payload)}
+        </div>
+        ${item.error ? `<div class="detail-list"><span>Ошибка</span><b>${escapeHtml(item.error)}</b></div>` : ''}
+      `);
+    }
+
     function appendAudit(payload, reset = false) {
       const rows = payload.items || [];
       if (reset) document.getElementById('auditRows').innerHTML = '';
+      if (reset) state.auditItems = [];
+      state.auditItems = [...(state.auditItems || []), ...rows];
       document.getElementById('auditRows').insertAdjacentHTML('beforeend', rows.map((item) => `
         <tr>
-          <td>${escapeHtml(item.created_at)}</td>
-          <td><b>${escapeHtml(item.action)}</b></td>
-          <td>${escapeHtml(item.actor_user_id)}</td>
-          <td>${item.error ? `<span class="badge rose">${escapeHtml(item.result)}</span>` : `<span class="badge">${escapeHtml(item.result)}</span>`}</td>
-          <td>${escapeHtml(item.target || '')}</td>
+          <td>${escapeHtml(formatDate(item.created_at))}</td>
+          <td><b>${escapeHtml(labelForAction(item.action))}</b><br><span class="label">${escapeHtml(item.action)}</span></td>
+          <td>ID ${escapeHtml(item.actor_user_id)}</td>
+          <td><span class="badge ${resultTone(item.result, item.error)}">${escapeHtml(labelForResult(item.result))}</span></td>
+          <td><button class="link-button" data-audit-details="${escapeHtml(item.id)}">${escapeHtml(item.target || 'подробности')}</button></td>
         </tr>
       `).join('') || (reset ? '<tr><td colspan="5">Журнал пуст.</td></tr>' : ''));
       state.auditOffset = (payload.offset || 0) + rows.length;
@@ -534,6 +792,14 @@
       return Object.fromEntries(new FormData(form).entries());
     }
 
+    async function loadGiveaways() {
+      const status = encodeURIComponent(state.giveawayStatus || 'all');
+      const data = await api(`/api/admin/giveaways?status=${status}`);
+      state.giveaways = data;
+      renderGiveaway(data);
+      return data;
+    }
+
     document.getElementById('nav').addEventListener('click', (event) => {
       const button = event.target.closest('button[data-section]');
       if (button) setSection(button.dataset.section);
@@ -546,16 +812,17 @@
       showToast('Контент обновлен');
     });
     document.getElementById('reloadGiveawaysBtn').addEventListener('click', async () => {
-      const data = await api('/api/admin/giveaways');
-      state.giveaways = data;
-      renderGiveaway(data);
+      await loadGiveaways();
       showToast('Розыгрыши обновлены');
     });
     document.getElementById('contentSearch').addEventListener('input', renderContent);
     document.getElementById('seriesFilter').addEventListener('change', renderContent);
+    document.body.addEventListener('change', (event) => {
+      if (event.target.matches('[data-series-select]')) updateSeriesHints();
+    });
     document.getElementById('syncBtn').addEventListener('click', async () => {
       const data = await api('/api/admin/sync', { method: 'POST' });
-      showToast(data.message || 'Sync запущен');
+      showToast(data.message || 'Обновление читалки запущено');
     });
     document.getElementById('auditMore').addEventListener('click', async () => {
       const data = await api(`/api/admin/audit?limit=${state.auditLimit}&offset=${state.auditOffset}`);
@@ -564,7 +831,13 @@
 
     document.getElementById('chapterForm').addEventListener('submit', async (event) => {
       event.preventDefault();
-      await api('/api/chapters', { method: 'POST', body: JSON.stringify(formPayload(event.currentTarget)) });
+      const payload = formPayload(event.currentTarget);
+      try {
+        await api('/api/chapters', { method: 'POST', body: JSON.stringify(payload) });
+      } catch (error) {
+        if (!String(error.message || '').includes('already')) throw error;
+        await api('/api/chapters', { method: 'PUT', body: JSON.stringify(payload) });
+      }
       showToast('Глава сохранена');
       state.reader = await api('/api/reader');
       renderContent();
@@ -575,10 +848,65 @@
       const payload = formPayload(event.currentTarget);
       payload.urls = String(payload.urls || '').split('\n').map((item) => item.trim()).filter(Boolean);
       const data = await api('/api/chapters/bulk/preview', { method: 'POST', body: JSON.stringify(payload) });
-      document.getElementById('bulkPreview').textContent = JSON.stringify(data, null, 2);
+      state.lastBulkPayload = payload;
+      state.lastBulkPreview = data;
+      renderBulkPreview(data);
     });
 
     document.body.addEventListener('click', async (event) => {
+      const linkBtn = event.target.closest('[data-open-links]');
+      if (linkBtn) {
+        const item = state.contentRows[Number(linkBtn.dataset.openLinks)];
+        if (!item) return;
+        showDetails(`Ссылки: ${item.title}`, `
+          <div class="detail-grid">
+            <div><span>Тайтл</span><b>${escapeHtml(item.title)}</b></div>
+            <div><span>Глава</span><b>${escapeHtml(item.chapter_name || item.chapter)}</b></div>
+            <div><span>Код</span><b>${escapeHtml(item.series_id)}</b></div>
+            <div><span>Ссылок</span><b>${escapeHtml(item.urls.length)}</b></div>
+          </div>
+          <div class="link-list">${item.urls.map((url, idx) => `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">Ссылка ${idx + 1}</a>`).join('')}</div>
+        `);
+      }
+      const editBtn = event.target.closest('[data-edit-chapter]');
+      if (editBtn) {
+        const item = state.contentRows[Number(editBtn.dataset.editChapter)];
+        if (!item) return;
+        const form = document.getElementById('chapterForm');
+        form.elements.series_id.value = item.series_id;
+        form.elements.volume.value = item.volume || '';
+        form.elements.chapter.value = item.chapter || '';
+        form.elements.url.value = item.urls.join('\n');
+        updateSeriesHints();
+        setSection('content');
+        showToast('Глава перенесена в форму редактирования');
+      }
+      const bulkSaveBtn = event.target.closest('[data-save-bulk]');
+      if (bulkSaveBtn) {
+        if (!state.lastBulkPayload) return;
+        const approved = await confirmAction({
+          title: 'Сохранить главы',
+          text: 'Новые главы из проверки будут записаны в базу и попадут в читалку.',
+          confirmText: 'Сохранить'
+        });
+        if (!approved) return;
+        const data = await api('/api/chapters/bulk', { method: 'POST', body: JSON.stringify(state.lastBulkPayload) });
+        showToast(`Добавлено глав: ${data.added || 0}`);
+        state.reader = await api('/api/reader');
+        renderContent();
+      }
+      const auditBtn = event.target.closest('[data-audit-details]');
+      if (auditBtn) showAuditDetails(auditBtn.dataset.auditDetails);
+      const giveawayBtn = event.target.closest('[data-giveaway-details]');
+      if (giveawayBtn) showGiveawayDetails(giveawayBtn.dataset.giveawayDetails);
+      const giveawayFilter = event.target.closest('[data-giveaway-status]');
+      if (giveawayFilter) {
+        state.giveawayStatus = giveawayFilter.dataset.giveawayStatus;
+        document.querySelectorAll('[data-giveaway-status]').forEach((button) => {
+          button.classList.toggle('active-filter', button === giveawayFilter);
+        });
+        await loadGiveaways();
+      }
       const artBtn = event.target.closest('[data-delete-art]');
       if (artBtn) {
         const approved = await confirmAction({
@@ -620,6 +948,8 @@
         }
       }
     });
+
+    document.getElementById('detailClose').addEventListener('click', hideDetails);
 
     const artsUrl = new URL('arts.html', location.href);
     if (params.get('api')) artsUrl.searchParams.set('api', params.get('api'));

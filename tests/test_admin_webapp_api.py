@@ -94,6 +94,9 @@ def test_admin_summary_returns_operator_counts(tmp_path, monkeypatch):
     assert payload["counts"]["arts_hidden"] == 1
     assert payload["counts"]["suggestions_pending"] == 1
     assert payload["counts"]["giveaways_active"] == 1
+    assert payload["counts"]["giveaways_running"] == 1
+    assert payload["counts"]["giveaways_scheduled"] == 0
+    assert payload["counts"]["giveaways_finished"] == 0
     assert payload["counts"]["comments_total"] == 1
     assert payload["counts"]["webapp_errors"] == 1
 
@@ -160,6 +163,25 @@ def test_admin_audit_is_paginated_newest_first(tmp_path, monkeypatch):
     assert body_json(first)["total"] == 2
 
 
+def test_admin_audit_filters_by_result_and_search(tmp_path, monkeypatch):
+    from aiohttp.test_utils import make_mocked_request
+
+    import database
+    import services.admin_webapp_api as admin_api
+
+    db_path = tmp_path / "admin.db"
+    monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    run(seed_admin_api_db(db_path))
+    install_auth(monkeypatch)
+
+    response = run(admin_api.handle_admin_audit(make_mocked_request("GET", "/api/admin/audit?result=ok&q=y")))
+    payload = body_json(response)
+
+    assert response.status == 200
+    assert payload["total"] == 1
+    assert payload["items"][0]["action"] == "newer"
+
+
 def test_admin_sync_runs_job_and_writes_audit(tmp_path, monkeypatch):
     from aiohttp.test_utils import make_mocked_request
 
@@ -212,4 +234,40 @@ def test_admin_giveaways_returns_list_without_giveaway_id(tmp_path, monkeypatch)
     assert payload["active"][0]["post_url"] == "https://t.me/channel/321"
     assert payload["active"][0]["required_channels"][0]["url"] == "https://t.me/required"
     assert payload["active"][0]["subscription"] == "1 доп. канал"
+    assert payload["status_counts"]["active"] == 1
+    assert payload["status_counts"]["all"] == 1
     assert payload["recent"][0]["prize"] == "VIP"
+
+
+def test_admin_giveaways_filters_recent_by_status(tmp_path, monkeypatch):
+    from aiohttp.test_utils import make_mocked_request
+
+    import database
+    import services.admin_webapp_api as admin_api
+
+    db_path = tmp_path / "admin.db"
+    monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    run(seed_admin_api_db(db_path))
+    install_auth(monkeypatch)
+
+    async def add_finished():
+        async with aiosqlite.connect(db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO giveaways
+                (status, channel_id, prize, post_text, winners_count, ends_at_utc, created_by, created_at)
+                VALUES ('finished', '@done', 'Coins', 'Done', 1, '2026-01-01T00:00:00+00:00', 10, '2026-01-01T00:00:00+00:00')
+                """
+            )
+            await db.commit()
+
+    run(add_finished())
+
+    response = run(admin_api.handle_admin_giveaways(make_mocked_request("GET", "/api/admin/giveaways?status=finished")))
+    payload = body_json(response)
+
+    assert response.status == 200
+    assert payload["status"] == "finished"
+    assert payload["total"] == 1
+    assert payload["recent"][0]["status"] == "finished"
+    assert payload["status_counts"]["finished"] == 1

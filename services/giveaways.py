@@ -574,14 +574,40 @@ async def get_required_channel_ids(giveaway_id: int) -> list[str]:
     return [item.channel_id for item in await get_giveaway_required_channels(giveaway_id)]
 
 
-async def list_recent_giveaways(*, created_by: int | None = None, limit: int = 20, offset: int = 0) -> list[Giveaway]:
+def _history_status_filter(status: str | None) -> tuple[str, list[object]]:
+    value = str(status or "all").strip().lower()
+    if value in {"", "all"}:
+        return "", []
+    if value == "active":
+        return "status IN (?, ?)", [GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING]
+    if value == "scheduled":
+        return "status = ?", [GIVEAWAY_STATUS_SCHEDULED]
+    if value == "finished":
+        return "status = ?", [GIVEAWAY_STATUS_FINISHED]
+    if value == "cancelled":
+        return "status = ?", [GIVEAWAY_STATUS_CANCELLED]
+    return "", []
+
+
+async def list_recent_giveaways(
+    *,
+    created_by: int | None = None,
+    limit: int = 20,
+    offset: int = 0,
+    status: str | None = None,
+) -> list[Giveaway]:
     limit = max(1, min(int(limit), 50))
     offset = max(0, int(offset))
     params: list[object] = []
-    where = ""
+    where_parts: list[str] = []
     if created_by is not None:
-        where = "WHERE created_by = ?"
+        where_parts.append("created_by = ?")
         params.append(created_by)
+    status_sql, status_params = _history_status_filter(status)
+    if status_sql:
+        where_parts.append(status_sql)
+        params.extend(status_params)
+    where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     params.append(limit)
     params.append(offset)
     async with aiosqlite.connect(database.DB_PATH) as db:
@@ -601,12 +627,17 @@ async def list_recent_giveaways(*, created_by: int | None = None, limit: int = 2
     return [_row_to_giveaway(row) for row in rows]
 
 
-async def count_recent_giveaways(*, created_by: int | None = None) -> int:
+async def count_recent_giveaways(*, created_by: int | None = None, status: str | None = None) -> int:
     params: list[object] = []
-    where = ""
+    where_parts: list[str] = []
     if created_by is not None:
-        where = "WHERE created_by = ?"
+        where_parts.append("created_by = ?")
         params.append(created_by)
+    status_sql, status_params = _history_status_filter(status)
+    if status_sql:
+        where_parts.append(status_sql)
+        params.extend(status_params)
+    where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(f"SELECT COUNT(*) FROM giveaways {where}", params) as cursor:
             row = await cursor.fetchone()

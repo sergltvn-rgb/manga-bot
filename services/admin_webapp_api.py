@@ -76,6 +76,10 @@ async def _admin_summary_counts() -> dict[str, int]:
                 await _count(db, "SELECT COUNT(*) FROM british_ranobe"),
             ]
         )
+        giveaways_scheduled = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'scheduled'")
+        giveaways_active = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status IN ('active', 'finishing')")
+        giveaways_finished = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'finished'")
+        giveaways_cancelled = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'cancelled'")
         return {
             "users_total": await _count(db, "SELECT COUNT(*) FROM users_stats"),
             "messages_total": await _count(db, "SELECT COALESCE(SUM(messages_count), 0) FROM users_stats"),
@@ -85,7 +89,11 @@ async def _admin_summary_counts() -> dict[str, int]:
             "arts_visible": await _count(db, "SELECT COUNT(*) FROM arts WHERE COALESCE(is_hidden, 0) = 0"),
             "arts_hidden": await _count(db, "SELECT COUNT(*) FROM arts WHERE COALESCE(is_hidden, 0) = 1"),
             "suggestions_pending": await _count(db, "SELECT COUNT(*) FROM suggested_arts WHERE status = 'pending'"),
-            "giveaways_active": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status IN ('active', 'scheduled', 'finishing')"),
+            "giveaways_active": giveaways_active + giveaways_scheduled,
+            "giveaways_running": giveaways_active,
+            "giveaways_scheduled": giveaways_scheduled,
+            "giveaways_finished": giveaways_finished,
+            "giveaways_cancelled": giveaways_cancelled,
             "comments_total": await _count(db, "SELECT COUNT(*) FROM chapter_comments"),
             "webapp_errors": await _count(
                 db,
@@ -190,16 +198,33 @@ async def handle_admin_audit(request: aiohttp.web.Request) -> aiohttp.web.Respon
     if isinstance(user, aiohttp.web.Response):
         return user
     limit, offset = _page_params(request)
+    action = str(request.query.get("action", "")).strip()
+    result = str(request.query.get("result", "")).strip()
+    search = str(request.query.get("q", "")).strip()
+    where_parts: list[str] = []
+    params: list[Any] = []
+    if action:
+        where_parts.append("action = ?")
+        params.append(action)
+    if result:
+        where_parts.append("result = ?")
+        params.append(result)
+    if search:
+        where_parts.append("(target LIKE ? OR payload_json LIKE ? OR error LIKE ?)")
+        like = f"%{search}%"
+        params.extend([like, like, like])
+    where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
     async with aiosqlite.connect(database.DB_PATH) as db:
-        total = await _count(db, "SELECT COUNT(*) FROM admin_audit_log")
+        total = await _count(db, f"SELECT COUNT(*) FROM admin_audit_log {where}", tuple(params))
         async with db.execute(
-            """
+            f"""
             SELECT id, action, actor_user_id, target, payload_json, result, error, created_at
             FROM admin_audit_log
+            {where}
             ORDER BY datetime(created_at) DESC, id DESC
             LIMIT ? OFFSET ?
             """,
-            (limit, offset),
+            (*params, limit, offset),
         ) as cursor:
             rows = await cursor.fetchall()
     items = [
@@ -272,20 +297,34 @@ async def _giveaway_payload(item: Giveaway) -> dict[str, Any]:
     }
 
 
+async def _giveaway_status_counts() -> dict[str, int]:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        return {
+            "scheduled": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'scheduled'"),
+            "active": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status IN ('active', 'finishing')"),
+            "finished": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'finished'"),
+            "cancelled": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'cancelled'"),
+            "all": await _count(db, "SELECT COUNT(*) FROM giveaways"),
+        }
+
+
 async def handle_admin_giveaways(request: aiohttp.web.Request) -> aiohttp.web.Response:
     user = await _require_admin(request)
     if isinstance(user, aiohttp.web.Response):
         return user
 
     limit, offset = _page_params(request, default_limit=8)
+    status = str(request.query.get("status", "all")).strip().lower()
     active_items = await list_active_giveaways()
-    recent_items = await list_recent_giveaways(limit=limit, offset=offset)
+    recent_items = await list_recent_giveaways(limit=limit, offset=offset, status=status)
     return _json(
         {
             "ok": True,
             "active": [await _giveaway_payload(item) for item in active_items],
             "recent": [await _giveaway_payload(item) for item in recent_items],
-            "total": await count_recent_giveaways(),
+            "total": await count_recent_giveaways(status=status),
+            "status": status,
+            "status_counts": await _giveaway_status_counts(),
             "limit": limit,
             "offset": offset,
         }
@@ -309,7 +348,7 @@ async def _run_webapp_sync() -> dict[str, str]:
     with open("webapp/chapters_data.json", "w", encoding="utf-8") as file:
         json.dump(result, file, ensure_ascii=False, indent=2)
     spawn_bg(run_git_sync("admin webapp sync"), name="run_git_sync:admin_webapp")
-    return {"status": "queued", "message": "sync started"}
+    return {"status": "queued", "message": "Обновление данных читалки запущено"}
 
 
 async def handle_admin_sync(request: aiohttp.web.Request) -> aiohttp.web.Response:
@@ -326,7 +365,7 @@ async def handle_admin_sync(request: aiohttp.web.Request) -> aiohttp.web.Respons
             payload_json=json.dumps({"source": "admin_webapp"}, ensure_ascii=False),
             result=status_text,
         )
-        return _json({"ok": True, "status": status_text, "message": str(result.get("message", "sync started"))})
+        return _json({"ok": True, "status": status_text, "message": str(result.get("message", "Обновление данных читалки запущено"))})
     except Exception as exc:  # noqa: BLE001 - sync failure must be reported and audited.
         await write_admin_audit_log(
             action="webapp_sync",
