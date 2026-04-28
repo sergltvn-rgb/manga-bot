@@ -32,11 +32,26 @@
           <h2 id="pageTitle">Обзор</h2>
           <p id="pageLead">Сводка по боту, читалке и активным задачам.</p>
         </div>
-        <button class="status-pill" id="refreshBtn"><span class="btn-icon">↻</span>Обновить</button>
+        <div class="topbar-actions">
+          <span class="last-updated" id="lastUpdated">Ещё не обновлялось</span>
+          <select class="field compact-field" id="autoRefreshSelect" aria-label="Автообновление">
+            <option value="0">Авто: выкл</option>
+            <option value="15">15 сек</option>
+            <option value="30">30 сек</option>
+            <option value="60">60 сек</option>
+          </select>
+          <button class="status-pill" id="refreshBtn"><span class="btn-icon">↻</span>Обновить</button>
+        </div>
       </header>
 
       <section class="section active" id="overview">
         <div class="ops-banner" id="opsBanner"></div>
+        <div class="command-strip" id="quickActions">
+          <button class="command-link" data-section-jump="content" type="button"><span>Контент</span><b>Главы и массовая загрузка</b></button>
+          <button class="command-link" data-section-jump="giveaways" type="button"><span>Розыгрыши</span><b>Активные кампании</b></button>
+          <a class="command-link" href="reader.html"><span>Читалка</span><b>Открыть WebApp</b></a>
+          <button class="command-link" id="copyReportBtn" type="button"><span>Отчёт</span><b>Скопировать состояние</b></button>
+        </div>
         <div class="kpi-grid" id="kpis"></div>
         <div class="split">
           <div class="panel">
@@ -54,6 +69,15 @@
             <div class="panel-head"><h3 id="errorsTitle">Последние ошибки</h3></div>
             <div id="errorList" class="empty">Загрузка...</div>
           </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Операционные подсказки</h3>
+              <p>Что проверить в первую очередь по текущим данным панели.</p>
+            </div>
+          </div>
+          <div class="insight-list" id="insightList"></div>
         </div>
       </section>
 
@@ -173,8 +197,24 @@
       <section class="section" id="ops">
         <div class="panel">
           <div class="panel-head">
-            <h3>Журнал действий</h3>
+            <div>
+              <h3>Журнал действий</h3>
+              <p>Фильтруйте события по действию, результату или тексту в цели и деталях.</p>
+            </div>
             <button class="btn" id="auditMore">Показать ещё</button>
+          </div>
+          <div class="toolbar audit-toolbar">
+            <input class="field" id="auditSearch" placeholder="Поиск по цели, деталям или ошибке" />
+            <select class="field compact-field" id="auditResultFilter">
+              <option value="">Любой результат</option>
+              <option value="ok">Готово</option>
+              <option value="queued">В очереди</option>
+              <option value="error">Ошибка</option>
+            </select>
+            <select class="field compact-field" id="auditActionFilter">
+              <option value="">Любое действие</option>
+            </select>
+            <button class="btn" id="auditReset" type="button">Сбросить</button>
           </div>
           <div class="table-wrap">
             <table>
@@ -224,10 +264,13 @@
       giveawayStatus: 'all',
       auditOffset: 0,
       auditLimit: 20,
+      auditFilters: { q: '', result: '', action: '' },
       auditItems: [],
       contentRows: [],
       lastBulkPayload: null,
-      lastBulkPreview: null
+      lastBulkPreview: null,
+      autoRefreshTimer: null,
+      lastUpdatedAt: null
     };
     const titles = {
       overview: ['Обзор', 'Сводка по боту, читалке и активным задачам.'],
@@ -385,6 +428,93 @@
         <span class="badge ${tone === 'ok' ? '' : 'rose'}">${tone === 'ok' ? 'В порядке' : 'Проверить'}</span>
       `;
       document.getElementById('opsBanner').classList.toggle('is-warn', tone !== 'ok');
+    }
+
+    function renderLastUpdated() {
+      const node = document.getElementById('lastUpdated');
+      if (!node) return;
+      node.textContent = state.lastUpdatedAt
+        ? `Обновлено: ${state.lastUpdatedAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+        : 'Ещё не обновлялось';
+    }
+
+    function buildOperatorInsights(counts = {}, health = {}, giveaways = {}) {
+      const insights = [];
+      const add = (tone, title, detail, section) => insights.push({ tone, title, detail, section });
+      if (!health.database || !health.database.ok) {
+        add('rose', 'База данных не отвечает', 'Сначала проверьте сервис и права на файл базы перед любыми массовыми действиями.', 'ops');
+      }
+      if (Number(counts.webapp_errors || 0) > 0) {
+        add('rose', 'Есть свежие ошибки WebApp', `За последние ${health.recent_errors_window_hours || 24} ч: ${counts.webapp_errors}. Откройте журнал и последние ошибки.`, 'ops');
+      }
+      if (Number(counts.suggestions_pending || 0) > 0) {
+        add('amber', 'Есть арт-предложки на модерации', `${counts.suggestions_pending} ожидают решения. Быстрый переход в галерею уже рядом.`, 'arts');
+      }
+      if (Number(counts.giveaways_scheduled || 0) > 0) {
+        add('violet', 'Запланированы розыгрыши', `${counts.giveaways_scheduled} кампаний ждут публикации. Проверьте время и ссылки на посты.`, 'giveaways');
+      }
+      if (Number(counts.giveaways_active || 0) === 0) {
+        add('', 'Нет активных розыгрышей', 'Если сейчас идёт промо-волна, проверьте создание кампании в Telegram-админке.', 'giveaways');
+      }
+      if (Number(counts.chapters_total || 0) === 0) {
+        add('rose', 'В базе нет глав', 'Читалка будет пустой. Добавьте главы или запустите синхронизацию данных.', 'content');
+      }
+      if (!insights.length) {
+        add('', 'Критичных задач не видно', 'База отвечает, свежих ошибок нет, основные витрины готовы к работе.', 'overview');
+      }
+      if (giveaways && giveaways.ok === false) {
+        add('amber', 'Розыгрыши не загрузились', 'Проверьте API розыгрышей или откройте журнал ошибок после обновления.', 'giveaways');
+      }
+      return insights;
+    }
+
+    function renderInsights() {
+      const counts = state.summary ? state.summary.counts : {};
+      const health = state.health ? state.health.health : {};
+      const insights = buildOperatorInsights(counts, health, state.giveaways);
+      document.getElementById('insightList').innerHTML = insights.map((item) => `
+        <button class="insight ${escapeHtml(item.tone)}" data-section-jump="${escapeHtml(item.section || 'overview')}" type="button">
+          <span>${escapeHtml(item.title)}</span>
+          <b>${escapeHtml(item.detail)}</b>
+        </button>
+      `).join('');
+    }
+
+    function buildOpsReport() {
+      const counts = state.summary ? state.summary.counts : {};
+      const health = state.health ? state.health.health : {};
+      return {
+        generated_at: new Date().toISOString(),
+        git: health.git ? health.git.hash : 'unknown',
+        database_ok: Boolean(health.database && health.database.ok),
+        counts,
+        recent_errors: asArray(health.recent_errors).map((item) => ({
+          type: item.event_type,
+          message: item.message,
+          created_at: item.created_at
+        })),
+        insights: buildOperatorInsights(counts, health, state.giveaways).map((item) => ({
+          tone: item.tone || 'info',
+          title: item.title,
+          detail: item.detail
+        }))
+      };
+    }
+
+    async function copyOpsReport() {
+      const text = JSON.stringify(buildOpsReport(), null, 2);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        textarea.remove();
+      }
+      showToast('Отчёт скопирован');
     }
 
     function renderHealth(health = {}) {
@@ -767,6 +897,38 @@
         </tr>
       `).join('') || (reset ? '<tr><td colspan="5">Журнал пуст.</td></tr>' : ''));
       state.auditOffset = (payload.offset || 0) + rows.length;
+      document.getElementById('auditMore').disabled = state.auditOffset >= Number(payload.total || 0);
+    }
+
+    function populateAuditActionFilter(items = []) {
+      const select = document.getElementById('auditActionFilter');
+      const selected = select.value;
+      const actions = Array.from(new Set([
+        ...Object.keys(actionLabels),
+        ...items.map((item) => item.action).filter(Boolean)
+      ])).sort();
+      select.innerHTML = '<option value="">Любое действие</option>' + actions.map((action) => (
+        `<option value="${escapeHtml(action)}">${escapeHtml(labelForAction(action))}</option>`
+      )).join('');
+      select.value = actions.includes(selected) ? selected : '';
+    }
+
+    function auditQuery(offset = 0) {
+      const params = new URLSearchParams({
+        limit: String(state.auditLimit),
+        offset: String(offset)
+      });
+      Object.entries(state.auditFilters).forEach(([key, value]) => {
+        if (String(value || '').trim()) params.set(key, String(value).trim());
+      });
+      return `/api/admin/audit?${params.toString()}`;
+    }
+
+    async function loadAudit({ reset = true } = {}) {
+      const data = await api(auditQuery(reset ? 0 : state.auditOffset));
+      appendAudit(data, reset);
+      populateAuditActionFilter(state.auditItems);
+      return data;
     }
 
     async function loadAll() {
@@ -777,12 +939,13 @@
           api('/api/reader'),
           api('/api/arts?limit=12'),
           api('/api/admin/giveaways').catch((error) => ({ ok: false, error: error.message })),
-          api(`/api/admin/audit?limit=${state.auditLimit}&offset=0`)
+          api(auditQuery(0))
         ]);
         state.summary = summary;
         state.health = health;
         state.reader = reader;
         state.giveaways = giveaway;
+        state.lastUpdatedAt = new Date();
         renderKpis(summary.counts);
         renderOpsBanner(summary.counts, health.health);
         renderHealth(health.health);
@@ -790,6 +953,9 @@
         renderArts(arts);
         renderGiveaway(giveaway);
         appendAudit(audit, true);
+        populateAuditActionFilter(state.auditItems);
+        renderInsights();
+        renderLastUpdated();
         showToast('Данные обновлены');
       } catch (error) {
         showToast(`Ошибка: ${error.message}`);
@@ -808,7 +974,27 @@
       const data = await api(`/api/admin/giveaways?status=${status}`);
       state.giveaways = data;
       renderGiveaway(data);
+      renderInsights();
       return data;
+    }
+
+    function configureAutoRefresh(seconds) {
+      clearInterval(state.autoRefreshTimer);
+      state.autoRefreshTimer = null;
+      const interval = Number(seconds || 0);
+      if (interval > 0) {
+        state.autoRefreshTimer = setInterval(loadAll, interval * 1000);
+        showToast(`Автообновление: ${interval} сек`);
+      }
+    }
+
+    function applyAuditFiltersFromControls() {
+      state.auditFilters = {
+        q: document.getElementById('auditSearch').value,
+        result: document.getElementById('auditResultFilter').value,
+        action: document.getElementById('auditActionFilter').value
+      };
+      return loadAudit({ reset: true });
     }
 
     document.getElementById('nav').addEventListener('click', (event) => {
@@ -817,6 +1003,12 @@
     });
 
     document.getElementById('refreshBtn').addEventListener('click', loadAll);
+    document.getElementById('autoRefreshSelect').addEventListener('change', (event) => {
+      configureAutoRefresh(event.target.value);
+    });
+    document.getElementById('copyReportBtn').addEventListener('click', () => {
+      copyOpsReport().catch((error) => showToast(`Не удалось скопировать отчёт: ${error.message}`));
+    });
     document.getElementById('reloadContentBtn').addEventListener('click', async () => {
       state.reader = await api('/api/reader');
       renderContent();
@@ -836,8 +1028,21 @@
       showToast(data.message || 'Обновление читалки запущено');
     });
     document.getElementById('auditMore').addEventListener('click', async () => {
-      const data = await api(`/api/admin/audit?limit=${state.auditLimit}&offset=${state.auditOffset}`);
-      appendAudit(data, false);
+      await loadAudit({ reset: false });
+    });
+    let auditSearchTimer = null;
+    document.getElementById('auditSearch').addEventListener('input', () => {
+      clearTimeout(auditSearchTimer);
+      auditSearchTimer = setTimeout(applyAuditFiltersFromControls, 260);
+    });
+    document.getElementById('auditResultFilter').addEventListener('change', applyAuditFiltersFromControls);
+    document.getElementById('auditActionFilter').addEventListener('change', applyAuditFiltersFromControls);
+    document.getElementById('auditReset').addEventListener('click', () => {
+      document.getElementById('auditSearch').value = '';
+      document.getElementById('auditResultFilter').value = '';
+      document.getElementById('auditActionFilter').value = '';
+      state.auditFilters = { q: '', result: '', action: '' };
+      loadAudit({ reset: true });
     });
 
     document.getElementById('chapterForm').addEventListener('submit', async (event) => {
@@ -865,6 +1070,10 @@
     });
 
     document.body.addEventListener('click', async (event) => {
+      const sectionJump = event.target.closest('[data-section-jump]');
+      if (sectionJump) {
+        setSection(sectionJump.dataset.sectionJump || 'overview');
+      }
       const linkBtn = event.target.closest('[data-open-links]');
       if (linkBtn) {
         const item = state.contentRows[Number(linkBtn.dataset.openLinks)];
