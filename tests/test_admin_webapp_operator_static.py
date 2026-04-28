@@ -27,3 +27,18 @@ def test_admin_audit_workspace_exposes_filters():
     assert 'id="auditReset"' in html
     assert "loadAudit(" in html
     assert "auditFilters" in html
+
+
+def test_admin_content_workspace_has_editing_and_report_tools():
+    html = ADMIN_HTML.read_text(encoding="utf-8")
+
+    assert 'id="contentLinkFilter"' in html
+    assert 'id="contentVisibleCount"' in html
+    assert 'id="contentReportBtn"' in html
+    assert 'id="formModeBanner"' in html
+    assert 'id="clearChapterForm"' in html
+    assert "clearChapterForm" in html
+    assert "copyContentReport" in html
+    assert "markChapterFormDirty" in html
+    assert "scrollIntoView" in html
+    assert "Данные главы подставлены ниже" in html

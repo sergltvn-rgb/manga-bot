@@ -348,6 +348,14 @@ button {
   gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
+  align-items: center;
+}
+
+.toolbar-status {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .field {
@@ -509,6 +517,10 @@ th {
   text-transform: uppercase;
 }
 
+tr.is-editing td {
+  background: rgba(14, 159, 134, .07);
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -535,6 +547,35 @@ th {
   display: grid;
   gap: 10px;
   padding: 14px;
+}
+
+.form-mode-banner {
+  display: grid;
+  gap: 4px;
+  margin: 14px 14px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.form-mode-banner b {
+  color: var(--ink);
+}
+
+.form-mode-banner span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.form-mode-banner.is-editing {
+  border-color: rgba(14, 159, 134, .32);
+  background: var(--accent-soft);
+}
+
+.form-mode-banner.is-dirty {
+  border-color: rgba(201, 138, 24, .34);
+  background: rgba(201, 138, 24, .08);
 }
 
 .empty {
@@ -876,6 +917,7 @@ th {
   .giveaway-summary { grid-template-columns: 1fr; }
   .meta-grid { grid-template-columns: 1fr; }
   .toolbar { display: grid; }
+  .toolbar-status { margin-left: 0; }
   .field { width: 100%; }
   .compact-field { width: 100%; }
   .command-strip { grid-template-columns: 1fr; }

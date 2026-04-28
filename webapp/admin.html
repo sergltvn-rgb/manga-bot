@@ -7,7 +7,7 @@
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="stylesheet" href="shared.css?v=20260428-recovery-2">
   <script src="shared.js?v=20260428-recovery-2"></script>
-  <link rel="stylesheet" href="admin.css?v=20260428-admin-polish-3" />
+  <link rel="stylesheet" href="admin.css?v=20260428-admin-content-4" />
 </head>
 <body>
   <div class="shared-recovery-mount" hidden>Обновить Сообщить админу</div>
@@ -90,6 +90,13 @@
           <div class="toolbar">
             <input class="field" id="contentSearch" placeholder="Поиск по названию или главе" />
             <select class="field" id="seriesFilter"></select>
+            <select class="field compact-field" id="contentLinkFilter" aria-label="Фильтр ссылок">
+              <option value="all">Все главы</option>
+              <option value="with-links">Со ссылками</option>
+              <option value="without-links">Без ссылок</option>
+            </select>
+            <button class="btn" id="contentReportBtn" type="button">Скопировать отчёт</button>
+            <span class="toolbar-status" id="contentVisibleCount">Показано 0</span>
           </div>
           <div class="content-quality" id="contentQuality"></div>
           <div class="table-wrap">
@@ -109,7 +116,17 @@
 
         <div class="split">
           <div class="panel">
-            <div class="panel-head"><h3>Добавить / обновить главу</h3></div>
+            <div class="panel-head">
+              <div>
+                <h3>Добавить / обновить главу</h3>
+                <p>После «Изменить» данные главы появятся здесь, а форма подсветится.</p>
+              </div>
+              <button class="btn" id="clearChapterForm" type="button">Очистить</button>
+            </div>
+            <div class="form-mode-banner" id="formModeBanner">
+              <b>Новая глава</b>
+              <span>Заполните поля и нажмите «Сохранить главу».</span>
+            </div>
             <form class="form-grid" id="chapterForm">
               <label class="field-group">
                 <span>Тайтл</span>
@@ -269,6 +286,8 @@
       contentRows: [],
       lastBulkPayload: null,
       lastBulkPreview: null,
+      editingChapterKey: '',
+      chapterFormDirty: false,
       autoRefreshTimer: null,
       lastUpdatedAt: null
     };
@@ -618,21 +637,103 @@
       `;
     }
 
+    function chapterKey(item) {
+      return [item.series_id || '', item.volume || '', item.chapter || ''].join('::');
+    }
+
+    function renderFormMode(item = null, { dirty = state.chapterFormDirty } = {}) {
+      const banner = document.getElementById('formModeBanner');
+      if (!banner) return;
+      banner.classList.toggle('is-editing', Boolean(item));
+      banner.classList.toggle('is-dirty', Boolean(dirty));
+      banner.innerHTML = item ? `
+        <b>Редактирование: ${escapeHtml(item.title)} · ${escapeHtml(item.chapter_name || item.chapter)}</b>
+        <span>${dirty ? 'Есть несохранённые изменения.' : 'Данные главы подставлены ниже. Измени поля и нажми «Сохранить главу».'}</span>
+      ` : `
+        <b>Новая глава</b>
+        <span>${dirty ? 'Черновик не сохранён.' : 'Заполните поля и нажмите «Сохранить главу».'}</span>
+      `;
+    }
+
+    function currentEditingItem() {
+      return state.contentRows.find((item) => chapterKey(item) === state.editingChapterKey) || null;
+    }
+
+    function markChapterFormDirty() {
+      state.chapterFormDirty = true;
+      renderFormMode(currentEditingItem(), { dirty: true });
+    }
+
+    function clearChapterForm() {
+      const form = document.getElementById('chapterForm');
+      form.reset();
+      state.editingChapterKey = '';
+      state.chapterFormDirty = false;
+      updateSeriesHints();
+      renderFormMode(null, { dirty: false });
+      renderContent();
+      showToast('Форма очищена');
+    }
+
+    async function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+
+    async function copyContentReport() {
+      const rows = readerSeries();
+      const withoutLinks = rows.filter((item) => !item.urls.length);
+      const payload = {
+        generated_at: new Date().toISOString(),
+        titles: uniqueSeries().length,
+        chapters: rows.length,
+        with_links: rows.length - withoutLinks.length,
+        without_links: withoutLinks.length,
+        visible_rows: state.contentRows.length,
+        missing_links: withoutLinks.slice(0, 40).map((item) => ({
+          series_id: item.series_id,
+          title: item.title,
+          volume: item.volume,
+          chapter: item.chapter,
+          chapter_name: item.chapter_name
+        }))
+      };
+      await copyText(JSON.stringify(payload, null, 2));
+      showToast('Отчёт по главам скопирован');
+    }
+
     function renderContent() {
       const select = document.getElementById('seriesFilter');
+      const previousSeries = select.value;
       const series = asArray(state.reader && state.reader.series);
       select.innerHTML = '<option value="">Все тайтлы</option>' + series.map((item) => `<option value="${escapeHtml(item.id || '')}">${escapeHtml(item.title || item.name || item.id)}</option>`).join('');
+      if (previousSeries) select.value = previousSeries;
       const query = document.getElementById('contentSearch').value.toLowerCase();
       const selected = select.value;
+      const linkFilter = document.getElementById('contentLinkFilter').value;
       const rows = readerSeries().filter((item) => {
         const matchesSeries = !selected || item.series_id === selected;
         const haystack = `${item.title} ${item.volume} ${item.chapter} ${item.chapter_name} ${item.urls.join(' ')}`.toLowerCase();
-        return matchesSeries && (!query || haystack.includes(query));
+        const matchesQuery = !query || haystack.includes(query);
+        const matchesLinks = linkFilter === 'with-links' ? item.urls.length : linkFilter === 'without-links' ? !item.urls.length : true;
+        return matchesSeries && matchesQuery && matchesLinks;
       }).slice(0, 120);
       state.contentRows = rows;
       renderContentQuality(readerSeries());
+      document.getElementById('contentVisibleCount').textContent = `Показано ${rows.length} из ${readerSeries().length}`;
       document.getElementById('contentRows').innerHTML = rows.length ? rows.map((item) => `
-        <tr>
+        <tr class="${chapterKey(item) === state.editingChapterKey ? 'is-editing' : ''}">
           <td><b>${escapeHtml(item.title)}</b><br><span class="label">Код: ${escapeHtml(item.series_id)}${item.volume ? ` · том ${escapeHtml(item.volume)}` : ''}</span></td>
           <td>${escapeHtml(item.chapter_name || item.chapter)}${item.chapter_name ? `<br><span class="label">ID: ${escapeHtml(item.chapter)}</span>` : ''}</td>
           <td>${item.url ? `<button class="link-button" data-open-links="${rows.indexOf(item)}">Открыть ссылки (${item.urls.length})</button>` : '<span class="label">нет ссылки</span>'}</td>
@@ -643,6 +744,7 @@
         </tr>
       `).join('') : '<tr><td colspan="4">Главы не найдены.</td></tr>';
       populateSeriesControls();
+      renderFormMode(currentEditingItem());
     }
 
     function renderArts(payload) {
@@ -1020,6 +1122,12 @@
     });
     document.getElementById('contentSearch').addEventListener('input', renderContent);
     document.getElementById('seriesFilter').addEventListener('change', renderContent);
+    document.getElementById('contentLinkFilter').addEventListener('change', renderContent);
+    document.getElementById('contentReportBtn').addEventListener('click', () => {
+      copyContentReport().catch((error) => showToast(`Не удалось скопировать отчёт: ${error.message}`));
+    });
+    document.getElementById('clearChapterForm').addEventListener('click', clearChapterForm);
+    document.getElementById('chapterForm').addEventListener('input', markChapterFormDirty);
     document.body.addEventListener('change', (event) => {
       if (event.target.matches('[data-series-select]')) updateSeriesHints();
     });
@@ -1055,6 +1163,8 @@
         await api('/api/chapters', { method: 'PUT', body: JSON.stringify(payload) });
       }
       showToast('Глава сохранена');
+      state.chapterFormDirty = false;
+      renderFormMode(currentEditingItem(), { dirty: false });
       state.reader = await api('/api/reader');
       renderContent();
     });
@@ -1097,9 +1207,15 @@
         form.elements.volume.value = item.volume || '';
         form.elements.chapter.value = item.chapter || '';
         form.elements.url.value = item.urls.join('\n');
+        state.editingChapterKey = chapterKey(item);
+        state.chapterFormDirty = false;
         updateSeriesHints();
+        renderFormMode(item, { dirty: false });
+        renderContent();
         setSection('content');
-        showToast('Глава перенесена в форму редактирования');
+        form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        form.elements.url.focus();
+        showToast('Данные главы подставлены ниже. Измени поля и нажми «Сохранить главу».');
       }
       const bulkSaveBtn = event.target.closest('[data-save-bulk]');
       if (bulkSaveBtn) {
