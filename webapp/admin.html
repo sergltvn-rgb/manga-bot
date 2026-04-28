@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Админка</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <h1>Alya Admin</h1>
+        <p>Операционный центр бота</p>
+      </div>
+      <nav class="nav" id="nav">
+        <button class="active" data-section="overview">📊 Обзор</button>
+        <button data-section="content">📚 Контент</button>
+        <button data-section="arts">🎨 Арты</button>
+        <button data-section="giveaways">🎁 Розыгрыши</button>
+        <button data-section="ops">⚙️ Операции</button>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h2 id="pageTitle">Обзор</h2>
+          <p id="pageLead">Сводка по боту, WebApp и активным задачам.</p>
+        </div>
+        <button class="status-pill" id="refreshBtn">🔄 Обновить</button>
+      </header>
+
+      <section class="section active" id="overview">
+        <div class="kpi-grid" id="kpis"></div>
+        <div class="split">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Состояние</h3>
+              <button class="btn" id="syncBtn">🔄 Sync WebApp</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <tbody id="healthRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Последние ошибки</h3></div>
+            <div id="errorList" class="empty">Загрузка...</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="content">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Главы и тайтлы</h3>
+            <button class="btn primary" id="reloadContentBtn">Обновить</button>
+          </div>
+          <div class="toolbar">
+            <input class="field" id="contentSearch" placeholder="Поиск по названию или главе" />
+            <select class="field" id="seriesFilter"></select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Тайтл</th>
+                  <th>Глава</th>
+                  <th>Ссылка</th>
+                  <th>Действия</th>
+                </tr>
+              </thead>
+              <tbody id="contentRows"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="panel">
+            <div class="panel-head"><h3>Добавить / обновить главу</h3></div>
+            <form class="form-grid" id="chapterForm">
+              <input class="field" name="series_id" placeholder="series_id, например manga_ru" required />
+              <input class="field" name="volume" placeholder="Том, если нужен" />
+              <input class="field" name="chapter" placeholder="Глава" required />
+              <textarea class="field" name="url" placeholder="Ссылка или текст для Telegraph" required></textarea>
+              <button class="btn primary" type="submit">Сохранить главу</button>
+            </form>
+          </div>
+          <div class="panel">
+            <div class="panel-head"><h3>Bulk preview</h3></div>
+            <form class="form-grid" id="bulkForm">
+              <input class="field" name="series_id" placeholder="series_id" required />
+              <input class="field" name="volume" placeholder="Том, если нужен" />
+              <input class="field" name="start_chapter" placeholder="Стартовая глава" value="1" />
+              <textarea class="field" name="urls" placeholder="Ссылки, каждая с новой строки" required></textarea>
+              <button class="btn" type="submit">Проверить</button>
+            </form>
+            <div id="bulkPreview" class="empty">Результат проверки появится здесь.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="arts">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Арты</h3>
+            <a class="btn primary" id="openArts" href="arts.html">Открыть галерею</a>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>№</th><th>Статус</th><th>Источник</th><th>Действия</th></tr></thead>
+              <tbody id="artRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="giveaways">
+        <div class="panel">
+          <div class="panel-head"><h3>Розыгрыши</h3></div>
+          <div id="giveawayStatus" class="empty">Загрузка...</div>
+        </div>
+      </section>
+
+      <section class="section" id="ops">
+        <div class="panel">
+          <div class="panel-head">
+            <h3>Журнал действий</h3>
+            <button class="btn" id="auditMore">Показать ещё</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Время</th><th>Действие</th><th>Админ</th><th>Результат</th><th>Цель</th></tr></thead>
+              <tbody id="auditRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <div class="modal" id="confirmModal" role="dialog" aria-modal="true">
+    <div class="dialog">
+      <h3 id="confirmTitle">Подтверждение</h3>
+      <p id="confirmText">Продолжить?</p>
+      <div class="toolbar" style="padding:0;border:0">
+        <button class="btn danger" id="confirmYes">Да</button>
+        <button class="btn" id="confirmNo">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+    if (tg) { tg.expand(); tg.ready(); }
+
+    const params = new URLSearchParams(window.location.search);
+    const API_URL = params.get('api') || (location.hostname === 'localhost' ? '' : location.origin);
+    const initData = tg && tg.initData ? tg.initData : '';
+    const state = { summary: null, health: null, reader: null, arts: [], auditOffset: 0, auditLimit: 20 };
+    const titles = {
+      overview: ['Обзор', 'Сводка по боту, WebApp и активным задачам.'],
+      content: ['Контент', 'Поиск, добавление, bulk preview и удаление глав.'],
+      arts: ['Арты', 'Быстрый контроль галереи и переход в полноценную сетку.'],
+      giveaways: ['Розыгрыши', 'Состояние giveaway mini app и активных участий.'],
+      ops: ['Операции', 'Health, sync и журнал админских действий.']
+    };
+
+    let toastTimer = null;
+    function showToast(text) {
+      const toast = document.getElementById('toast');
+      toast.textContent = text;
+      toast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[char]);
+    }
+
+    function asArray(value) {
+      return Array.isArray(value) ? value : [];
+    }
+
+    function confirmAction({ title, text, confirmText = 'Да' }) {
+      const modal = document.getElementById('confirmModal');
+      document.getElementById('confirmTitle').textContent = title;
+      document.getElementById('confirmText').textContent = text;
+      document.getElementById('confirmYes').textContent = confirmText;
+      modal.classList.add('show');
+      return new Promise((resolve) => {
+        const yes = document.getElementById('confirmYes');
+        const no = document.getElementById('confirmNo');
+        const close = (result) => {
+          modal.classList.remove('show');
+          yes.onclick = null;
+          no.onclick = null;
+          resolve(result);
+        };
+        yes.onclick = () => close(true);
+        no.onclick = () => close(false);
+      });
+    }
+
+    async function api(path, options = {}) {
+      const headers = options.headers || {};
+      if (initData) headers.Authorization = `tma ${initData}`;
+      if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      return data;
+    }
+
+    function setSection(id) {
+      document.querySelectorAll('.section').forEach((node) => node.classList.toggle('active', node.id === id));
+      document.querySelectorAll('.nav button').forEach((node) => node.classList.toggle('active', node.dataset.section === id));
+      document.getElementById('pageTitle').textContent = titles[id][0];
+      document.getElementById('pageLead').textContent = titles[id][1];
+    }
+
+    function renderKpis(counts = {}) {
+      const items = [
+        ['Пользователи', counts.users_total || 0, 'badge'],
+        ['Главы', counts.chapters_total || 0, 'badge violet'],
+        ['Арты', (counts.arts_visible || 0) + (counts.arts_hidden || 0), 'badge amber'],
+        ['Ошибки WebApp', counts.webapp_errors || 0, 'badge rose'],
+        ['Предложка', counts.suggestions_pending || 0, 'badge'],
+        ['Розыгрыши', counts.giveaways_active || 0, 'badge violet'],
+        ['Комментарии', counts.comments_total || 0, 'badge amber'],
+        ['Сообщения', counts.messages_total || 0, 'badge']
+      ];
+      document.getElementById('kpis').innerHTML = items.map(([label, value, badge]) => `
+        <article class="kpi"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><em class="${badge}">live</em></article>
+      `).join('');
+    }
+
+    function renderHealth(health = {}) {
+      const providers = health.providers || {};
+      const rows = [
+        ['DB', health.database && health.database.ok ? 'OK' : 'Проблема'],
+        ['Git', health.git ? health.git.hash : 'unknown'],
+        ['Bot', health.bot && health.bot.username ? `@${health.bot.username}` : 'нет данных'],
+        ['Uptime', `${Math.floor((health.uptime_seconds || 0) / 60)} мин`],
+        ['Gemma', providers.gemma && providers.gemma.configured ? 'настроена' : 'выключена'],
+        ['Groq', providers.groq && providers.groq.configured ? 'настроен' : 'нет ключа']
+      ];
+      document.getElementById('healthRows').innerHTML = rows.map(([key, value]) => `<tr><th>${escapeHtml(key)}</th><td>${escapeHtml(value)}</td></tr>`).join('');
+      const errors = health.recent_errors || [];
+      document.getElementById('errorList').innerHTML = errors.length
+        ? errors.map((item) => `<p><span class="badge rose">${escapeHtml(item.event_type)}</span><br>${escapeHtml(item.message || 'без сообщения')}<br><span class="label">${escapeHtml(item.created_at)}</span></p>`).join('')
+        : 'Ошибок не найдено.';
+    }
+
+    function readerSeries() {
+      return asArray(state.reader && state.reader.series).flatMap((series) => {
+        const volumes = asArray(series.volumes).length ? asArray(series.volumes) : [{ volume: series.volume || '', chapters: series.chapters || series.items || [] }];
+        return volumes.flatMap((volume) => asArray(volume.chapters).map((chapter) => ({
+          series_id: series.id || series.series_id || '',
+          title: series.title || series.name || series.id || 'Тайтл',
+          volume: volume.volume || '',
+          chapter: chapter.chapter || chapter.number || chapter.title || '',
+          url: chapter.url || chapter.link || ''
+        })));
+      });
+    }
+
+    function renderContent() {
+      const select = document.getElementById('seriesFilter');
+      const series = asArray(state.reader && state.reader.series);
+      select.innerHTML = '<option value="">Все тайтлы</option>' + series.map((item) => `<option value="${escapeHtml(item.id || '')}">${escapeHtml(item.title || item.name || item.id)}</option>`).join('');
+      const query = document.getElementById('contentSearch').value.toLowerCase();
+      const selected = select.value;
+      const rows = readerSeries().filter((item) => {
+        const matchesSeries = !selected || item.series_id === selected;
+        const haystack = `${item.title} ${item.volume} ${item.chapter} ${item.url}`.toLowerCase();
+        return matchesSeries && (!query || haystack.includes(query));
+      }).slice(0, 120);
+      document.getElementById('contentRows').innerHTML = rows.length ? rows.map((item) => `
+        <tr>
+          <td><b>${escapeHtml(item.title)}</b><br><span class="label">${escapeHtml(item.series_id)}${item.volume ? ` · том ${escapeHtml(item.volume)}` : ''}</span></td>
+          <td>${escapeHtml(item.chapter)}</td>
+          <td>${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Открыть</a>` : '<span class="label">нет ссылки</span>'}</td>
+          <td><button class="btn danger" data-delete-chapter="${escapeHtml(item.series_id)}" data-volume="${escapeHtml(item.volume)}" data-chapter="${escapeHtml(item.chapter)}">Удалить</button></td>
+        </tr>
+      `).join('') : '<tr><td colspan="4">Главы не найдены.</td></tr>';
+    }
+
+    function renderArts(payload) {
+      const items = payload.items || [];
+      state.arts = items;
+      document.getElementById('artRows').innerHTML = items.length ? items.map((item) => `
+        <tr>
+          <td><b>№${escapeHtml(item.display_number || item.id)}</b><br><span class="label">DB ${escapeHtml(item.id)}</span></td>
+          <td>${item.is_hidden ? '<span class="badge rose">скрыт</span>' : '<span class="badge">видимый</span>'}</td>
+          <td>${escapeHtml(item.source || 'gallery')}</td>
+          <td><button class="btn danger" data-delete-art="${escapeHtml(item.id)}">Удалить</button></td>
+        </tr>
+      `).join('') : '<tr><td colspan="4">Артов нет.</td></tr>';
+    }
+
+    function renderGiveaway(payload) {
+      document.getElementById('giveawayStatus').innerHTML = `<pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>`;
+    }
+
+    function appendAudit(payload, reset = false) {
+      const rows = payload.items || [];
+      if (reset) document.getElementById('auditRows').innerHTML = '';
+      document.getElementById('auditRows').insertAdjacentHTML('beforeend', rows.map((item) => `
+        <tr>
+          <td>${escapeHtml(item.created_at)}</td>
+          <td><b>${escapeHtml(item.action)}</b></td>
+          <td>${escapeHtml(item.actor_user_id)}</td>
+          <td>${item.error ? `<span class="badge rose">${escapeHtml(item.result)}</span>` : `<span class="badge">${escapeHtml(item.result)}</span>`}</td>
+          <td>${escapeHtml(item.target || '')}</td>
+        </tr>
+      `).join('') || (reset ? '<tr><td colspan="5">Журнал пуст.</td></tr>' : ''));
+      state.auditOffset = (payload.offset || 0) + rows.length;
+    }
+
+    async function loadAll() {
+      try {
+        const [summary, health, reader, arts, giveaway, audit] = await Promise.all([
+          api('/api/admin/summary'),
+          api('/api/admin/health'),
+          api('/api/reader'),
+          api('/api/arts?limit=12'),
+          api('/api/giveaway/status').catch((error) => ({ error: error.message })),
+          api(`/api/admin/audit?limit=${state.auditLimit}&offset=0`)
+        ]);
+        state.summary = summary;
+        state.health = health;
+        state.reader = reader;
+        renderKpis(summary.counts);
+        renderHealth(health.health);
+        renderContent();
+        renderArts(arts);
+        renderGiveaway(giveaway);
+        appendAudit(audit, true);
+        showToast('Данные обновлены');
+      } catch (error) {
+        showToast(`Ошибка: ${error.message}`);
+        if (error.message === 'forbidden' || error.message === 'unauthorized') {
+          document.querySelector('.main').innerHTML = '<section class="panel" style="padding:22px"><h2>Нет доступа</h2><p class="label">Откройте админку из Telegram под аккаунтом администратора.</p></section>';
+        }
+      }
+    }
+
+    function formPayload(form) {
+      return Object.fromEntries(new FormData(form).entries());
+    }
+
+    document.getElementById('nav').addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-section]');
+      if (button) setSection(button.dataset.section);
+    });
+
+    document.getElementById('refreshBtn').addEventListener('click', loadAll);
+    document.getElementById('reloadContentBtn').addEventListener('click', async () => {
+      state.reader = await api('/api/reader');
+      renderContent();
+      showToast('Контент обновлен');
+    });
+    document.getElementById('contentSearch').addEventListener('input', renderContent);
+    document.getElementById('seriesFilter').addEventListener('change', renderContent);
+    document.getElementById('syncBtn').addEventListener('click', async () => {
+      const data = await api('/api/admin/sync', { method: 'POST' });
+      showToast(data.message || 'Sync запущен');
+    });
+    document.getElementById('auditMore').addEventListener('click', async () => {
+      const data = await api(`/api/admin/audit?limit=${state.auditLimit}&offset=${state.auditOffset}`);
+      appendAudit(data, false);
+    });
+
+    document.getElementById('chapterForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await api('/api/chapters', { method: 'POST', body: JSON.stringify(formPayload(event.currentTarget)) });
+      showToast('Глава сохранена');
+      state.reader = await api('/api/reader');
+      renderContent();
+    });
+
+    document.getElementById('bulkForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const payload = formPayload(event.currentTarget);
+      payload.urls = String(payload.urls || '').split('\n').map((item) => item.trim()).filter(Boolean);
+      const data = await api('/api/chapters/bulk/preview', { method: 'POST', body: JSON.stringify(payload) });
+      document.getElementById('bulkPreview').textContent = JSON.stringify(data, null, 2);
+    });
+
+    document.body.addEventListener('click', async (event) => {
+      const artBtn = event.target.closest('[data-delete-art]');
+      if (artBtn) {
+        const approved = await confirmAction({
+          title: 'Удалить арт',
+          text: `Арт #${artBtn.dataset.deleteArt} будет удален окончательно.`,
+          confirmText: 'Удалить'
+        });
+        if (!approved) return;
+        try {
+          await api(`/api/arts/${encodeURIComponent(artBtn.dataset.deleteArt)}`, { method: 'DELETE' });
+          renderArts(await api('/api/arts?limit=12'));
+          showToast('Арт удален');
+        } catch (error) {
+          showToast(`Не удалось удалить арт: ${error.message}`);
+        }
+      }
+      const chapterBtn = event.target.closest('[data-delete-chapter]');
+      if (chapterBtn) {
+        const approved = await confirmAction({
+          title: 'Удалить главу',
+          text: `Удалить главу ${chapterBtn.dataset.chapter}?`,
+          confirmText: 'Удалить'
+        });
+        if (!approved) return;
+        try {
+          await api('/api/chapters', {
+            method: 'DELETE',
+            body: JSON.stringify({
+              series_id: chapterBtn.dataset.deleteChapter,
+              volume: chapterBtn.dataset.volume,
+              chapter: chapterBtn.dataset.chapter
+            })
+          });
+          state.reader = await api('/api/reader');
+          renderContent();
+          showToast('Глава удалена');
+        } catch (error) {
+          showToast(`Не удалось удалить главу: ${error.message}`);
+        }
+      }
+    });
+
+    const artsUrl = new URL('arts.html', location.href);
+    if (params.get('api')) artsUrl.searchParams.set('api', params.get('api'));
+    document.getElementById('openArts').href = artsUrl.toString();
+
+    loadAll();
+  </script>
+</body>
+</html>

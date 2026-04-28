@@ -28,11 +28,14 @@
 from __future__ import annotations
 
 import logging
+import os
+from urllib.parse import urlencode
 
 import aiosqlite
 from aiogram import types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from config import API_HOST, WEBAPP_URL
 from database import DB_PATH, get_admins, get_setting
 from services.admin_helpers import MAIN_ADMIN_ID
 from services.telegram_helpers import escape_html_text
@@ -103,9 +106,22 @@ async def _fetch_admin_metrics() -> dict:
     return metrics
 
 
+def _admin_webapp_url() -> str:
+    base = f"{WEBAPP_URL.rstrip('/')}/webapp/admin.html"
+    query_items: list[tuple[str, str]] = []
+    if API_HOST:
+        query_items.append(("api", API_HOST))
+    cache_buster = str(os.getenv("WEBAPP_CACHE_BUSTER", "")).strip()
+    if cache_buster:
+        query_items.append(("rev", cache_buster))
+    query = urlencode(query_items)
+    return f"{base}?{query}" if query else base
+
+
 def _build_admin_menu_kb() -> types.InlineKeyboardMarkup:
     """Главная клавиатура /admin. Единая точка сборки — меняется 1 раз."""
     b = InlineKeyboardBuilder()
+    b.row(types.InlineKeyboardButton(text="🌐 Открыть админку", web_app=types.WebAppInfo(url=_admin_webapp_url())))
     b.row(
         types.InlineKeyboardButton(text="➕ Добавить главу", callback_data="admin_add_chapter"),
         types.InlineKeyboardButton(text="🗑 Удалить главу", callback_data="admin_del_chapter"),
