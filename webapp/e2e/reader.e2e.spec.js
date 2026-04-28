@@ -1407,6 +1407,42 @@ test.describe("Reader E2E smoke", () => {
     await context.close();
   });
 
+  test("tablet settings: restores an over-dark dimmer to a safe value", async ({ browser }) => {
+    const state = createMockState();
+    const context = await browser.newContext({
+      viewport: { width: 834, height: 1112 },
+      userAgent: "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15",
+    });
+    const page = await context.newPage();
+    await installTelegramAndApiMocks(page, state);
+    await page.addInitScript(() => {
+      localStorage.setItem("reader_settings", JSON.stringify({ theme: "light", dimmerValue: 85 }));
+    });
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=tablet-dimmer");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+
+    const dimmerState = await page.evaluate(() => ({
+      value: settings.dimmerValue,
+      inputMax: document.getElementById("input-dimmerValue")?.getAttribute("max"),
+      overlay: getComputedStyle(document.getElementById("dimmer-overlay")).backgroundColor,
+    }));
+
+    expect(dimmerState.value).toBeLessThanOrEqual(45);
+    expect(dimmerState.inputMax).toBe("45");
+    expect(dimmerState.overlay).not.toBe("rgba(0, 0, 0, 0.85)");
+
+    await page.evaluate(() => toggleSettings());
+    await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/);
+    await expect(page.locator("#label-dimmerValue")).toHaveText("45%");
+    await expect(page.locator("#input-dimmerValue")).toHaveValue("45");
+
+    await context.close();
+  });
+
   test("cache snapshot rotates when rev changes", async ({ page }) => {
     const state = createMockState();
     await installTelegramAndApiMocks(page, state);

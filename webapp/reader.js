@@ -942,27 +942,43 @@ const defaults = {
     readingMode: 'scroll', // 'scroll' or 'pages'
     dropCap: true
 };
+
+const READER_DIMMER_MAX = 45;
+
+function clampDimmerValue(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.min(READER_DIMMER_MAX, Math.max(0, parsed));
+}
+
+function normalizeReaderSettings(candidate) {
+    const source = candidate && typeof candidate === 'object' ? candidate : {};
+    const next = { ...defaults, ...source };
+    next.dimmerValue = clampDimmerValue(next.dimmerValue);
+    if (!next.lineHeight) next.lineHeight = defaults.lineHeight;
+    if (!next.textAlign) next.textAlign = defaults.textAlign;
+    if (next.indent === undefined) next.indent = defaults.indent;
+    if (next.paraSpacing === undefined) next.paraSpacing = defaults.paraSpacing;
+    if (next.letterSpacing === undefined) next.letterSpacing = defaults.letterSpacing;
+    if (next.paraIndent === undefined) next.paraIndent = defaults.paraIndent;
+    if (next.readingMode === undefined) next.readingMode = defaults.readingMode;
+    return next;
+}
+
 let settings;
 try {
     const saved = JSON.parse(localStorage.getItem('reader_settings') || 'null');
     if (saved && typeof saved === 'object') {
-        settings = { ...defaults, ...saved };
+        settings = normalizeReaderSettings(saved);
     } else {
-        settings = { ...defaults };
+        settings = normalizeReaderSettings(defaults);
     }
 } catch (e) {
     console.warn("Failed to parse settings from localStorage", e);
-    settings = { ...defaults };
+    settings = normalizeReaderSettings(defaults);
 }
 // Миграция старых настроек
-if (!settings.lineHeight) settings.lineHeight = 1.8;
-if (!settings.textAlign) settings.textAlign = 'left';
-if (settings.indent === undefined) settings.indent = true;
-if (settings.paraSpacing === undefined) settings.paraSpacing = 20;
-if (settings.letterSpacing === undefined) settings.letterSpacing = 0;
-if (settings.paraIndent === undefined) settings.paraIndent = 25;
-if (settings.dimmerValue === undefined) settings.dimmerValue = 0;
-if (settings.readingMode === undefined) settings.readingMode = 'scroll';
+settings = normalizeReaderSettings(settings);
 
 let readChapters;
 try {
@@ -4428,6 +4444,7 @@ function syncSettingsPreview() {
 }
 
 function updateSettingsUI() {
+    settings = normalizeReaderSettings(settings);
     // Labels for sliders
     if (document.getElementById('label-fontSize')) document.getElementById('label-fontSize').innerText = settings.fontSize + 'px';
     if (document.getElementById('label-textWidth')) document.getElementById('label-textWidth').innerText = settings.textWidth + '%';
@@ -4453,8 +4470,10 @@ function updateSettingsUI() {
 }
 
 function setDimmer(val) {
-    settings.dimmerValue = parseInt(val);
-    if (document.getElementById('label-dimmerValue')) document.getElementById('label-dimmerValue').innerText = val + '%';
+    const nextValue = clampDimmerValue(val);
+    settings.dimmerValue = nextValue;
+    if (document.getElementById('label-dimmerValue')) document.getElementById('label-dimmerValue').innerText = nextValue + '%';
+    if (document.getElementById('input-dimmerValue')) document.getElementById('input-dimmerValue').value = nextValue;
     applySettings();
     saveSettings();
 }
@@ -4462,6 +4481,7 @@ function setDimmer(val) {
 
 
 function applySettings() {
+    settings = normalizeReaderSettings(settings);
     // Тема (Refresh v4: добавлены warm, high-contrast)
     document.body.classList.remove('theme-sepia', 'theme-dark', 'theme-gray', 'theme-amoled', 'theme-warm', 'theme-high-contrast');
     if (settings.theme && settings.theme !== 'light') {
@@ -4530,6 +4550,7 @@ function applySettings() {
 }
 
 function saveSettings() {
+    settings = normalizeReaderSettings(settings);
     safeSetLocal('reader_settings', settings);
 }
 
