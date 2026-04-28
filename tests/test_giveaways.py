@@ -582,6 +582,48 @@ class TestGiveawayWinnerSelection:
         assert status["joined"] is False
         assert status["missing_channels"] == ["@extra_channel"]
 
+    def test_webapp_join_checks_subscription_and_adds_entry(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class Member:
+            status = "member"
+
+        class BotStub:
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member()
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 10))
+
+        result = run(
+            giveaways.join_giveaway_from_webapp(
+                BotStub(),
+                giveaway_id,
+                {"id": 1001, "username": "alice", "first_name": "Alice"},
+            )
+        )
+
+        assert result["ok"] is True
+        assert result["joined"] is True
+        assert result["added"] is True
+        assert result["entries_count"] == 1
+        assert run(giveaways.has_giveaway_entry(giveaway_id, 1001)) is True
+
 
 class TestGiveawayPublishing:
     def test_publish_text_giveaway_uses_send_message(self):
@@ -683,6 +725,19 @@ class TestGiveawayPublishing:
 
         assert len(buttons) == 1
         assert buttons[0].callback_data == "giveaway_join:42"
+        assert "7" in buttons[0].text
+        assert "Проверить подписку" in buttons[0].text
+
+    def test_participation_markup_uses_mini_app_link_when_available(self):
+        from services.giveaways import _participation_markup
+
+        mini_app_url = "https://t.me/Alyamangapage_bot/randomizer?startapp=giveaway_42"
+        markup = _participation_markup(42, mini_app_url=mini_app_url, entries_count=7)
+        buttons = [button for row in markup.inline_keyboard for button in row]
+
+        assert len(buttons) == 1
+        assert buttons[0].url == mini_app_url
+        assert buttons[0].callback_data is None
         assert "7" in buttons[0].text
         assert "Проверить подписку" in buttons[0].text
 

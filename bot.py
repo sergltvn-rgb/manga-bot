@@ -4822,7 +4822,7 @@ from services.ai_chat_api import handle_ai_chat  # noqa: E402,F401
 from services.telemetry_api import handle_telemetry_post  # noqa: E402,F401
 
 
-from services.giveaway_webapp_api import handle_giveaway_status  # noqa: E402,F401
+from services.giveaway_webapp_api import handle_giveaway_join, handle_giveaway_status  # noqa: E402,F401
 from services.art_webapp_api import (  # noqa: E402,F401
     handle_art_delete,
     handle_art_hide,
@@ -5323,6 +5323,7 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_get("/api/chapter-content", handle_chapter_content)
     app.router.add_post("/api/telemetry", handle_telemetry_post)
     app.router.add_get("/api/giveaway/status", handle_giveaway_status)
+    app.router.add_post("/api/giveaway/join", handle_giveaway_join)
     app.router.add_get("/api/arts", handle_arts_list)
     app.router.add_get("/api/arts/media/{id}", handle_art_media)
     app.router.add_get("/api/arts/suggestions", handle_art_suggestions_list)
@@ -5344,6 +5345,7 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_options("/api/chapter-content", handle_cors_preflight)
     app.router.add_options("/api/telemetry", handle_cors_preflight)
     app.router.add_options("/api/giveaway/status", handle_cors_preflight)
+    app.router.add_options("/api/giveaway/join", handle_cors_preflight)
     app.router.add_options("/api/arts", handle_cors_preflight)
     app.router.add_options("/api/arts/media/{id}", handle_cors_preflight)
     app.router.add_options("/api/arts/suggestions", handle_cors_preflight)

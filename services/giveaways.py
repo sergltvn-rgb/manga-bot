@@ -1200,10 +1200,49 @@ async def get_giveaway_webapp_status(bot, giveaway_id: int, user_id: int) -> dic
         "missing_channels": subscription.missing_channels,
         "required_channels": required_channels,
         "joined": await has_giveaway_entry(giveaway.id, user_id),
+        "entries_count": await count_giveaway_entries(giveaway.id),
         "ends_at": format_giveaway_end(giveaway.ends_at_utc),
         "winners_count": giveaway.winners_count,
         "prize": giveaway.prize,
     }
+
+
+async def join_giveaway_from_webapp(bot, giveaway_id: int, user: dict, *, refresh_markup: bool = False) -> dict:
+    try:
+        user_id = int(user["id"])
+    except (TypeError, ValueError, KeyError):
+        return {"ok": False, "status": "bad_user", "giveaway_id": giveaway_id}
+
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return {"ok": False, "status": "not_found", "giveaway_id": giveaway_id}
+
+    status = await get_giveaway_webapp_status(bot, giveaway_id, user_id)
+    if not status.get("is_active"):
+        status.update({"added": False})
+        return status
+    if status.get("joined"):
+        status.update({"added": False, "entries_count": await count_giveaway_entries(giveaway_id)})
+        return status
+    if not status.get("is_allowed"):
+        status.update({"added": False, "entries_count": await count_giveaway_entries(giveaway_id)})
+        return status
+
+    added = await add_giveaway_entry(
+        giveaway_id,
+        user_id,
+        user.get("username"),
+        user.get("first_name"),
+    )
+    if added and refresh_markup:
+        try:
+            await refresh_giveaway_participation_markup(bot, giveaway)
+        except Exception as exc:  # noqa: BLE001 - joining must not fail because a public post counter refresh failed.
+            logging.debug("giveaway: failed to refresh post markup after webapp join id=%s error=%s", giveaway_id, exc)
+    status["joined"] = True
+    status["added"] = added
+    status["entries_count"] = await count_giveaway_entries(giveaway_id)
+    return status
 
 
 def _giveaway_post_text(giveaway: Giveaway, required_channel_ids: list[str] | None = None) -> str:
@@ -1230,11 +1269,13 @@ def _participation_markup(
     entries_count: int | None = None,
 ) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    del mini_app_url  # The single button must run server-side checks and join atomically.
     button_text = "Проверить подписку · Участвовать"
     if entries_count is not None:
         button_text = f"Проверить подписку · Участвовать · {entries_count}"
-    builder.button(text=button_text, callback_data=f"giveaway_join:{giveaway_id}")
+    if mini_app_url:
+        builder.button(text=button_text, url=mini_app_url)
+    else:
+        builder.button(text=button_text, callback_data=f"giveaway_join:{giveaway_id}")
     builder.adjust(1)
     return builder.as_markup()
 
