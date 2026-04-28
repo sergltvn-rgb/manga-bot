@@ -124,6 +124,21 @@ class TestValidators:
         text = "See https://a.com and https://b.com and https://a.com again"
         assert _clean_urls(text) == ["https://a.com", "https://b.com"]
 
+    def test_clean_urls_trims_markdown_parentheses(self):
+        from services.validators import _clean_urls
+
+        text = (
+            "1 Глава (https://teletype.in/@slitvin/vYInpgcuxK-) | "
+            "(1 часть) (https://telegra.ph/Britanskaya-Krasavica--4-tom-1-glava-04-28) "
+            "(2 часть) (https://telegra.ph/Britanskaya-Krasavica--4-tom-1-glava-2-chast-04-28)"
+        )
+
+        assert _clean_urls(text) == [
+            "https://teletype.in/@slitvin/vYInpgcuxK-",
+            "https://telegra.ph/Britanskaya-Krasavica--4-tom-1-glava-04-28",
+            "https://telegra.ph/Britanskaya-Krasavica--4-tom-1-glava-2-chast-04-28",
+        ]
+
     def test_safe_json_dumps_truncates(self):
         from services.validators import _safe_json_dumps
 
@@ -823,6 +838,50 @@ class TestReaderApi:
         resp_304 = asyncio.run(handle_chapter_content(req_304))
         assert resp_304.status == 304
         assert resp_304.body in (None, b"")
+
+
+class TestReaderPipeline:
+    def test_chapter_content_concatenates_telegraph_parts(self, monkeypatch):
+        import asyncio
+
+        import services.reader_pipeline as reader_pipeline
+
+        async def fake_resolve(*_args):
+            return (
+                {"series": []},
+                {"id": "british_belle"},
+                {
+                    "chapter": "1",
+                    "custom_name": "Глава 1",
+                    "urls": [
+                        "https://teletype.in/@slitvin/full",
+                        "https://telegra.ph/part-1",
+                        "https://telegra.ph/part-2",
+                    ],
+                },
+            )
+
+        async def fake_fetch_telegraph(url):
+            return {
+                "https://telegra.ph/part-1": "<p>Первая часть главы.</p>",
+                "https://telegra.ph/part-2": "<p>Вторая часть главы.</p>",
+            }.get(url, "")
+
+        async def fake_fetch_teletype(_url):
+            return "<p>Полная Teletype копия.</p>"
+
+        monkeypatch.setattr(reader_pipeline, "_resolve_reader_chapter_entry", fake_resolve)
+        monkeypatch.setattr(reader_pipeline, "_fetch_telegra_ph_html", fake_fetch_telegraph)
+        monkeypatch.setattr(reader_pipeline, "_fetch_teletype_html", fake_fetch_teletype)
+
+        payload, status = asyncio.run(reader_pipeline._build_chapter_content_payload("british_belle", "1", "1"))
+
+        assert status == 200
+        assert payload["ok"] is True
+        assert payload["source_type"] == "telegraph"
+        assert "Первая часть главы." in payload["html"]
+        assert "Вторая часть главы." in payload["html"]
+        assert payload["html"].index("Первая часть главы.") < payload["html"].index("Вторая часть главы.")
 
 
 # --- services.auth ---

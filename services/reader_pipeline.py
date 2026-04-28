@@ -67,6 +67,19 @@ def _render_inline_chapter_html(text: str) -> str:
     return "".join(parts)
 
 
+def _chapter_source_type(url: str) -> str:
+    value = str(url or "").lower()
+    if "telegra.ph" in value:
+        return "telegraph"
+    if "teletype.in" in value:
+        return "teletype"
+    return "fallback"
+
+
+def _chapter_source_priority(source_type: str) -> int:
+    return {"telegraph": 0, "teletype": 1, "fallback": 2}.get(source_type, 2)
+
+
 async def _resolve_reader_chapter_entry(series_id: str, volume: str, chapter: str) -> tuple[dict | None, dict | None, dict | None]:
     """Ищет главу в cached reader-payload по `(series_id, volume, chapter)`.
 
@@ -189,8 +202,32 @@ async def _build_chapter_content_payload(series_id: str, volume: str, chapter: s
 
     preferred_urls = sorted(
         source_urls,
-        key=lambda value: (0 if "telegra.ph" in value else 1 if "teletype.in" in value else 2, source_urls.index(value)),
+        key=lambda value: (_chapter_source_priority(_chapter_source_type(value)), source_urls.index(value)),
     )
+
+    for source_type in ("telegraph", "teletype"):
+        same_source_urls = [url for url in preferred_urls if _chapter_source_type(url) == source_type]
+        if len(same_source_urls) < 2:
+            continue
+        fragments: list[str] = []
+        for url in same_source_urls:
+            try:
+                html_fragment = await _fetch_telegra_ph_html(url) if source_type == "telegraph" else await _fetch_teletype_html(url)
+                if html_fragment and _html_fragment_has_visible_content(html_fragment):
+                    fragments.append(html_fragment)
+            except Exception as fetch_error:  # noqa: BLE001 - one broken part should not block the rest.
+                logging.warning("Chapter content fetch failed for %s: %s", url, fetch_error)
+        if fragments:
+            return {
+                "ok": True,
+                "source_type": source_type,
+                "html": "\n".join(fragments),
+                "fallback_url": same_source_urls[0],
+                "series_id": str(series_id),
+                "volume": str(volume),
+                "chapter": str(chapter),
+                "chapter_name": chapter_name,
+            }, 200
 
     best_payload: dict | None = None
     best_score: tuple[int, int, int, int] | None = None
@@ -199,10 +236,10 @@ async def _build_chapter_content_payload(series_id: str, volume: str, chapter: s
         try:
             html_fragment = ""
             source_type = "fallback"
-            if "telegra.ph" in url:
+            if _chapter_source_type(url) == "telegraph":
                 html_fragment = await _fetch_telegra_ph_html(url)
                 source_type = "telegraph"
-            elif "teletype.in" in url:
+            elif _chapter_source_type(url) == "teletype":
                 html_fragment = await _fetch_teletype_html(url)
                 source_type = "teletype"
 

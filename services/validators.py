@@ -74,6 +74,7 @@ def _clean_urls(url_text: str) -> list:
     """
     links: list[str] = []
     for raw in re.findall(r'(https?://[^\s<"\'>]+)', str(url_text or "")):
+        raw = raw.rstrip(".,;:!?)]}»”")
         normalized = _normalize_external_url(raw)
         if normalized and normalized not in links:
             links.append(normalized)

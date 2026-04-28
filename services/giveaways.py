@@ -1230,13 +1230,11 @@ def _participation_markup(
     entries_count: int | None = None,
 ) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="Участвовать", callback_data=f"giveaway_join:{giveaway_id}")
+    del mini_app_url  # The single button must run server-side checks and join atomically.
+    button_text = "Проверить подписку · Участвовать"
     if entries_count is not None:
-        builder.button(text=f"Участников: {entries_count}", callback_data=f"giveaway_count:{giveaway_id}")
-    if mini_app_url:
-        builder.button(text="Проверить подписку", url=mini_app_url)
-    else:
-        builder.button(text="Проверить подписку", callback_data=f"giveaway_check:{giveaway_id}")
+        button_text = f"Проверить подписку · Участвовать · {entries_count}"
+    builder.button(text=button_text, callback_data=f"giveaway_join:{giveaway_id}")
     builder.adjust(1)
     return builder.as_markup()
 

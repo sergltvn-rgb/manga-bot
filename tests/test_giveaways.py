@@ -671,18 +671,20 @@ class TestGiveawayPublishing:
         markup = _participation_markup(42)
         buttons = [button for row in markup.inline_keyboard for button in row]
 
-        assert [button.callback_data for button in buttons] == ["giveaway_join:42", "giveaway_check:42"]
+        assert [button.callback_data for button in buttons] == ["giveaway_join:42"]
+        assert buttons[0].text == "Проверить подписку · Участвовать"
         assert all(button.url is None for button in buttons)
 
-    def test_participation_markup_can_show_participant_count(self):
+    def test_participation_markup_embeds_participant_count_in_single_button(self):
         from services.giveaways import _participation_markup
 
         markup = _participation_markup(42, entries_count=7)
         buttons = [button for row in markup.inline_keyboard for button in row]
 
+        assert len(buttons) == 1
         assert buttons[0].callback_data == "giveaway_join:42"
-        assert buttons[1].callback_data == "giveaway_count:42"
-        assert "7" in buttons[1].text
+        assert "7" in buttons[0].text
+        assert "Проверить подписку" in buttons[0].text
 
     def test_refresh_giveaway_participation_markup_updates_old_post_counter(self, tmp_path, monkeypatch):
         import database
@@ -721,7 +723,9 @@ class TestGiveawayPublishing:
         buttons = [button for row in bot.calls[0][1]["reply_markup"].inline_keyboard for button in row]
         assert bot.calls[0][1]["chat_id"] == "@main_channel"
         assert bot.calls[0][1]["message_id"] == 123
-        assert any(button.callback_data == "giveaway_count:1" and "1" in button.text for button in buttons)
+        assert len(buttons) == 1
+        assert buttons[0].callback_data == "giveaway_join:1"
+        assert "1" in buttons[0].text
 
     def test_finalize_sends_result_without_editing_original_post(self, tmp_path, monkeypatch):
         import database
