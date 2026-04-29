@@ -772,6 +772,7 @@ function resetTransientUiState({ saveSettingsOnClose = false } = {}) {
     closeSettingsPanel({ save: saveSettingsOnClose });
     closeEditUrlModal();
     closeBulkModal();
+    closeAddChapterModal();
     closeTypoModal();
     closeAdminMenu();
     document.body.classList.remove('keyboard-open');
@@ -5376,17 +5377,34 @@ function openAddChapterModal(forIdx) {
     closeAdminMenu();
     const overlay = document.getElementById('add-chapter-overlay');
     const modal = document.getElementById('add-chapter-modal');
+    const volumeInput = document.getElementById('add-chapter-volume');
     const chapInput = document.getElementById('add-chapter-number');
     const nameInput = document.getElementById('add-chapter-name');
     const urlInput = document.getElementById('add-chapter-url');
+    const toneSelect = document.getElementById('add-chapter-tone');
+    const editor = document.getElementById('add-chapter-editor');
+    const seriesName = document.getElementById('chapter-editor-series-name');
+    const sourceRow = document.getElementById('chapter-editor-source-row');
+    const scheduleInput = document.getElementById('add-chapter-scheduled-at');
     if (!overlay || !modal) return;
+    if (seriesName) seriesName.textContent = currentSeries?.title || currentSeries?.id || 'Серия';
+    if (volumeInput) volumeInput.value = String(currentVolume.volume ?? 1);
     if (chapInput) chapInput.value = String(computeNextChapterNumber(currentChapters));
     if (nameInput) nameInput.value = '';
     if (urlInput) urlInput.value = '';
+    if (toneSelect) toneSelect.value = 'without_negativity';
+    if (editor) editor.innerHTML = '';
+    if (sourceRow) sourceRow.classList.add('hidden');
+    if (scheduleInput) {
+        scheduleInput.value = '';
+        scheduleInput.classList.add('hidden');
+    }
+    updateAddChapterCounter();
     restoreOriginalLabel(document.getElementById('add-chapter-save'));
     overlay.classList.remove('hidden');
     modal.classList.remove('hidden');
-    setTimeout(() => { if (urlInput) urlInput.focus(); }, 350);
+    document.body.classList.add('chapter-editor-open');
+    setTimeout(() => { if (editor) editor.focus(); }, 150);
 }
 
 function closeAddChapterModal() {
@@ -5394,23 +5412,129 @@ function closeAddChapterModal() {
     const modal = document.getElementById('add-chapter-modal');
     if (overlay) overlay.classList.add('hidden');
     if (modal) modal.classList.add('hidden');
+    document.body.classList.remove('chapter-editor-open');
     restoreOriginalLabel(document.getElementById('add-chapter-save'));
+}
+
+function normalizeChapterEditorText(text) {
+    return String(text || '').replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getChapterEditorPlainText() {
+    const editor = document.getElementById('add-chapter-editor');
+    return normalizeChapterEditorText(editor?.innerText || editor?.textContent || '');
+}
+
+function getChapterEditorParagraphCount() {
+    const editor = document.getElementById('add-chapter-editor');
+    const raw = String(editor?.innerText || editor?.textContent || '').replace(/\u00a0/g, ' ').trim();
+    if (!raw) return 0;
+    return raw.split(/\n+/).map((line) => line.trim()).filter(Boolean).length;
+}
+
+function getChapterEditorHtml() {
+    const editor = document.getElementById('add-chapter-editor');
+    const text = getChapterEditorPlainText();
+    if (!editor || !text) return '';
+    return (editor.innerHTML || '').trim() || escapeHtml(text);
+}
+
+function updateAddChapterCounter() {
+    const counter = document.getElementById('add-chapter-counter');
+    if (!counter) return;
+    counter.textContent = `${getChapterEditorParagraphCount()} / ${getChapterEditorPlainText().length}`;
+}
+
+function focusChapterEditor() {
+    const editor = document.getElementById('add-chapter-editor');
+    if (editor) editor.focus();
+}
+
+function execChapterEditorCommand(command) {
+    focusChapterEditor();
+    if (!command) return;
+    if (command.startsWith('formatBlock:')) {
+        const block = command.split(':')[1] || 'P';
+        document.execCommand('formatBlock', false, block);
+    } else {
+        document.execCommand(command, false, null);
+    }
+    updateAddChapterCounter();
+}
+
+function toggleChapterEditorSource() {
+    const sourceRow = document.getElementById('chapter-editor-source-row');
+    if (!sourceRow) return;
+    sourceRow.classList.toggle('hidden');
+    if (!sourceRow.classList.contains('hidden')) {
+        document.getElementById('add-chapter-url')?.focus();
+    }
+}
+
+function insertChapterEditorImage() {
+    const url = window.prompt('URL изображения');
+    if (!url || !/^https?:\/\//i.test(url.trim())) {
+        if (url) showToast('Укажите http(s)-ссылку на изображение');
+        return;
+    }
+    focusChapterEditor();
+    document.execCommand('insertImage', false, url.trim());
+    updateAddChapterCounter();
+}
+
+function handleChapterEditorToolbar(event) {
+    const target = event?.currentTarget || event?.target;
+    const command = target?.dataset?.editorCommand || '';
+    const action = target?.dataset?.editorAction || '';
+    if (action === 'source') {
+        toggleChapterEditorSource();
+        return;
+    }
+    if (action === 'image') {
+        insertChapterEditorImage();
+        return;
+    }
+    execChapterEditorCommand(command);
+}
+
+function toggleChapterSchedulePicker() {
+    const scheduleInput = document.getElementById('add-chapter-scheduled-at');
+    if (!scheduleInput) return;
+    scheduleInput.classList.toggle('hidden');
+    if (!scheduleInput.classList.contains('hidden')) scheduleInput.focus();
+}
+
+function collectAddChapterContentPayload() {
+    const urlInput = document.getElementById('add-chapter-url');
+    const source = (urlInput?.value || '').trim();
+    const editorHtml = getChapterEditorHtml();
+    return {
+        url: source || editorHtml,
+        contentHtml: source ? '' : editorHtml,
+    };
 }
 
 async function saveAddChapter() {
     if (!API_URL || !currentSeries || !currentVolume) return;
+    const volumeInput = document.getElementById('add-chapter-volume');
     const chapInput = document.getElementById('add-chapter-number');
     const nameInput = document.getElementById('add-chapter-name');
-    const urlInput = document.getElementById('add-chapter-url');
+    const toneSelect = document.getElementById('add-chapter-tone');
+    const scheduleInput = document.getElementById('add-chapter-scheduled-at');
+    const volume = (volumeInput?.value || currentVolume.volume || '').toString().trim();
     const chapter = (chapInput?.value || '').trim();
     const name = (nameInput?.value || '').trim();
-    const url = (urlInput?.value || '').trim();
+    const contentPayload = collectAddChapterContentPayload();
+    const url = contentPayload.url;
+    const tone = (toneSelect?.value || 'without_negativity').trim();
+    const scheduledAt = (scheduleInput?.value || '').trim();
+    if (!volume) return showToast('Укажите том');
     if (!chapter) return showToast('Укажите номер главы');
-    if (!url) return showToast('Укажите ссылку');
+    if (!url) return showToast('Заполните содержание главы или ссылку');
 
     const saveBtn = document.getElementById('add-chapter-save');
     captureOriginalLabel(saveBtn);
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Добавление...'; }
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Создание...'; }
 
     try {
         const resp = await apiFetch(API_URL + '/api/chapters', {
@@ -5418,24 +5542,30 @@ async function saveAddChapter() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 series_id: currentSeries.id,
-                volume: currentVolume.volume,
+                volume: volume,
                 chapter: chapter,
                 name: name,
-                url: url
+                url: url,
+                content_html: contentPayload.contentHtml,
+                tone: tone,
+                scheduled_at: scheduledAt
             })
         });
         const result = await resp.json();
         if (result.ok) {
-            if (Array.isArray(currentVolume.chapters)) {
-                const exists = currentVolume.chapters.some((item) => sameReaderKey(item.chapter, chapter));
+            const targetVolume = findVolumeByKey(currentSeries, volume) || currentVolume;
+            if (targetVolume && Array.isArray(targetVolume.chapters)) {
+                const exists = targetVolume.chapters.some((item) => sameReaderKey(item.chapter, chapter));
                 if (!exists) {
-                    currentVolume.chapters.push({
+                    targetVolume.chapters.push({
                         chapter,
                         custom_name: name || `Глава ${chapter}`,
                         text: '',
                         url,
                     });
-                    currentChapters = currentVolume.chapters;
+                    if (sameReaderKey(targetVolume.volume, currentVolume.volume)) {
+                        currentChapters = targetVolume.chapters;
+                    }
                 }
             }
             closeAddChapterModal();

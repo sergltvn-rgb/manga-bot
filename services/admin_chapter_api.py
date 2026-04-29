@@ -486,7 +486,7 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
 
 async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Response:
     """POST: добавить одну главу. Только для админов. 409 если уже существует."""
-    from bot import DB_PATH, invalidate_reader_cache, run_git_sync, spawn_bg
+    from bot import DB_PATH, get_custom_name, invalidate_reader_cache, run_git_sync, spawn_bg, upload_to_telegraph
 
     user_id = ""
     try:
@@ -507,14 +507,16 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
         chapter = str(data.get("chapter", "")).strip()
         name = str(data.get("name", "") or "").strip()
         url_raw = str(data.get("url", "") or "").strip()
+        content_html = str(data.get("content_html", "") or "").strip()
+        raw_content = content_html or url_raw
 
-        if not series_id or not chapter or not url_raw:
+        if not series_id or not chapter or not raw_content:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
         if not _is_valid_series_id(series_id):
             return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
         if not _is_valid_chapter_token(chapter):
             return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
-        if len(url_raw) > MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH:
+        if len(raw_content) > MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH:
             return aiohttp.web.json_response({"error": "payload too large"}, status=400, headers=CORS_HEADERS)
         if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
             return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
@@ -523,7 +525,13 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
         if not info:
             return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
 
-        links = _clean_urls(url_raw)
+        links = [] if content_html else _clean_urls(url_raw)
+        if not links and len(raw_content) > 30:
+            s_name = await get_custom_name(f"series_{series_id}") or series_id
+            title = f"{s_name} — Глава {chapter}"
+            telegraph_url = await upload_to_telegraph(title, raw_content)
+            if telegraph_url:
+                links = [telegraph_url]
         if not links:
             return aiohttp.web.json_response({"error": "invalid or unsupported URL"}, status=400, headers=CORS_HEADERS)
         if len(links) > MAX_BULK_URLS_PER_REQUEST:

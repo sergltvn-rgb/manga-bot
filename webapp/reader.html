@@ -594,26 +594,95 @@
 
     <!-- === Add Chapter Modal (Admin) === -->
     <div id="add-chapter-overlay" class="modal-overlay hidden" onclick="closeAddChapterModal()"></div>
-    <div id="add-chapter-modal" class="edit-url-modal hidden">
-        <h3>Добавить главу</h3>
-        <p class="edit-url-chapter-name">Будет добавлена в текущий том.</p>
-        <label class="add-chapter-field">
-            <span>Номер главы</span>
-            <input type="text" id="add-chapter-number" class="edit-url-input" placeholder="например: 15 или 15.5">
-        </label>
-        <label class="add-chapter-field">
-            <span>Имя (опционально)</span>
-            <input type="text" id="add-chapter-name" class="edit-url-input" placeholder="Глава 15 — Встреча">
-        </label>
-        <label class="add-chapter-field">
-            <span>Ссылка</span>
-            <input type="text" id="add-chapter-url" class="edit-url-input" placeholder="https://telegra.ph/...">
-        </label>
-        <div class="edit-url-actions">
-            <button class="edit-url-cancel" onclick="closeAddChapterModal()">Отмена</button>
-            <button class="edit-url-save" id="add-chapter-save" onclick="saveAddChapter()">Добавить</button>
+    <section id="add-chapter-modal" class="chapter-editor-modal hidden" role="dialog" aria-modal="true" aria-labelledby="chapter-editor-title">
+        <div class="chapter-editor-shell">
+            <header class="chapter-editor-sitebar">
+                <div class="chapter-editor-brand" aria-label="Alya">Alya<span>LIB</span></div>
+                <nav class="chapter-editor-site-nav" aria-label="Админ-навигация">
+                    <button type="button">Каталог</button>
+                    <button type="button">Поиск</button>
+                    <button type="button">Форум</button>
+                </nav>
+                <div class="chapter-editor-site-actions">
+                    <button type="button" aria-label="Команда">👥</button>
+                    <button type="button" aria-label="Добавить">+</button>
+                    <button type="button" aria-label="Уведомления">🔔</button>
+                    <button type="button" aria-label="Меню">☰</button>
+                    <button type="button" class="chapter-editor-close" onclick="closeAddChapterModal()" aria-label="Закрыть редактор">×</button>
+                </div>
+            </header>
+
+            <div class="chapter-editor-breadcrumb">
+                <span id="chapter-editor-series-name">Серия</span>
+                <span aria-hidden="true">/</span>
+                <strong id="chapter-editor-title">Добавление глав</strong>
+            </div>
+
+            <div class="chapter-editor-meta-row">
+                <label class="chapter-editor-mini-field">
+                    <span>Том</span>
+                    <input type="text" id="add-chapter-volume" inputmode="decimal" autocomplete="off">
+                </label>
+                <label class="chapter-editor-mini-field">
+                    <span>Глава</span>
+                    <input type="text" id="add-chapter-number" inputmode="decimal" autocomplete="off" placeholder="8">
+                </label>
+                <label class="chapter-editor-title-field">
+                    <span>Название главы</span>
+                    <input type="text" id="add-chapter-name" autocomplete="off" placeholder="Название главы">
+                </label>
+                <label class="chapter-editor-tone-field">
+                    <span>Тональность</span>
+                    <select id="add-chapter-tone">
+                        <option value="without_negativity">Without negativity</option>
+                        <option value="neutral">Neutral</option>
+                        <option value="drama">Drama</option>
+                        <option value="spoilers">Spoilers</option>
+                    </select>
+                </label>
+                <div class="chapter-editor-schedule-wrap">
+                    <button type="button" id="add-chapter-schedule" class="chapter-editor-icon-btn" onclick="toggleChapterSchedulePicker()" aria-label="Запланировать публикацию">◷</button>
+                    <input type="datetime-local" id="add-chapter-scheduled-at" class="chapter-editor-schedule-input hidden" aria-label="Дата публикации">
+                </div>
+                <button type="button" class="chapter-editor-create" id="add-chapter-save" onclick="saveAddChapter()">Создать</button>
+            </div>
+
+            <div class="chapter-editor-toolbar" role="toolbar" aria-label="Форматирование главы">
+                <button type="button" class="chapter-editor-tool" data-editor-action="source" onclick="handleChapterEditorToolbar(event)" aria-label="Источник или ссылка">⚙</button>
+                <span class="chapter-editor-separator"></span>
+                <button type="button" class="chapter-editor-tool" data-editor-command="formatBlock:H2" onclick="handleChapterEditorToolbar(event)" aria-label="Большой заголовок">H</button>
+                <button type="button" class="chapter-editor-tool chapter-editor-tool-small" data-editor-command="formatBlock:H3" onclick="handleChapterEditorToolbar(event)" aria-label="Малый заголовок">H</button>
+                <span class="chapter-editor-separator"></span>
+                <button type="button" class="chapter-editor-tool" data-editor-command="bold" onclick="handleChapterEditorToolbar(event)" aria-label="Жирный">B</button>
+                <button type="button" class="chapter-editor-tool" data-editor-command="italic" onclick="handleChapterEditorToolbar(event)" aria-label="Курсив">I</button>
+                <button type="button" class="chapter-editor-tool" data-editor-command="underline" onclick="handleChapterEditorToolbar(event)" aria-label="Подчеркнуть">U</button>
+                <button type="button" class="chapter-editor-tool" data-editor-command="strikeThrough" onclick="handleChapterEditorToolbar(event)" aria-label="Зачеркнуть">S</button>
+                <span class="chapter-editor-separator"></span>
+                <button type="button" class="chapter-editor-tool" data-editor-command="justifyLeft" onclick="handleChapterEditorToolbar(event)" aria-label="По левому краю">☰</button>
+                <button type="button" class="chapter-editor-tool" data-editor-command="justifyCenter" onclick="handleChapterEditorToolbar(event)" aria-label="По центру">≡</button>
+                <button type="button" class="chapter-editor-tool" data-editor-command="justifyRight" onclick="handleChapterEditorToolbar(event)" aria-label="По правому краю">☷</button>
+                <span class="chapter-editor-separator"></span>
+                <button type="button" class="chapter-editor-tool" data-editor-command="insertOrderedList" onclick="handleChapterEditorToolbar(event)" aria-label="Нумерованный список">1.</button>
+                <button type="button" class="chapter-editor-tool" data-editor-command="insertUnorderedList" onclick="handleChapterEditorToolbar(event)" aria-label="Маркированный список">•</button>
+                <span class="chapter-editor-separator"></span>
+                <button type="button" class="chapter-editor-tool" data-editor-command="formatBlock:BLOCKQUOTE" onclick="handleChapterEditorToolbar(event)" aria-label="Цитата">”</button>
+                <button type="button" class="chapter-editor-tool" data-editor-command="insertHorizontalRule" onclick="handleChapterEditorToolbar(event)" aria-label="Разделитель">−</button>
+                <button type="button" class="chapter-editor-tool" data-editor-action="image" onclick="handleChapterEditorToolbar(event)" aria-label="Изображение">▧</button>
+                <span id="add-chapter-counter" class="chapter-editor-counter" aria-live="polite">0 / 0</span>
+            </div>
+
+            <label id="chapter-editor-source-row" class="chapter-editor-source-row hidden">
+                <span>Источник или готовая ссылка</span>
+                <input type="text" id="add-chapter-url" placeholder="https://telegra.ph/... или текст главы">
+            </label>
+
+            <div class="chapter-editor-notice" role="note">
+                <p>Пожалуйста, не забывайте сообщать об ошибках, связанных с редактором, при их обнаружении.</p>
+            </div>
+
+            <div id="add-chapter-editor" class="chapter-editor-canvas" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Содержание главы..." oninput="updateAddChapterCounter()"></div>
         </div>
-    </div>
+    </section>
 
     <!-- === Series Cover Edit Modal (Admin) === -->
     <div id="cover-edit-overlay" class="modal-overlay hidden" onclick="closeCoverEditModal()"></div>

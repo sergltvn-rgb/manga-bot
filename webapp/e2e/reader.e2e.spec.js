@@ -596,6 +596,7 @@ async function installTelegramAndApiMocks(page, state) {
     if (pathname === "/api/chapters" && method === "POST") {
       state.calls.chapterAdd += 1;
       const body = safeJson(request);
+      state.lastChapterAddPayload = body;
       const volume = findVolume(state, body.series_id, body.volume);
       if (!volume) {
         await fulfillJson(route, { error: "unknown volume" }, 400);
@@ -1135,8 +1136,8 @@ test.describe("Reader E2E smoke", () => {
     await page.locator("#chapters-list .chapter-item").first().click();
     await expect(page.locator("#screen-reader")).toHaveClass(/active/);
     await page.evaluate(() => openAddChapterModal());
-    await page.fill("#add-chapter-url", "https://example.org/site-admin-added");
     await page.fill("#add-chapter-name", "Site admin added chapter");
+    await page.locator("#add-chapter-editor").fill("Site admin chapter body with enough text to publish.");
     await page.click("#add-chapter-save");
     await expect.poll(() => state.calls.chapterAdd).toBe(1);
 
@@ -1666,13 +1667,43 @@ test.describe("Reader E2E smoke", () => {
 
     await page.evaluate(() => openAddChapterModal());
     await expect(page.locator("#add-chapter-modal")).not.toHaveClass(/hidden/);
+    await expect(page.locator("#add-chapter-modal")).toHaveClass(/chapter-editor-modal/);
+    await expect(page.locator("#add-chapter-volume")).toHaveValue("1");
     await expect(page.locator("#add-chapter-number")).toHaveValue("3");
+    await expect(page.locator("#add-chapter-tone")).toHaveValue("without_negativity");
+    await expect(page.locator("#add-chapter-schedule")).toBeVisible();
+    await expect(page.locator("#add-chapter-editor")).toBeVisible();
+    await expect(page.locator("#add-chapter-counter")).toHaveText("0 / 0");
+    await expect(page.locator('[data-editor-command="formatBlock:H2"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="formatBlock:H3"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="bold"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="italic"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="underline"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="strikeThrough"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="justifyLeft"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="justifyCenter"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="justifyRight"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="insertOrderedList"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="insertUnorderedList"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="formatBlock:BLOCKQUOTE"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="insertHorizontalRule"]')).toBeVisible();
+    await expect(page.locator('[data-editor-action="image"]')).toBeVisible();
 
-    await page.fill("#add-chapter-url", "https://example.org/added-chapter");
     await page.fill("#add-chapter-name", "E2E added chapter");
+    await page.locator("#add-chapter-editor").fill("First paragraph of a newly written chapter.\n\nSecond paragraph with enough text for publishing.");
+    await expect(page.locator("#add-chapter-counter")).toHaveText("2 / 93");
     await page.click("#add-chapter-save");
 
     await expect.poll(() => state.calls.chapterAdd).toBe(1);
+    expect(state.lastChapterAddPayload).toMatchObject({
+      series_id: "manga_ru",
+      volume: "1",
+      chapter: "3",
+      name: "E2E added chapter",
+      tone: "without_negativity",
+    });
+    expect(state.lastChapterAddPayload.url).toContain("First paragraph of a newly written chapter.");
+    expect(state.lastChapterAddPayload.content_html).toContain("First paragraph of a newly written chapter.");
     await expect.poll(() => {
       const v = findVolume(state, "manga_ru", 1);
       return v ? v.chapters.length : 0;
