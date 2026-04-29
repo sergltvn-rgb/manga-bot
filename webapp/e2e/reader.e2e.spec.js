@@ -1672,7 +1672,7 @@ test.describe("Reader E2E smoke", () => {
     await expect(page.locator("#add-chapter-modal")).toHaveClass(/chapter-editor-modal/);
     await expect(page.locator("#add-chapter-volume")).toHaveValue("1");
     await expect(page.locator("#add-chapter-number")).toHaveValue("3");
-    await expect(page.locator("#add-chapter-tone")).toHaveValue("without_negativity");
+    await expect(page.locator("#add-chapter-tone")).toHaveValue("");
     await expect(page.locator("#add-chapter-schedule")).toBeVisible();
     await expect(page.locator("#add-chapter-editor")).toBeVisible();
     await expect(page.locator("#add-chapter-counter")).toHaveText("0 / 0");
@@ -1702,7 +1702,7 @@ test.describe("Reader E2E smoke", () => {
       volume: "1",
       chapter: "3",
       name: "E2E added chapter",
-      tone: "without_negativity",
+      tone: "",
     });
     expect(state.lastChapterAddPayload.url).toContain("First paragraph of a newly written chapter.");
     expect(state.lastChapterAddPayload.content_html).toContain("First paragraph of a newly written chapter.");
@@ -1757,8 +1757,41 @@ test.describe("Reader E2E smoke", () => {
 
     await page.click("#add-chapter-save");
     await expect.poll(() => state.calls.chapterAdd).toBe(1);
-    const draftKeys = await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("reader_chapter_editor_draft")));
-    expect(draftKeys).toHaveLength(0);
+    await expect(page.locator("#add-chapter-modal")).toHaveClass(/hidden/);
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("reader_chapter_editor_draft")).length)).toBe(0);
+  });
+
+  test("admin editor is discoverable and quote formatting does not nest", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=editor-discoverable");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+
+    await page.click("#admin-fab-btn");
+    await expect(page.locator("#admin-menu")).toContainText("Редактировать главу");
+    await page.locator("#admin-menu .admin-menu-item", { hasText: "Редактировать главу" }).click();
+    await expect(page.locator("#chapter-editor-title")).toHaveText("Редактирование главы");
+    await expect(page.locator("#chapter-editor-mode-badge")).toHaveText("Правка");
+
+    await page.locator("#add-chapter-editor").fill("Quote should not become a nested frame.");
+    await page.evaluate(() => {
+      const editor = document.getElementById("add-chapter-editor");
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await page.click('[data-editor-command="formatBlock:BLOCKQUOTE"]');
+    await page.click('[data-editor-command="formatBlock:BLOCKQUOTE"]');
+
+    const nestedQuotes = await page.locator("#add-chapter-editor blockquote blockquote").count();
+    expect(nestedQuotes).toBe(0);
+    await expect(page.locator("#add-chapter-editor")).toContainText("Quote should not become a nested frame.");
   });
 
   test("admin chapter editor edits existing chapters and avoids fake header controls", async ({ page }) => {

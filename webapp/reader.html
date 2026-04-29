@@ -249,7 +249,7 @@
                     <div class="admin-menu-header">Инструменты Админа</div>
                     <button class="admin-menu-item" onclick="renameChapterCurrent()"><span class="icon">📝</span> Переименовать главу</button>
                     <button class="admin-menu-item" onclick="resetCurrentChapterName()"><span class="icon">🔄</span> Сброс имени</button>
-                    <button class="admin-menu-item" onclick="openEditUrlModal(currentChapterIdx)"><span class="icon">🔗</span> Ред. ссылки</button>
+                    <button class="admin-menu-item" onclick="openEditUrlModal(currentChapterIdx)"><span class="icon">✎</span> Редактировать главу</button>
                     <button class="admin-menu-item" onclick="openAddChapterForCurrent()"><span class="icon">📄</span> Добавить главу</button>
                     <button class="admin-menu-item" onclick="deleteChapterCurrent()"><span class="icon">🗑️</span> Удалить главу</button>
                     <button class="admin-menu-item" onclick="openBulkModal()"><span class="icon">📦</span> Масс. загрузка</button>
@@ -629,7 +629,8 @@
                 <label class="chapter-editor-tone-field">
                     <span>Тональность</span>
                     <select id="add-chapter-tone">
-                        <option value="without_negativity">Without negativity</option>
+                        <option value="">Не указана</option>
+                        <option value="without_negativity">Без негатива</option>
                         <option value="neutral">Neutral</option>
                         <option value="drama">Drama</option>
                         <option value="spoilers">Spoilers</option>
@@ -643,8 +644,8 @@
             </div>
 
             <div class="chapter-editor-toolbar" role="toolbar" aria-label="Форматирование главы">
-                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-command="undo" onclick="handleChapterEditorToolbar(event)" aria-label="Отменить">Back</button>
-                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-command="redo" onclick="handleChapterEditorToolbar(event)" aria-label="Повторить">Next</button>
+                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-command="undo" onclick="handleChapterEditorToolbar(event)" aria-label="Отменить">↶</button>
+                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-command="redo" onclick="handleChapterEditorToolbar(event)" aria-label="Повторить">↷</button>
                 <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-action="clear" onclick="handleChapterEditorToolbar(event)" aria-label="Очистить форматирование">Tx</button>
                 <span class="chapter-editor-separator"></span>
                 <button type="button" class="chapter-editor-tool" data-editor-action="source" onclick="handleChapterEditorToolbar(event)" aria-label="Источник или ссылка">⚙</button>
@@ -667,7 +668,7 @@
                 <button type="button" class="chapter-editor-tool" data-editor-command="formatBlock:BLOCKQUOTE" onclick="handleChapterEditorToolbar(event)" aria-label="Цитата">”</button>
                 <button type="button" class="chapter-editor-tool" data-editor-command="insertHorizontalRule" onclick="handleChapterEditorToolbar(event)" aria-label="Разделитель">−</button>
                 <button type="button" class="chapter-editor-tool" data-editor-action="image" onclick="handleChapterEditorToolbar(event)" aria-label="Изображение">▧</button>
-                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-action="preview" onclick="handleChapterEditorToolbar(event)" aria-label="Предпросмотр">View</button>
+                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-action="preview" onclick="handleChapterEditorToolbar(event)" aria-label="Предпросмотр">◐</button>
                 <span id="add-chapter-counter" class="chapter-editor-counter" aria-live="polite">0 / 0</span>
                 <span id="chapter-editor-draft-status" class="chapter-editor-draft-status" aria-live="polite">Готово</span>
             </div>

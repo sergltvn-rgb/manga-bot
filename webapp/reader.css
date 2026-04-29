@@ -2642,16 +2642,18 @@ input:checked + .slider:before { transform: translateX(20px); }
 
 /* === Admin Link Edit Button (Refresh v4) === */
 .admin-link-btn {
-    background: none;
-    border: none;
+    background: var(--chip-bg);
+    border: 1px solid var(--surface-border);
     cursor: pointer;
-    font-size: 15px;
-    margin-left: 4px;
+    font-size: 12px;
+    font-weight: 800;
+    margin-left: 8px;
     vertical-align: middle;
-    padding: 6px;
-    border-radius: var(--radius-sm);
+    padding: 5px 8px;
+    border-radius: 999px;
     display: inline-flex;
     align-items: center;
+    gap: 5px;
     justify-content: center;
     transition: background 0.2s, color 0.2s;
     user-select: none;
@@ -2659,8 +2661,14 @@ input:checked + .slider:before { transform: translateX(20px); }
     -webkit-tap-highlight-color: transparent;
     color: var(--accent);
 }
-.admin-link-btn:hover { background: var(--chip-bg); }
+.admin-link-btn:hover { background: rgba(var(--accent-rgb), 0.14); }
 .admin-link-btn:active { background: var(--chip-bg); transform: scale(0.94); }
+.admin-link-icon { font-size: 13px; }
+
+@media (max-width: 520px) {
+    .admin-link-label { display: none; }
+    .admin-link-btn { padding: 6px; }
+}
 
 /* === Bulk Upload Button (Refresh v4) === */
 .admin-bulk-btn {

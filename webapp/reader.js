@@ -2442,7 +2442,7 @@ function renderChaptersList() {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
         const chapName = ch.custom_name || `Глава ${ch.chapter}`;
         const hasCustom = !!ch.custom_name;
-        const linkBtn = isAdminMode ? `<button class="admin-link-btn" title="Редактировать ссылку" onclick="openEditUrlModal(${idx}); event.stopPropagation();">&#128279;</button>` : '';
+        const linkBtn = isAdminMode ? `<button class="admin-link-btn" title="Редактировать главу" aria-label="Редактировать главу" onclick="openEditUrlModal(${idx}); event.stopPropagation();"><span class="admin-link-icon">✎</span><span class="admin-link-label">Редактировать</span></button>` : '';
         const editBtns = isAdminMode ? `
             <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#9998;</button>
             ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
@@ -5205,7 +5205,7 @@ function collectChapterEditorDraftData() {
         chapter: document.getElementById('add-chapter-number')?.value || '',
         name: document.getElementById('add-chapter-name')?.value || '',
         url: document.getElementById('add-chapter-url')?.value || '',
-        tone: document.getElementById('add-chapter-tone')?.value || 'without_negativity',
+        tone: document.getElementById('add-chapter-tone')?.value || '',
         scheduledAt: document.getElementById('add-chapter-scheduled-at')?.value || '',
         editorHtml: document.getElementById('add-chapter-editor')?.innerHTML || '',
     };
@@ -5534,7 +5534,7 @@ function openChapterEditor({ mode = 'create', chapterIdx = null } = {}) {
     }
     if (nameInput) nameInput.value = chapterEditorMode === 'edit' ? chapterName : '';
     if (urlInput) urlInput.value = chapterEditorMode === 'edit' ? sourceValue : '';
-    if (toneSelect) toneSelect.value = 'without_negativity';
+    if (toneSelect) toneSelect.value = '';
     if (editor) {
         editor.innerHTML = hasInlineText ? chapterPlainTextToEditorHtml(editingChapter.text) : '';
     }
@@ -5574,17 +5574,24 @@ function openAddChapterModal(forIdx) {
 function closeAddChapterModal(options = {}) {
     const overlay = document.getElementById('add-chapter-overlay');
     const modal = document.getElementById('add-chapter-modal');
+    const closingDraftKey = chapterEditorDraftKey;
     const visible = modal && !modal.classList.contains('hidden');
     if (visible && chapterEditorDirty && !options.skipConfirm) {
         const ok = window.confirm('Закрыть редактор? Черновик сохранен, но изменения еще не опубликованы.');
         if (!ok) return false;
     }
+    if (options.clearDraft) chapterEditorDirty = false;
     if (chapterEditorDraftTimer) {
         clearTimeout(chapterEditorDraftTimer);
         chapterEditorDraftTimer = null;
         if (chapterEditorDirty && !options.clearDraft) saveChapterEditorDraft();
     }
-    if (options.clearDraft) clearChapterEditorDraft();
+    if (options.clearDraft) {
+        clearChapterEditorDraft();
+        if (closingDraftKey) {
+            try { localStorage.removeItem(closingDraftKey); } catch (e) { /* ignore */ }
+        }
+    }
     if (overlay) overlay.classList.add('hidden');
     if (modal) modal.classList.add('hidden');
     modal?.querySelector('.chapter-editor-shell')?.classList.remove('preview-active');
@@ -5599,6 +5606,7 @@ function closeAddChapterModal(options = {}) {
     chapterEditorMode = 'create';
     chapterEditorEditIdx = null;
     chapterEditorDirty = false;
+    chapterEditorDraftKey = '';
     return true;
 }
 
@@ -5636,12 +5644,43 @@ function focusChapterEditor() {
     if (editor) editor.focus();
 }
 
+function getChapterEditorSelectionElement() {
+    const editor = document.getElementById('add-chapter-editor');
+    const selection = window.getSelection?.();
+    const node = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).startContainer : null;
+    const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+    return editor && element && editor.contains(element) ? element : editor;
+}
+
+function unwrapChapterEditorElement(element) {
+    if (!element || !element.parentNode) return;
+    const parent = element.parentNode;
+    while (element.firstChild) {
+        parent.insertBefore(element.firstChild, element);
+    }
+    parent.removeChild(element);
+}
+
+function flattenChapterEditorBlockquotes() {
+    const editor = document.getElementById('add-chapter-editor');
+    if (!editor) return;
+    editor.querySelectorAll('blockquote blockquote').forEach((quote) => unwrapChapterEditorElement(quote));
+}
+
 function execChapterEditorCommand(command) {
     focusChapterEditor();
     if (!command) return;
     if (command.startsWith('formatBlock:')) {
         const block = command.split(':')[1] || 'P';
-        document.execCommand('formatBlock', false, block);
+        const currentElement = getChapterEditorSelectionElement();
+        const currentBlockquote = currentElement?.closest?.('blockquote');
+        const editor = document.getElementById('add-chapter-editor');
+        if (block.toUpperCase() === 'BLOCKQUOTE' && currentBlockquote && editor?.contains(currentBlockquote)) {
+            unwrapChapterEditorElement(currentBlockquote);
+        } else {
+            document.execCommand('formatBlock', false, block);
+        }
+        flattenChapterEditorBlockquotes();
     } else {
         document.execCommand(command, false, null);
     }
@@ -5670,30 +5709,35 @@ function insertChapterEditorImage() {
 
 function normalizeChapterEditorToolbarLabels() {
     const labels = {
-        source: 'URL',
-        image: 'Img',
+        source: '⚙',
+        image: '▧',
+        preview: '◐',
+        clear: 'Tx',
     };
     document.querySelectorAll('.chapter-editor-tool[data-editor-command], .chapter-editor-tool[data-editor-action]').forEach((btn) => {
         const command = btn.dataset.editorCommand || '';
         const action = btn.dataset.editorAction || '';
         const next = labels[action] || ({
-            'formatBlock:H2': 'H2',
-            'formatBlock:H3': 'H3',
+            'formatBlock:H2': 'H',
+            'formatBlock:H3': 'H',
             bold: 'B',
             italic: 'I',
             underline: 'U',
             strikeThrough: 'S',
-            justifyLeft: 'L',
-            justifyCenter: 'C',
-            justifyRight: 'R',
+            justifyLeft: '☰',
+            justifyCenter: '≡',
+            justifyRight: '☷',
             insertOrderedList: '1.',
-            insertUnorderedList: 'List',
-            'formatBlock:BLOCKQUOTE': 'Q',
-            insertHorizontalRule: 'Line',
-            undo: 'Back',
-            redo: 'Next',
+            insertUnorderedList: '•',
+            'formatBlock:BLOCKQUOTE': '”',
+            insertHorizontalRule: '−',
+            undo: '↶',
+            redo: '↷',
         })[command];
         if (next) btn.textContent = next;
+        if (!btn.title && btn.getAttribute('aria-label')) {
+            btn.title = btn.getAttribute('aria-label');
+        }
     });
 }
 
@@ -5788,7 +5832,7 @@ async function saveAddChapter() {
     const name = (nameInput?.value || '').trim();
     const contentPayload = collectAddChapterContentPayload();
     const url = contentPayload.url;
-    const tone = (toneSelect?.value || 'without_negativity').trim();
+    const tone = (toneSelect?.value || '').trim();
     const scheduledAt = (scheduleInput?.value || '').trim();
     if (!volume) return showToast('Укажите том');
     if (!chapter) return showToast('Укажите номер главы');
