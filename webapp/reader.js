@@ -4200,6 +4200,7 @@ function showScreen(name) {
     // Refresh v4: global admin FAB на не-reader экранах
     syncGlobalAdminFab(name);
     syncReaderSearchVisibility();
+    syncReadingStatsTimer(name);
 
     // Update bottom nav
     const navTabs = document.querySelectorAll('.nav-tab');
@@ -5584,17 +5585,46 @@ async function saveCoverEdit() {
 // ==========================================================================
 
 let readingStats = safeGetLocal('reader_stats', {timeSpentSeconds:0});
+let readingStatsTimer = null;
 
-// Track reading time when in 'reader' screen
-setInterval(() => {
-    if (document.getElementById('screen-reader').classList.contains('active') && !document.hidden) {
-        readingStats.timeSpentSeconds += 5;
-        if (readingStats.timeSpentSeconds % 60 === 0) { // save every minute
-            safeSetLocal('reader_stats', readingStats);
-            updateLibraryStats();
-        }
+function tickReadingStats() {
+    if (getActiveScreenName() !== 'reader' || document.hidden) {
+        syncReadingStatsTimer();
+        return;
     }
-}, 5000);
+    readingStats.timeSpentSeconds += 5;
+    if (readingStats.timeSpentSeconds % 60 === 0) {
+        safeSetLocal('reader_stats', readingStats);
+        updateLibraryStats();
+    }
+}
+
+function startReadingStatsTimer() {
+    if (readingStatsTimer || getActiveScreenName() !== 'reader' || document.hidden) return;
+    readingStatsTimer = setInterval(tickReadingStats, 5000);
+}
+
+function stopReadingStatsTimer({ persist = true } = {}) {
+    if (!readingStatsTimer) return;
+    clearInterval(readingStatsTimer);
+    readingStatsTimer = null;
+    if (persist) {
+        safeSetLocal('reader_stats', readingStats);
+        updateLibraryStats();
+    }
+}
+
+function syncReadingStatsTimer(screenName = getActiveScreenName()) {
+    if (screenName === 'reader' && !document.hidden) {
+        startReadingStatsTimer();
+    } else {
+        stopReadingStatsTimer();
+    }
+}
+
+document.addEventListener('visibilitychange', () => {
+    syncReadingStatsTimer();
+});
 
 function updateLibraryStats() {
     const timeEl = document.getElementById('stat-time');

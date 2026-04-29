@@ -1285,7 +1285,7 @@ test.describe("Reader E2E smoke", () => {
     await expect(page.locator("#chapters-list .chapter-item").first()).toContainText("Chapter 2");
   });
 
-  test("reader startup does not poll poster images on a fixed interval", async ({ page }) => {
+  test("reader startup does not start background polling before reading", async ({ page }) => {
     const state = createMockState();
     await page.addInitScript(() => {
       const nativeSetInterval = window.setInterval.bind(window);
@@ -1300,9 +1300,16 @@ test.describe("Reader E2E smoke", () => {
     await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=interval-audit");
     await expect(page.locator("#series-list .series-card")).toHaveCount(1);
 
-    const delays = await page.evaluate(() => window.__readerIntervalDelays || []);
-    expect(delays).toContain(5000);
+    let delays = await page.evaluate(() => window.__readerIntervalDelays || []);
     expect(delays).not.toContain(1500);
+    expect(delays).not.toContain(5000);
+
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+
+    delays = await page.evaluate(() => window.__readerIntervalDelays || []);
+    expect(delays).toContain(5000);
   });
 
   test("chapter payload cache survives reload and renders before slow network refresh", async ({ page }) => {
@@ -1553,6 +1560,28 @@ test.describe("Reader E2E smoke", () => {
       hideProgress: true,
       hideChapterHeader: true,
     });
+  });
+
+  test("library screen covers global search chrome behind translucent headers", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=library-cover");
+    await page.locator("#tab-library").click();
+    await expect(page.locator("#screen-library")).toHaveClass(/active/);
+    await expect(page.locator("#reader-search-panel")).toHaveClass(/hidden/);
+
+    const screenBackgroundAlpha = await page.evaluate(() => {
+      const screen = document.getElementById("screen-library");
+      const panel = document.getElementById("reader-search-panel");
+      panel?.classList.remove("hidden");
+      const bg = getComputedStyle(screen).backgroundColor;
+      const match = bg.match(/rgba?\(([^)]+)\)/);
+      if (!match) return 0;
+      const parts = match[1].split(",").map((part) => Number.parseFloat(part.trim()));
+      return parts.length >= 4 ? parts[3] : 1;
+    });
+    expect(screenBackgroundAlpha).toBe(1);
   });
 
   test("cache snapshot rotates when rev changes", async ({ page }) => {
