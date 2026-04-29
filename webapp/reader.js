@@ -2442,7 +2442,7 @@ function renderChaptersList() {
         const readClass = isRead(currentSeries.id, currentVolume.volume, ch.chapter) ? 'read' : '';
         const chapName = ch.custom_name || `Глава ${ch.chapter}`;
         const hasCustom = !!ch.custom_name;
-        const linkBtn = isAdminMode ? `<button class="admin-link-btn" title="Редактировать главу" aria-label="Редактировать главу" onclick="openEditUrlModal(${idx}); event.stopPropagation();"><span class="admin-link-icon">✎</span><span class="admin-link-label">Редактировать</span></button>` : '';
+        const linkBtn = isAdminMode ? `<button class="admin-link-btn" title="Редактировать главу" aria-label="Редактировать главу" onclick="openChapterEditModal(${idx}); event.stopPropagation();"><span class="admin-link-icon">✎</span><span class="admin-link-label">Редактировать</span></button>` : '';
         const editBtns = isAdminMode ? `
             <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#9998;</button>
             ${hasCustom ? `<button class="admin-reset-btn" title="Сброс на дефолт" onclick="resetCustomName('chap_${currentSeries.id}_${currentVolume.volume}_${ch.chapter}'); event.stopPropagation();">&#8635;</button>` : ''}
@@ -3008,7 +3008,7 @@ function loadChapterContent(chapter, usePrefetch = false, telemetryContext = nul
                 <div class="empty-icon" style="font-size:4rem;opacity:0.3;">⏳</div>
                 <h3 style="margin-top:1.5rem;font-weight:700;">Глава еще не загружена</h3>
                 <p style="opacity:0.6;max-width:300px;margin:1rem auto;">Эта часть главы еще находится в переводе или ожидает проверки администратором.</p>
-                ${isAdminMode ? `<button class="admin-primary-btn" style="margin-top:2rem;" onclick="openEditUrlModal(currentChapterIdx)">🔗 Добавить ссылку</button>` : ''}
+                ${isAdminMode ? `<button class="admin-primary-btn" style="margin-top:2rem;" onclick="openChapterEditModal(currentChapterIdx)">✎ Открыть редактор</button>` : ''}
             </div>
         `;
         reportChapterOpenTelemetry(chapter, chapterTelemetryContext, 'empty');
@@ -5050,6 +5050,7 @@ const CHAPTER_EDITOR_DRAFT_PREFIX = 'reader_chapter_editor_draft';
 let chapterEditorDirty = false;
 let chapterEditorDraftTimer = null;
 let chapterEditorDraftKey = '';
+let chapterEditorHydrationToken = 0;
 
 // Remember pristine button labels to restore after async operations.
 function captureOriginalLabel(btn) {
@@ -5066,7 +5067,7 @@ function restoreOriginalLabel(btn) {
     }
 }
 
-function openEditUrlModal(chIdx) {
+function openChapterEditModal(chIdx) {
     if (!currentChapters[chIdx]) {
         showToast('Нет главы для редактирования');
         return;
@@ -5076,6 +5077,10 @@ function openEditUrlModal(chIdx) {
         return;
     }
     openChapterEditor({ mode: 'edit', chapterIdx: chIdx });
+}
+
+function openEditUrlModal(chIdx) {
+    openChapterEditModal(chIdx);
 }
 
 function closeEditUrlModal() {
@@ -5228,6 +5233,66 @@ function applyChapterEditorDraftData(data) {
     if (scheduleInput) data.scheduledAt ? scheduleInput.value = data.scheduledAt : scheduleInput.value = '';
     if (editor) editor.innerHTML = data.editorHtml || '';
     return true;
+}
+
+function sanitizeChapterEditorHtml(html) {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '');
+    template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, form, input, button').forEach((node) => node.remove());
+    template.content.querySelectorAll('.reading-time-badge, [data-chapter-loading-hint], .skeleton-loader-card').forEach((node) => node.remove());
+    template.content.querySelectorAll('*').forEach((node) => {
+        [...node.attributes].forEach((attr) => {
+            const name = attr.name.toLowerCase();
+            if (name.startsWith('on') || name === 'style' || name === 'class' || name.startsWith('data-')) {
+                node.removeAttribute(attr.name);
+                return;
+            }
+            if ((name === 'href' || name === 'src') && !/^https?:\/\//i.test(attr.value || '')) {
+                node.removeAttribute(attr.name);
+            }
+        });
+    });
+    return template.innerHTML.trim();
+}
+
+function setChapterEditorHydrating(active) {
+    const editor = document.getElementById('add-chapter-editor');
+    if (!editor) return;
+    editor.classList.toggle('is-loading', !!active);
+    editor.setAttribute('aria-busy', active ? 'true' : 'false');
+    editor.dataset.placeholder = active ? 'Загружаю содержание главы...' : 'Содержание главы...';
+}
+
+async function hydrateChapterEditorFromChapterContent(chapterIdx, token) {
+    if (chapterEditorMode !== 'edit' || !Number.isInteger(chapterIdx)) return;
+    const editor = document.getElementById('add-chapter-editor');
+    const sourceRow = document.getElementById('chapter-editor-source-row');
+    const chapter = currentChapters[chapterIdx];
+    if (!editor || !chapter || getChapterEditorPlainText()) return;
+    if (getChapterSourceUrls(chapter).length === 0) return;
+
+    setChapterEditorHydrating(true);
+    setChapterEditorDraftStatus('Загружаю текст', 'dirty');
+    try {
+        const payload = await warmChapterPayloadByIndex(chapterIdx);
+        if (token !== chapterEditorHydrationToken || chapterEditorMode !== 'edit' || chapterEditorEditIdx !== chapterIdx) return;
+        const html = payload?.ok && payload?.html ? sanitizeChapterEditorHtml(payload.html) : '';
+        if (html) {
+            editor.innerHTML = html;
+            if (sourceRow) sourceRow.classList.add('hidden');
+            updateAddChapterCounter();
+            updateChapterEditorPreview();
+            setChapterEditorDraftStatus('Текст загружен', 'saved');
+        } else {
+            if (sourceRow) sourceRow.classList.remove('hidden');
+            setChapterEditorDraftStatus('Источник', 'idle');
+        }
+    } catch (e) {
+        if (sourceRow) sourceRow.classList.remove('hidden');
+        setChapterEditorDraftStatus('Ссылка доступна', 'idle');
+    } finally {
+        if (token === chapterEditorHydrationToken) setChapterEditorHydrating(false);
+    }
 }
 
 function loadChapterEditorDraft() {
@@ -5514,6 +5579,8 @@ function openChapterEditor({ mode = 'create', chapterIdx = null } = {}) {
     chapterEditorMode = mode === 'edit' ? 'edit' : 'create';
     chapterEditorEditIdx = chapterEditorMode === 'edit' ? chapterIdx : null;
     chapterEditorDirty = false;
+    chapterEditorHydrationToken += 1;
+    const hydrationToken = chapterEditorHydrationToken;
 
     const chapterName = editingChapter?.custom_name || (editingChapter ? `Глава ${editingChapter.chapter}` : '');
     const sourceValue = editingChapter
@@ -5537,6 +5604,9 @@ function openChapterEditor({ mode = 'create', chapterIdx = null } = {}) {
     if (toneSelect) toneSelect.value = '';
     if (editor) {
         editor.innerHTML = hasInlineText ? chapterPlainTextToEditorHtml(editingChapter.text) : '';
+        editor.classList.remove('is-loading');
+        editor.setAttribute('aria-busy', 'false');
+        editor.dataset.placeholder = 'Содержание главы...';
     }
     if (sourceRow) {
         sourceRow.classList.toggle('hidden', chapterEditorMode !== 'edit' || hasInlineText || !sourceValue);
@@ -5561,6 +5631,10 @@ function openChapterEditor({ mode = 'create', chapterIdx = null } = {}) {
     overlay.classList.remove('hidden');
     modal.classList.remove('hidden');
     document.body.classList.add('chapter-editor-open');
+    if (chapterEditorMode === 'edit' && !restoredDraft && !hasInlineText && sourceValue) {
+        if (sourceRow) sourceRow.classList.add('hidden');
+        hydrateChapterEditorFromChapterContent(chapterIdx, hydrationToken);
+    }
     setTimeout(() => {
         if (editor && (!sourceRow || sourceRow.classList.contains('hidden'))) editor.focus();
         else document.getElementById('add-chapter-url')?.focus();
@@ -5607,6 +5681,7 @@ function closeAddChapterModal(options = {}) {
     chapterEditorEditIdx = null;
     chapterEditorDirty = false;
     chapterEditorDraftKey = '';
+    chapterEditorHydrationToken += 1;
     return true;
 }
 
@@ -5628,9 +5703,12 @@ function getChapterEditorParagraphCount() {
 
 function getChapterEditorHtml() {
     const editor = document.getElementById('add-chapter-editor');
+    if (!editor) return '';
     const text = getChapterEditorPlainText();
-    if (!editor || !text) return '';
-    return (editor.innerHTML || '').trim() || escapeHtml(text);
+    const html = (editor.innerHTML || '').trim();
+    const hasVisualContent = !!editor.querySelector('img, picture, video, figure, iframe, hr');
+    if (!text && !hasVisualContent) return '';
+    return html || escapeHtml(text);
 }
 
 function updateAddChapterCounter() {
@@ -5811,9 +5889,15 @@ function collectAddChapterContentPayload() {
     const urlInput = document.getElementById('add-chapter-url');
     const source = (urlInput?.value || '').trim();
     const editorHtml = getChapterEditorHtml();
+    if (editorHtml) {
+        return {
+            url: editorHtml,
+            contentHtml: editorHtml,
+        };
+    }
     return {
-        url: source || editorHtml,
-        contentHtml: source ? '' : editorHtml,
+        url: source,
+        contentHtml: '',
     };
 }
 

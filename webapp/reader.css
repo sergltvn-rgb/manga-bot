@@ -3111,6 +3111,14 @@ input:checked + .slider:before { transform: translateX(20px); }
     pointer-events: none;
 }
 
+.chapter-editor-canvas.is-loading {
+    cursor: progress;
+}
+
+.chapter-editor-canvas.is-loading:empty::before {
+    color: #68aef5;
+}
+
 .chapter-editor-canvas h2,
 .chapter-editor-canvas h3 {
     color: #f1f3f7;

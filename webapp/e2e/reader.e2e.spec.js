@@ -1829,6 +1829,69 @@ test.describe("Reader E2E smoke", () => {
     expect(state.lastChapterEditPayload.content_html).toContain("Edited chapter body from the rich editor.");
   });
 
+  test("admin chapter edit opens rich editor for url-backed chapters without leaving only blur", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.series[0].volumes[0].chapters[0] = {
+      chapter: "1",
+      custom_name: "Remote chapter",
+      url: "https://teletype.in/@slitvin/remote-chapter",
+      __chapterContent: {
+        ok: true,
+        source_type: "teletype",
+        html: "<p>Loaded remote body from chapter-content.</p><p>Second paragraph is editable.</p>",
+        fallback_url: "https://teletype.in/@slitvin/remote-chapter",
+      },
+    };
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=edit-url-backed");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .admin-link-btn").first().click();
+
+    await expect(page.locator("#add-chapter-modal")).not.toHaveClass(/hidden/);
+    await expect(page.locator("#edit-url-modal")).toHaveClass(/hidden/);
+    await expect.poll(() => page.evaluate(() => {
+      const top = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+      return !!top?.closest("#add-chapter-modal");
+    })).toBe(true);
+    await expect(page.locator("#chapter-editor-title")).toHaveText("Редактирование главы");
+    await expect(page.locator("#add-chapter-editor")).toContainText("Loaded remote body from chapter-content.");
+    await expect(page.locator("#chapter-editor-source-row")).toHaveClass(/hidden/);
+
+    await page.locator("#add-chapter-editor").fill("Rewritten remote chapter body.\n\nFresh paragraph.");
+    await page.click("#add-chapter-save");
+    await expect.poll(() => state.calls.chapterEdit).toBe(1);
+    expect(state.lastChapterEditPayload.url).toContain("Rewritten remote chapter body.");
+    expect(state.lastChapterEditPayload.content_html).toContain("Rewritten remote chapter body.");
+  });
+
+  test("admin chapter editor keeps image-only manga chapters editable", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.series[0].volumes[0].chapters[0] = {
+      chapter: "1",
+      custom_name: "Image chapter",
+      url: "https://teletype.in/@slitvin/image-chapter",
+      __chapterContent: {
+        ok: true,
+        source_type: "teletype",
+        html: '<figure><img src="https://example.org/page-1.webp" alt="Page 1"></figure>',
+        fallback_url: "https://teletype.in/@slitvin/image-chapter",
+      },
+    };
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=edit-image-only");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .admin-link-btn").first().click();
+
+    await expect(page.locator("#add-chapter-editor img")).toHaveAttribute("src", "https://example.org/page-1.webp");
+    await page.click("#add-chapter-save");
+    await expect.poll(() => state.calls.chapterEdit).toBe(1);
+    expect(state.lastChapterEditPayload.content_html).toContain("https://example.org/page-1.webp");
+  });
+
   test("admin delete chapter flow", async ({ page }) => {
     const state = createMockState();
     await installTelegramAndApiMocks(page, state);
