@@ -687,19 +687,7 @@ function formatDate(dateStr) {
 
 function toggleImmersiveMode(force = null) {
     isImmersive = force !== null ? force : !isImmersive;
-    const header = document.querySelector('.reader-header');
-    const bottomBar = document.getElementById('reader-bottom-bar');
-    const fab = document.getElementById('fab-container');
-
-    if (isImmersive) {
-        header?.classList.add('header-hidden');
-        bottomBar?.classList.add('bar-hidden');
-        fab?.classList.add('fab-hidden');
-    } else {
-        header?.classList.remove('header-hidden');
-        bottomBar?.classList.remove('bar-hidden');
-        fab?.classList.remove('fab-hidden');
-    }
+    document.getElementById('screen-reader')?.classList.toggle('immersive', isImmersive);
 }
 
 function setQuickSwitcherOpen(isOpen) {
@@ -940,7 +928,9 @@ const defaults = {
     paraIndent: 25,
     dimmerValue: 0,
     readingMode: 'scroll', // 'scroll' or 'pages'
-    dropCap: true
+    dropCap: true,
+    hideProgress: false,
+    hideChapterHeader: false
 };
 
 const READER_DIMMER_MAX = 45;
@@ -962,6 +952,10 @@ function normalizeReaderSettings(candidate) {
     if (next.letterSpacing === undefined) next.letterSpacing = defaults.letterSpacing;
     if (next.paraIndent === undefined) next.paraIndent = defaults.paraIndent;
     if (next.readingMode === undefined) next.readingMode = defaults.readingMode;
+    if (next.hideProgress === undefined) next.hideProgress = defaults.hideProgress;
+    if (next.hideChapterHeader === undefined) next.hideChapterHeader = defaults.hideChapterHeader;
+    next.hideProgress = !!next.hideProgress;
+    next.hideChapterHeader = !!next.hideChapterHeader;
     return next;
 }
 
@@ -1784,11 +1778,9 @@ let progressBarEl = null;
 
 function initProgressBar() {
     if (!progressBarEl) {
-        progressBarEl = document.createElement('div');
-        progressBarEl.className = 'reading-progress-bar';
-        progressBarEl.style.width = '0%';
-        document.body.appendChild(progressBarEl);
+        progressBarEl = document.getElementById('reading-progress-bar');
     }
+    if (progressBarEl) progressBarEl.style.width = '0%';
 }
 
 function updateProgressBar(el) {
@@ -4312,6 +4304,20 @@ function setDropCap(enabled) {
     saveSettings();
 }
 
+function setHideProgress(enabled) {
+    settings.hideProgress = !!enabled;
+    applySettings();
+    saveSettings();
+    updateSettingsUI();
+}
+
+function setHideChapterHeader(enabled) {
+    settings.hideChapterHeader = !!enabled;
+    applySettings();
+    saveSettings();
+    updateSettingsUI();
+}
+
 // ==========================================================================
 // НАСТРОЙКИ
 // ==========================================================================
@@ -4465,6 +4471,10 @@ function updateSettingsUI() {
     // Refresh v4 toggles
     const dropCapInput = document.getElementById('input-dropCap');
     if (dropCapInput) dropCapInput.checked = !!settings.dropCap;
+    const hideProgressInput = document.getElementById('hide-progress-toggle');
+    if (hideProgressInput) hideProgressInput.checked = !!settings.hideProgress;
+    const hideChapterHeaderInput = document.getElementById('hide-chapter-header-toggle');
+    if (hideChapterHeaderInput) hideChapterHeaderInput.checked = !!settings.hideChapterHeader;
 
     syncAdminModeControls();
 }
@@ -4487,6 +4497,8 @@ function applySettings() {
     if (settings.theme && settings.theme !== 'light') {
         document.body.classList.add(`theme-${settings.theme}`);
     }
+    document.body.classList.toggle('reader-hide-progress', !!settings.hideProgress);
+    document.body.classList.toggle('reader-hide-chapter-header', !!settings.hideChapterHeader);
 
     // Диммер (Яркость)
     const dimmer = document.getElementById('dimmer-overlay');
@@ -4564,9 +4576,6 @@ function restoreSettings() {
 // ==========================================================================
 
 let scrollSaveTimer = null;
-let lastScrollY = 0;
-let uiHidden = false;
-
 document.addEventListener('DOMContentLoaded', () => {
     const readerContent = document.getElementById('reader-content');
     if (readerContent) {
@@ -4601,54 +4610,6 @@ document.addEventListener('DOMContentLoaded', () => {
         readerContent.addEventListener('pointerup', finishPointer, { passive: true });
         readerContent.addEventListener('pointercancel', finishPointer, { passive: true });
 
-        let ticking = false;
-        readerContent.addEventListener('scroll', () => {
-            if (!ticking) {
-                window.requestAnimationFrame(() => {
-                    updateProgressBar(readerContent);
-
-                    // ★ Auto-hide UI на скролле (пункт 1)
-                    const currentScroll = readerContent.scrollTop;
-                    const topBar = document.getElementById('reader-top-bar');
-                    const bottomBar = document.getElementById('reader-bottom-bar');
-
-                    if (topBar && bottomBar) {
-                        if (currentScroll > lastScrollY + 8 && currentScroll > 100) {
-                            // Скролл вниз — прячем
-                            if (!uiHidden) {
-                                topBar.classList.add('bars-hidden');
-                                bottomBar.classList.add('bars-hidden');
-                                uiHidden = true;
-
-                                // Закрываем FAB-меню при скролле вниз
-                                const menu = document.getElementById('fab-menu');
-                                if (menu && !menu.classList.contains('hidden')) toggleFab();
-                            }
-                        } else if (currentScroll < lastScrollY - 5) {
-                            // Скролл вверх — показываем
-                            if (uiHidden) {
-                                topBar.classList.remove('bars-hidden');
-                                bottomBar.classList.remove('bars-hidden');
-                                uiHidden = false;
-                            }
-                        }
-                    }
-
-                    lastScrollY = currentScroll <= 0 ? 0 : currentScroll;
-
-                    // Prefetch and Save Logic
-                    clearTimeout(scrollSaveTimer);
-                    scrollSaveTimer = setTimeout(() => {
-                        const pct = currentScroll / Math.max(1, readerContent.scrollHeight - readerContent.clientHeight);
-                        if (pct > 0.8) prefetchNextChapter();
-                        saveScrollPosition();
-                    }, 500);
-
-                    ticking = false;
-                });
-                ticking = true;
-            }
-        }, { passive: true });
     }
 
 
@@ -4681,9 +4642,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const topBar = document.getElementById('reader-top-bar');
                 const bottomBar = document.getElementById('reader-bottom-bar');
                 if (topBar && bottomBar) {
-                    topBar.classList.toggle('bars-hidden');
-                    bottomBar.classList.toggle('bars-hidden');
-                    uiHidden = !uiHidden;
+                    const screen = document.getElementById('screen-reader');
+                    const isNowImmersive = screen?.classList.toggle('immersive') || false;
+                    isImmersive = isNowImmersive;
                     haptic('light');
                 }
             }
@@ -6707,11 +6668,13 @@ function initReaderScrollListeners() {
         if (Math.abs(scrollTop - lastScrollTop) > threshold) {
             if (scrollTop > lastScrollTop && scrollTop > 100) {
                 screen.classList.add('immersive');
+                isImmersive = true;
                 // Закрываем FAB при скролле вниз
                 const fab = document.getElementById('fab-menu');
                 if (fab && !fab.classList.contains('hidden')) toggleFab();
             } else if (scrollTop < lastScrollTop - 5) {
                 screen.classList.remove('immersive');
+                isImmersive = false;
             }
             lastScrollTop = scrollTop;
         }

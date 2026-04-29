@@ -1443,6 +1443,64 @@ test.describe("Reader E2E smoke", () => {
     await context.close();
   });
 
+  test("reader chrome uses a single progress bar and one immersive state", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.series[0].volumes[0].chapters[0].text = Array.from(
+      { length: 80 },
+      (_, idx) => `Long reader paragraph ${idx + 1} for scroll state verification.`
+    ).join("\n\n");
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=chrome-state");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+
+    await expect(page.locator(".reading-progress-bar")).toHaveCount(1);
+
+    await page.locator("#reader-content").evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      el.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+
+    await expect(page.locator("#screen-reader")).toHaveClass(/immersive/);
+    await expect(page.locator("#reader-top-bar")).not.toHaveClass(/bars-hidden|bar-hidden|header-hidden/);
+    await expect(page.locator("#reader-bottom-bar")).not.toHaveClass(/bars-hidden|bar-hidden/);
+    await expect
+      .poll(() => page.locator("#reader-scrubber").evaluate((el) => Number(el.value)))
+      .toBeGreaterThan(0);
+  });
+
+  test("settings can hide progress and chapter header without blocking close", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=compact-settings");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+
+    await page.evaluate(() => toggleSettings());
+    await expect(page.locator("#settings-panel")).not.toHaveClass(/hidden/);
+    await expect(page.locator('label[for="hide-progress-toggle"]')).toBeVisible();
+    await expect(page.locator('label[for="hide-chapter-header-toggle"]')).toBeVisible();
+    await expect(page.locator(".close-settings-btn")).toBeInViewport();
+
+    await page.locator('label[for="hide-progress-toggle"]').click();
+    await page.locator('label[for="hide-chapter-header-toggle"]').click();
+    await page.click(".close-settings-btn");
+
+    await expect(page.locator("#settings-panel")).toHaveClass(/hidden/);
+    await expect(page.locator("#reading-progress-container")).toBeHidden();
+    await expect(page.locator("#chapter-title-header")).toBeHidden();
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("reader_settings") || "{}"))).toMatchObject({
+      hideProgress: true,
+      hideChapterHeader: true,
+    });
+  });
+
   test("cache snapshot rotates when rev changes", async ({ page }) => {
     const state = createMockState();
     await installTelegramAndApiMocks(page, state);

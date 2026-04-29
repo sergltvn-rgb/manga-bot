@@ -5914,3 +5914,172 @@ body.keyboard-open #screen-reader .admin-menu {
 .reader-content.loading {
     opacity: 0;
 }
+
+/* Compact reader chrome and settings sheet */
+body.reader-hide-progress .reading-progress-container,
+body.reader-hide-progress .reader-scrubber-row {
+    display: none !important;
+}
+
+body.reader-hide-chapter-header #screen-reader .header-title-container {
+    display: none !important;
+}
+
+#screen-reader .reader-bottom-bar {
+    gap: 2px;
+    padding: 4px 12px calc(5px + env(safe-area-inset-bottom));
+    min-height: calc(61px + env(safe-area-inset-bottom));
+}
+
+#screen-reader .reader-scrubber-row {
+    min-height: 10px;
+    padding: 0;
+}
+
+#screen-reader .reader-scrubber {
+    height: 10px;
+}
+
+#screen-reader .reader-scrubber::-webkit-slider-runnable-track {
+    height: 3px;
+}
+
+#screen-reader .reader-scrubber::-webkit-slider-thumb {
+    width: 12px;
+    height: 12px;
+    margin-top: -4px;
+}
+
+#screen-reader .reader-bottom-actions {
+    gap: 8px;
+    padding: 0;
+}
+
+#screen-reader .nav-btn {
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 12px;
+}
+
+#screen-reader .chapter-indicator {
+    min-height: 30px;
+    min-width: 58px;
+    padding: 0 8px;
+    font-size: 11px;
+}
+
+#screen-reader .reader-content {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
+#screen-reader .fab-container,
+#screen-reader .autoscroll-fab {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+}
+
+#screen-reader .admin-fab-container {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+#settings-panel.settings-panel {
+    max-height: min(82vh, 720px);
+    padding: 0 14px max(10px, env(safe-area-inset-bottom));
+    border-radius: 18px 18px 0 0;
+}
+
+#settings-panel.settings-panel::before {
+    width: 32px;
+    margin: 8px auto 7px;
+}
+
+#settings-panel .settings-preview {
+    margin: 0 -14px 8px;
+    padding: 8px 14px;
+}
+
+#settings-panel .settings-preview-text {
+    font-size: 13px;
+    line-height: 1.45;
+    max-height: 3.1em;
+}
+
+#settings-panel .settings-scroll-body {
+    gap: 14px;
+    padding-right: 1px;
+}
+
+#settings-panel .settings-section {
+    gap: 8px;
+}
+
+#settings-panel .settings-section-title {
+    margin-bottom: 0;
+    padding-bottom: 3px;
+    font-size: 10px;
+    letter-spacing: 1px;
+}
+
+#settings-panel .setting-item-block,
+#settings-panel .setting-item-row {
+    padding: 4px 0;
+}
+
+#settings-panel .setting-item-block + .setting-item-block,
+#settings-panel .setting-item-block + .setting-item-row,
+#settings-panel .setting-item-row + .setting-item-block,
+#settings-panel .setting-item-row + .setting-item-row {
+    padding-top: 8px;
+    margin-top: 0;
+}
+
+#settings-panel .setting-info {
+    gap: 2px;
+}
+
+#settings-panel .setting-hint {
+    margin-top: 2px;
+    font-size: 11px;
+    line-height: 1.25;
+}
+
+#settings-panel .theme-grid {
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 6px;
+}
+
+#settings-panel .theme-chip {
+    min-height: 44px;
+    padding: 6px;
+    gap: 4px;
+    font-size: 10px;
+}
+
+#settings-panel .theme-chip::before {
+    width: 34px;
+    height: 24px;
+    border-radius: 7px;
+}
+
+#settings-panel .segmented-control {
+    margin-top: 6px;
+    padding: 3px;
+    border-radius: 10px;
+}
+
+#settings-panel .segmented-control button {
+    min-height: 36px;
+    padding: 7px 4px;
+}
+
+#settings-panel input[type="range"]::-webkit-slider-thumb {
+    width: 18px;
+    height: 18px;
+}
+
+#settings-panel .close-settings-btn {
+    min-height: 44px;
+    margin-top: 8px;
+    padding: 10px;
+    border-radius: 12px;
+    font-size: 14px;
+}
