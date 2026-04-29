@@ -169,15 +169,18 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
         series_id = str(data.get("series_id", "")).strip()
         volume = data.get("volume")
         chapter = str(data.get("chapter", "")).strip()
+        name = str(data.get("name", "") or "").strip()
         new_url_raw = str(data.get("url", "")).strip()
+        content_html = str(data.get("content_html", "") or "").strip()
+        raw_content = content_html or new_url_raw
 
-        if not series_id or not chapter or not new_url_raw:
+        if not series_id or not chapter or not raw_content:
             return aiohttp.web.json_response({"error": "missing fields"}, status=400, headers=CORS_HEADERS)
         if not _is_valid_series_id(series_id):
             return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
         if not _is_valid_chapter_token(chapter):
             return aiohttp.web.json_response({"error": "invalid chapter"}, status=400, headers=CORS_HEADERS)
-        if len(new_url_raw) > MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH:
+        if len(raw_content) > MAX_CHAPTER_EDIT_RAW_TEXT_LENGTH:
             return aiohttp.web.json_response({"error": "payload too large"}, status=400, headers=CORS_HEADERS)
         if series_id in ("akashic_records", "british_belle") and volume in (None, "", "null"):
             return aiohttp.web.json_response({"error": "missing volume"}, status=400, headers=CORS_HEADERS)
@@ -186,14 +189,14 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
         if not info:
             return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
 
-        links = _clean_urls(new_url_raw)
+        links = [] if content_html else _clean_urls(new_url_raw)
 
         # Конвертируем только если ВООБЩЕ нет ссылок и текст большой.
-        if not links and len(new_url_raw) > 30:
+        if not links and len(raw_content) > 30:
             title = f"Глава {chapter}"
             s_name = await get_custom_name(f"series_{series_id}") or series_id
             title = f"{s_name} — Глава {chapter}"
-            telegraph_url = await upload_to_telegraph(title, new_url_raw)
+            telegraph_url = await upload_to_telegraph(title, raw_content)
             if telegraph_url:
                 links = [telegraph_url]
 
@@ -215,6 +218,7 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
                     f"ON CONFLICT(volume, chapter) DO UPDATE SET url=excluded.url",
                     (volume, chapter, new_url, next_order),
                 )
+                vol_token = volume
             else:
                 lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
                 async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=?", (lang,)) as cur:
@@ -224,6 +228,13 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
                     f"INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?) "
                     f"ON CONFLICT(chapter_number, lang) DO UPDATE SET url=excluded.url",
                     (chapter, lang, new_url, next_order),
+                )
+                vol_token = 1
+            if name:
+                name_clean = name[:120].strip()
+                await db.execute(
+                    "INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)",
+                    (f"chap_{series_id}_{vol_token}_{chapter}", name_clean),
                 )
             await db.commit()
         invalidate_reader_cache("chapter_url_edited")

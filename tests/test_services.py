@@ -1239,6 +1239,97 @@ class TestAdminChapterApi:
 
         assert asyncio.run(fetch_row()) == ("7", "ru", "https://telegra.ph/raw-chapter-7")
 
+    def test_chapter_edit_accepts_rich_text_and_updates_name(self, tmp_path, monkeypatch):
+        import asyncio
+        import json
+
+        import aiosqlite
+
+        import bot
+        import services.admin_chapter_api as admin_chapter_api
+        from services.admin_chapter_api import handle_chapter_edit
+
+        db_path = tmp_path / "chapter-edit-rich.db"
+
+        async def setup_db():
+            async with aiosqlite.connect(db_path) as db:
+                await db.execute(
+                    "CREATE TABLE chapters_urls (chapter_number TEXT, lang TEXT, url TEXT, sort_order INTEGER DEFAULT 0, PRIMARY KEY (chapter_number, lang))"
+                )
+                await db.execute("CREATE TABLE custom_names (id TEXT PRIMARY KEY, name TEXT)")
+                await db.execute(
+                    "INSERT INTO chapters_urls (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?)",
+                    ("2", "ru", "https://example.org/old", 1),
+                )
+                await db.commit()
+
+        asyncio.run(setup_db())
+        monkeypatch.setattr(bot, "DB_PATH", str(db_path))
+        monkeypatch.setattr(admin_chapter_api, "get_auth_user", lambda _request: {"id": 123})
+        monkeypatch.setattr(bot, "invalidate_reader_cache", lambda *_args, **_kwargs: None)
+
+        def fake_spawn_bg(coro, *_args, **_kwargs):
+            if hasattr(coro, "close"):
+                coro.close()
+
+        monkeypatch.setattr(bot, "spawn_bg", fake_spawn_bg)
+
+        async def fake_ok(*_args, **_kwargs):
+            return None
+
+        async def fake_git_sync(_message):
+            return True, "ok"
+
+        async def fake_get_custom_name(_key):
+            return "Test Series"
+
+        async def fake_upload_to_telegraph(title, content):
+            assert title == "Test Series — Глава 2"
+            assert "edited rich body" in content
+            return "https://telegra.ph/edited-rich-2"
+
+        monkeypatch.setattr(admin_chapter_api, "_enforce_rate_limit", fake_ok)
+        monkeypatch.setattr(admin_chapter_api, "_check_admin", fake_ok)
+        monkeypatch.setattr(admin_chapter_api, "_sync_reader_json", fake_ok)
+        monkeypatch.setattr(admin_chapter_api, "_audit_admin_action", fake_ok)
+        monkeypatch.setattr(bot, "run_git_sync", fake_git_sync)
+        monkeypatch.setattr(bot, "get_custom_name", fake_get_custom_name)
+        monkeypatch.setattr(bot, "upload_to_telegraph", fake_upload_to_telegraph)
+
+        class FakeRequest:
+            path = "/api/chapters"
+
+            async def json(self):
+                return {
+                    "series_id": "manga_ru",
+                    "volume": "1",
+                    "chapter": "2",
+                    "name": "Edited title",
+                    "url": "<p>edited rich body with enough text</p>",
+                    "content_html": '<p>edited rich body with enough text</p><img src="https://cdn.example/p.png">',
+                }
+
+        resp = asyncio.run(handle_chapter_edit(FakeRequest()))
+        assert resp.status == 200
+        body = json.loads(resp.body.decode())
+        assert body["ok"] is True
+
+        async def fetch_state():
+            async with aiosqlite.connect(db_path) as db:
+                async with db.execute(
+                    "SELECT url FROM chapters_urls WHERE chapter_number = ? AND lang = ?",
+                    ("2", "ru"),
+                ) as cursor:
+                    row = await cursor.fetchone()
+                async with db.execute(
+                    "SELECT name FROM custom_names WHERE id = ?",
+                    ("chap_manga_ru_1_2",),
+                ) as cursor:
+                    name_row = await cursor.fetchone()
+                return row, name_row
+
+        assert asyncio.run(fetch_state()) == (("https://telegra.ph/edited-rich-2",), ("Edited title",))
+
 
 # --- services.comments_api ---
 

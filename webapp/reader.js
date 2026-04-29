@@ -5044,6 +5044,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==========================================================================
 
 let editUrlChapterIdx = null;
+let chapterEditorMode = 'create';
+let chapterEditorEditIdx = null;
 
 // Remember pristine button labels to restore after async operations.
 function captureOriginalLabel(btn) {
@@ -5069,17 +5071,7 @@ function openEditUrlModal(chIdx) {
         showToast('Редактирование доступно только при подключенном API.');
         return;
     }
-    editUrlChapterIdx = chIdx;
-    const ch = currentChapters[chIdx];
-    const chapName = ch.custom_name || `Глава ${ch.chapter}`;
-    document.getElementById('edit-url-chapter-name').textContent = chapName;
-    const currentUrl = (ch.urls && ch.urls.length > 0) ? ch.urls.join('\n') : (ch.url || '');
-    document.getElementById('edit-url-input').value = currentUrl;
-    // Reset button to pristine state in case a previous attempt errored out.
-    restoreOriginalLabel(document.getElementById('edit-url-save'));
-    document.getElementById('edit-url-overlay').classList.remove('hidden');
-    document.getElementById('edit-url-modal').classList.remove('hidden');
-    setTimeout(() => document.getElementById('edit-url-input').focus(), 350);
+    openChapterEditor({ mode: 'edit', chapterIdx: chIdx });
 }
 
 function closeEditUrlModal() {
@@ -5089,6 +5081,7 @@ function closeEditUrlModal() {
     if (modal) modal.classList.add('hidden');
     restoreOriginalLabel(document.getElementById('edit-url-save'));
     editUrlChapterIdx = null;
+    if (chapterEditorMode === 'edit') closeAddChapterModal();
 }
 
 async function saveEditUrl() {
@@ -5177,6 +5170,15 @@ function computeNextChapterNumber(chapters) {
     if (nums.length === 0) return 1;
     const max = Math.max(...nums);
     return Math.max(1, Math.floor(max) + 1);
+}
+
+function chapterPlainTextToEditorHtml(text) {
+    return String(text || '')
+        .split(/\n{2,}/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .map((part) => `<p>${escapeHtml(part).replace(/\n/g, '<br>')}</p>`)
+        .join('');
 }
 
 function collectBulkUploadPayload() {
@@ -5365,13 +5367,18 @@ async function executeBulkUploadLegacy() {
     }
 }
 
-function openAddChapterModal(forIdx) {
+function openChapterEditor({ mode = 'create', chapterIdx = null } = {}) {
     if (!hasAdminApi()) {
-        showToast('Добавление доступно только при подключенном API.');
+        showToast('Редактор доступен только при подключенном API.');
         return;
     }
     if (!currentSeries || !currentVolume) {
         showToast('Сначала выберите том.');
+        return;
+    }
+    const editingChapter = mode === 'edit' ? currentChapters[chapterIdx] : null;
+    if (mode === 'edit' && !editingChapter) {
+        showToast('Нет главы для редактирования');
         return;
     }
     closeAdminMenu();
@@ -5384,27 +5391,63 @@ function openAddChapterModal(forIdx) {
     const toneSelect = document.getElementById('add-chapter-tone');
     const editor = document.getElementById('add-chapter-editor');
     const seriesName = document.getElementById('chapter-editor-series-name');
+    const title = document.getElementById('chapter-editor-title');
+    const modeBadge = document.getElementById('chapter-editor-mode-badge');
     const sourceRow = document.getElementById('chapter-editor-source-row');
     const scheduleInput = document.getElementById('add-chapter-scheduled-at');
     if (!overlay || !modal) return;
+
+    chapterEditorMode = mode === 'edit' ? 'edit' : 'create';
+    chapterEditorEditIdx = chapterEditorMode === 'edit' ? chapterIdx : null;
+
+    const chapterName = editingChapter?.custom_name || (editingChapter ? `Глава ${editingChapter.chapter}` : '');
+    const sourceValue = editingChapter
+        ? ((Array.isArray(editingChapter.urls) && editingChapter.urls.length > 0) ? editingChapter.urls.join('\n') : (editingChapter.url || ''))
+        : '';
+    const hasInlineText = !!(editingChapter?.text && String(editingChapter.text).trim());
+
     if (seriesName) seriesName.textContent = currentSeries?.title || currentSeries?.id || 'Серия';
-    if (volumeInput) volumeInput.value = String(currentVolume.volume ?? 1);
-    if (chapInput) chapInput.value = String(computeNextChapterNumber(currentChapters));
-    if (nameInput) nameInput.value = '';
-    if (urlInput) urlInput.value = '';
+    if (title) title.textContent = chapterEditorMode === 'edit' ? 'Редактирование главы' : 'Добавление глав';
+    if (modeBadge) modeBadge.textContent = chapterEditorMode === 'edit' ? 'Правка' : 'Новая глава';
+    if (volumeInput) {
+        volumeInput.value = String(currentVolume.volume ?? 1);
+        volumeInput.disabled = chapterEditorMode === 'edit';
+    }
+    if (chapInput) {
+        chapInput.value = String(editingChapter?.chapter ?? computeNextChapterNumber(currentChapters));
+        chapInput.disabled = chapterEditorMode === 'edit';
+    }
+    if (nameInput) nameInput.value = chapterEditorMode === 'edit' ? chapterName : '';
+    if (urlInput) urlInput.value = chapterEditorMode === 'edit' ? sourceValue : '';
     if (toneSelect) toneSelect.value = 'without_negativity';
-    if (editor) editor.innerHTML = '';
-    if (sourceRow) sourceRow.classList.add('hidden');
+    if (editor) {
+        editor.innerHTML = hasInlineText ? chapterPlainTextToEditorHtml(editingChapter.text) : '';
+    }
+    if (sourceRow) {
+        sourceRow.classList.toggle('hidden', chapterEditorMode !== 'edit' || hasInlineText || !sourceValue);
+    }
     if (scheduleInput) {
         scheduleInput.value = '';
         scheduleInput.classList.add('hidden');
     }
     updateAddChapterCounter();
-    restoreOriginalLabel(document.getElementById('add-chapter-save'));
+    const saveBtn = document.getElementById('add-chapter-save');
+    if (saveBtn) {
+        saveBtn.dataset.originalLabel = chapterEditorMode === 'edit' ? 'Сохранить' : 'Создать';
+        saveBtn.textContent = saveBtn.dataset.originalLabel;
+        saveBtn.disabled = false;
+    }
     overlay.classList.remove('hidden');
     modal.classList.remove('hidden');
     document.body.classList.add('chapter-editor-open');
-    setTimeout(() => { if (editor) editor.focus(); }, 150);
+    setTimeout(() => {
+        if (editor && (!sourceRow || sourceRow.classList.contains('hidden'))) editor.focus();
+        else document.getElementById('add-chapter-url')?.focus();
+    }, 150);
+}
+
+function openAddChapterModal(forIdx) {
+    openChapterEditor({ mode: 'create' });
 }
 
 function closeAddChapterModal() {
@@ -5414,6 +5457,12 @@ function closeAddChapterModal() {
     if (modal) modal.classList.add('hidden');
     document.body.classList.remove('chapter-editor-open');
     restoreOriginalLabel(document.getElementById('add-chapter-save'));
+    const volumeInput = document.getElementById('add-chapter-volume');
+    const chapInput = document.getElementById('add-chapter-number');
+    if (volumeInput) volumeInput.disabled = false;
+    if (chapInput) chapInput.disabled = false;
+    chapterEditorMode = 'create';
+    chapterEditorEditIdx = null;
 }
 
 function normalizeChapterEditorText(text) {
@@ -5516,6 +5565,9 @@ function collectAddChapterContentPayload() {
 
 async function saveAddChapter() {
     if (!API_URL || !currentSeries || !currentVolume) return;
+    const isEditing = chapterEditorMode === 'edit';
+    const editingChapter = isEditing ? currentChapters[chapterEditorEditIdx] : null;
+    if (isEditing && !editingChapter) return showToast('Нет главы для редактирования');
     const volumeInput = document.getElementById('add-chapter-volume');
     const chapInput = document.getElementById('add-chapter-number');
     const nameInput = document.getElementById('add-chapter-name');
@@ -5534,11 +5586,11 @@ async function saveAddChapter() {
 
     const saveBtn = document.getElementById('add-chapter-save');
     captureOriginalLabel(saveBtn);
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Создание...'; }
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = isEditing ? 'Сохранение...' : 'Создание...'; }
 
     try {
         const resp = await apiFetch(API_URL + '/api/chapters', {
-            method: 'POST',
+            method: isEditing ? 'PUT' : 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 series_id: currentSeries.id,
@@ -5553,24 +5605,41 @@ async function saveAddChapter() {
         });
         const result = await resp.json();
         if (result.ok) {
-            const targetVolume = findVolumeByKey(currentSeries, volume) || currentVolume;
-            if (targetVolume && Array.isArray(targetVolume.chapters)) {
-                const exists = targetVolume.chapters.some((item) => sameReaderKey(item.chapter, chapter));
-                if (!exists) {
-                    targetVolume.chapters.push({
-                        chapter,
-                        custom_name: name || `Глава ${chapter}`,
-                        text: '',
-                        url,
-                    });
-                    if (sameReaderKey(targetVolume.volume, currentVolume.volume)) {
-                        currentChapters = targetVolume.chapters;
+            if (isEditing && editingChapter) {
+                editingChapter.custom_name = name || `Глава ${chapter}`;
+                if (contentPayload.contentHtml) {
+                    editingChapter.text = getChapterEditorPlainText();
+                    editingChapter.url = url;
+                    editingChapter.urls = [];
+                } else {
+                    const urlArr = url.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+                    editingChapter.urls = urlArr;
+                    editingChapter.url = urlArr[0] || '';
+                    editingChapter.text = '';
+                }
+            } else {
+                const targetVolume = findVolumeByKey(currentSeries, volume) || currentVolume;
+                if (targetVolume && Array.isArray(targetVolume.chapters)) {
+                    const exists = targetVolume.chapters.some((item) => sameReaderKey(item.chapter, chapter));
+                    if (!exists) {
+                        targetVolume.chapters.push({
+                            chapter,
+                            custom_name: name || `Глава ${chapter}`,
+                            text: contentPayload.contentHtml ? getChapterEditorPlainText() : '',
+                            url,
+                        });
+                        if (sameReaderKey(targetVolume.volume, currentVolume.volume)) {
+                            currentChapters = targetVolume.chapters;
+                        }
                     }
                 }
             }
             closeAddChapterModal();
-            showToast('✅ Глава добавлена!');
+            showToast(isEditing ? '✅ Глава обновлена!' : '✅ Глава добавлена!');
             haptic('success');
+            if (document.getElementById('screen-chapters')?.classList.contains('active')) {
+                renderChaptersList();
+            }
             refreshReaderDataInBackground();
         } else {
             showToast('Ошибка: ' + (result.error || `HTTP ${resp.status}`));

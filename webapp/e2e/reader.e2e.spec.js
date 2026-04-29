@@ -497,6 +497,7 @@ async function installTelegramAndApiMocks(page, state) {
     if (pathname === "/api/chapters" && method === "PUT") {
       state.calls.chapterEdit += 1;
       const body = safeJson(request);
+      state.lastChapterEditPayload = body;
       const volume = findVolume(state, body.series_id, body.volume);
       if (volume) {
         const chapter = volume.chapters.find((ch) => String(ch.chapter) === String(body.chapter));
@@ -1238,9 +1239,10 @@ test.describe("Reader E2E smoke", () => {
     await page.evaluate(() => {
       openEditUrlModal(0);
     });
-    await expect(page.locator("#edit-url-modal")).not.toHaveClass(/hidden/);
-    await page.fill("#edit-url-input", "https://example.org/chapter-1-updated");
-    await page.click("#edit-url-save");
+    await expect(page.locator("#add-chapter-modal")).not.toHaveClass(/hidden/);
+    await expect(page.locator("#chapter-editor-title")).toHaveText("Редактирование главы");
+    await page.locator("#add-chapter-editor").fill("Updated chapter one body from the shared admin editor.");
+    await page.click("#add-chapter-save");
     await expect.poll(() => state.calls.chapterEdit).toBe(1);
 
     await expect(page.locator(".admin-bulk-btn")).toBeVisible();
@@ -1708,6 +1710,41 @@ test.describe("Reader E2E smoke", () => {
       const v = findVolume(state, "manga_ru", 1);
       return v ? v.chapters.length : 0;
     }).toBe(3);
+  });
+
+  test("admin chapter editor edits existing chapters and avoids fake header controls", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=edit-rich");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(2);
+
+    await page.evaluate(() => openEditUrlModal(1));
+    const modal = page.locator("#add-chapter-modal");
+    await expect(modal).not.toHaveClass(/hidden/);
+    await expect(page.locator("#chapter-editor-title")).toHaveText("Редактирование главы");
+    await expect(page.locator(".chapter-editor-site-nav")).toHaveCount(0);
+    await expect(page.locator(".chapter-editor-site-actions button")).toHaveCount(1);
+    await expect(page.locator("#add-chapter-volume")).toHaveValue("1");
+    await expect(page.locator("#add-chapter-number")).toHaveValue("2");
+    await expect(page.locator("#add-chapter-name")).toHaveValue("Chapter 2");
+    await expect(page.locator("#add-chapter-editor")).toContainText("This is chapter two text");
+
+    await page.locator("#add-chapter-editor").fill("Edited chapter body from the rich editor.\n\nSecond paragraph stays readable.");
+    await expect(page.locator("#add-chapter-save")).toHaveText("Сохранить");
+    await page.click("#add-chapter-save");
+
+    await expect.poll(() => state.calls.chapterEdit).toBe(1);
+    expect(state.lastChapterEditPayload).toMatchObject({
+      series_id: "manga_ru",
+      volume: "1",
+      chapter: "2",
+      name: "Chapter 2",
+    });
+    expect(state.lastChapterEditPayload.url).toContain("Edited chapter body from the rich editor.");
+    expect(state.lastChapterEditPayload.content_html).toContain("Edited chapter body from the rich editor.");
   });
 
   test("admin delete chapter flow", async ({ page }) => {
