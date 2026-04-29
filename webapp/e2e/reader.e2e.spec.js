@@ -1285,6 +1285,26 @@ test.describe("Reader E2E smoke", () => {
     await expect(page.locator("#chapters-list .chapter-item").first()).toContainText("Chapter 2");
   });
 
+  test("reader startup does not poll poster images on a fixed interval", async ({ page }) => {
+    const state = createMockState();
+    await page.addInitScript(() => {
+      const nativeSetInterval = window.setInterval.bind(window);
+      window.__readerIntervalDelays = [];
+      window.setInterval = (handler, delay, ...args) => {
+        window.__readerIntervalDelays.push(Number(delay));
+        return nativeSetInterval(handler, delay, ...args);
+      };
+    });
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=interval-audit");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+
+    const delays = await page.evaluate(() => window.__readerIntervalDelays || []);
+    expect(delays).toContain(5000);
+    expect(delays).not.toContain(1500);
+  });
+
   test("chapter payload cache survives reload and renders before slow network refresh", async ({ page }) => {
     const state = createMockState();
     await installTelegramAndApiMocks(page, state);
@@ -1321,6 +1341,40 @@ test.describe("Reader E2E smoke", () => {
       "manga_ru::1::3",
       "manga_ru::1::4",
     ]);
+  });
+
+  test("jumping chapters cancels delayed warmups from the previous chapter", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.series[0].volumes[0].chapters.push(
+      { chapter: "3", custom_name: "Chapter 3", text: "Third chapter text.", url: "" },
+      { chapter: "4", custom_name: "Chapter 4", text: "Fourth chapter text.", url: "" }
+    );
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=prefetch-cancel");
+    await page.evaluate(() => {
+      const originalWarmChapterPayloadByIndex = window.warmChapterPayloadByIndex;
+      window.__warmChapterIndexes = [];
+      window.warmChapterPayloadByIndex = (idx, options) => {
+        window.__warmChapterIndexes.push(idx);
+        return originalWarmChapterPayloadByIndex(idx, options);
+      };
+    });
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await page.waitForTimeout(230);
+
+    state.chapterContentRequests = [];
+    await page.evaluate(() => {
+      window.__warmChapterIndexes = [];
+    });
+    await page.evaluate(() => openChapter(3));
+    await expect(page.locator("#reader-text")).toContainText("Fourth chapter text.");
+    await page.waitForTimeout(500);
+
+    const warmedIndexes = await page.evaluate(() => window.__warmChapterIndexes);
+    expect(warmedIndexes).not.toContain(1);
+    expect(state.chapterContentRequests).not.toContain("manga_ru::1::2");
   });
 
   test("admin bulk upload preview validates before publishing", async ({ page }) => {

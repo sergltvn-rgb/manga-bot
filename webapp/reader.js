@@ -279,7 +279,27 @@ let _networkStatusHideTimer = null;
 let _networkStatusBound = false;
 let _chapterLoadingHintTimer = null;
 let _nextChapterPrefetchTimer = null;
+let _nextChapterPrefetchChildTimers = [];
+let _nextChapterPrefetchToken = 0;
 let _chapterWarmupTimer = null;
+
+function clearNextChapterPrefetchTimers() {
+    if (_nextChapterPrefetchTimer) {
+        clearTimeout(_nextChapterPrefetchTimer);
+        _nextChapterPrefetchTimer = null;
+    }
+    _nextChapterPrefetchChildTimers.forEach((timerId) => clearTimeout(timerId));
+    _nextChapterPrefetchChildTimers = [];
+    _nextChapterPrefetchToken += 1;
+}
+
+function queueNextChapterPrefetchChild(callback, delay) {
+    const timerId = setTimeout(() => {
+        _nextChapterPrefetchChildTimers = _nextChapterPrefetchChildTimers.filter((id) => id !== timerId);
+        callback();
+    }, delay);
+    _nextChapterPrefetchChildTimers.push(timerId);
+}
 
 function suppressReaderTapToScroll(ms = 700) {
     const until = Date.now() + Number(ms || 0);
@@ -791,6 +811,7 @@ function resetCurrentSeriesSelection() {
     currentChapters = [];
     currentChapterIdx = 0;
     prefetchedChapter = { idx: -1, html: null };
+    clearNextChapterPrefetchTimers();
     if (_chapterWarmupTimer) {
         clearTimeout(_chapterWarmupTimer);
         _chapterWarmupTimer = null;
@@ -4338,18 +4359,27 @@ function toggleSettings() {
 }
 
 function scheduleNextChapterPrefetch(chapter) {
-    if (_nextChapterPrefetchTimer) {
-        clearTimeout(_nextChapterPrefetchTimer);
-    }
+    clearNextChapterPrefetchTimers();
     const chapterKey = chapter && chapter.chapter !== undefined ? String(chapter.chapter) : '';
+    const seriesId = currentSeries?.id;
+    const volumeId = currentVolume?.volume;
+    const baseChapterIdx = currentChapterIdx;
+    const token = _nextChapterPrefetchToken;
     _nextChapterPrefetchTimer = setTimeout(() => {
-        const activeChapter = currentChapters[currentChapterIdx];
+        _nextChapterPrefetchTimer = null;
+        if (token !== _nextChapterPrefetchToken) return;
+        if (!sameReaderKey(currentSeries?.id, seriesId) || !sameReaderKey(currentVolume?.volume, volumeId)) return;
+        if (currentChapterIdx !== baseChapterIdx) return;
+        const activeChapter = currentChapters[baseChapterIdx];
         if (!activeChapter || String(activeChapter.chapter) !== chapterKey) return;
         if (API_URL) {
-            const indexes = [currentChapterIdx - 1, currentChapterIdx + 1, currentChapterIdx + 2];
+            const indexes = [baseChapterIdx - 1, baseChapterIdx + 1, baseChapterIdx + 2];
             indexes.forEach((idx, order) => {
-                setTimeout(() => {
-                    warmChapterPayloadByIndex(idx, { preferPrefetchSlot: idx === currentChapterIdx + 1 }).catch(() => {});
+                queueNextChapterPrefetchChild(() => {
+                    if (token !== _nextChapterPrefetchToken) return;
+                    if (!sameReaderKey(currentSeries?.id, seriesId) || !sameReaderKey(currentVolume?.volume, volumeId)) return;
+                    if (currentChapterIdx !== baseChapterIdx) return;
+                    warmChapterPayloadByIndex(idx, { preferPrefetchSlot: idx === baseChapterIdx + 1 }).catch(() => {});
                 }, order * 180);
             });
         }
@@ -6235,14 +6265,44 @@ function haptic(style = 'light') {
                 markLoaded(t);
             }
         }, true);
-        // На случай если изображение уже в кэше и load не сработает — проверяем периодически
+        // На случай если изображение уже в кэше и load не сработает.
         const checkCached = () => {
             document.querySelectorAll('img.series-poster-img, img.series-detail-cover-img').forEach((img) => {
                 if (img.complete && img.naturalWidth > 0) markLoaded(img);
             });
         };
-        document.addEventListener('DOMContentLoaded', checkCached);
-        setInterval(checkCached, 1500);
+        let imageObserverStarted = false;
+        const observeNewImages = () => {
+            if (imageObserverStarted) return;
+            if (!document.body || typeof MutationObserver === 'undefined') return;
+            imageObserverStarted = true;
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    mutation.addedNodes.forEach((node) => {
+                        if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
+                        const candidates = [];
+                        if (node.matches?.('img.series-poster-img, img.series-detail-cover-img')) {
+                            candidates.push(node);
+                        }
+                        node.querySelectorAll?.('img.series-poster-img, img.series-detail-cover-img').forEach((img) => candidates.push(img));
+                        candidates.forEach((img) => {
+                            if (img.complete && img.naturalWidth > 0) markLoaded(img);
+                        });
+                    });
+                });
+            });
+            observer.observe(document.body, { childList: true, subtree: true });
+        };
+        const startImageBlurUp = () => {
+            checkCached();
+            observeNewImages();
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startImageBlurUp, { once: true });
+        } else {
+            startImageBlurUp();
+        }
+        setTimeout(checkCached, 250);
     } catch (_) { /* ignore */ }
 })();
 
