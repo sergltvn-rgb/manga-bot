@@ -772,7 +772,7 @@ function resetTransientUiState({ saveSettingsOnClose = false } = {}) {
     closeSettingsPanel({ save: saveSettingsOnClose });
     closeEditUrlModal();
     closeBulkModal();
-    closeAddChapterModal();
+    closeAddChapterModal({ skipConfirm: true });
     closeTypoModal();
     closeAdminMenu();
     document.body.classList.remove('keyboard-open');
@@ -5046,6 +5046,10 @@ document.addEventListener('DOMContentLoaded', () => {
 let editUrlChapterIdx = null;
 let chapterEditorMode = 'create';
 let chapterEditorEditIdx = null;
+const CHAPTER_EDITOR_DRAFT_PREFIX = 'reader_chapter_editor_draft';
+let chapterEditorDirty = false;
+let chapterEditorDraftTimer = null;
+let chapterEditorDraftKey = '';
 
 // Remember pristine button labels to restore after async operations.
 function captureOriginalLabel(btn) {
@@ -5081,7 +5085,7 @@ function closeEditUrlModal() {
     if (modal) modal.classList.add('hidden');
     restoreOriginalLabel(document.getElementById('edit-url-save'));
     editUrlChapterIdx = null;
-    if (chapterEditorMode === 'edit') closeAddChapterModal();
+    if (chapterEditorMode === 'edit') closeAddChapterModal({ skipConfirm: true });
 }
 
 async function saveEditUrl() {
@@ -5179,6 +5183,116 @@ function chapterPlainTextToEditorHtml(text) {
         .filter(Boolean)
         .map((part) => `<p>${escapeHtml(part).replace(/\n/g, '<br>')}</p>`)
         .join('');
+}
+
+function getChapterEditorDraftKey(mode, chapter = '') {
+    const seriesId = currentSeries?.id || 'unknown';
+    const volume = currentVolume?.volume ?? '1';
+    const suffix = mode === 'edit' ? `edit_${chapter || 'current'}` : 'create';
+    return `${CHAPTER_EDITOR_DRAFT_PREFIX}:${seriesId}:${volume}:${suffix}`;
+}
+
+function setChapterEditorDraftStatus(text, tone = 'saved') {
+    const status = document.getElementById('chapter-editor-draft-status');
+    if (!status) return;
+    status.textContent = text;
+    status.dataset.tone = tone;
+}
+
+function collectChapterEditorDraftData() {
+    return {
+        volume: document.getElementById('add-chapter-volume')?.value || '',
+        chapter: document.getElementById('add-chapter-number')?.value || '',
+        name: document.getElementById('add-chapter-name')?.value || '',
+        url: document.getElementById('add-chapter-url')?.value || '',
+        tone: document.getElementById('add-chapter-tone')?.value || 'without_negativity',
+        scheduledAt: document.getElementById('add-chapter-scheduled-at')?.value || '',
+        editorHtml: document.getElementById('add-chapter-editor')?.innerHTML || '',
+    };
+}
+
+function applyChapterEditorDraftData(data) {
+    if (!data || typeof data !== 'object') return false;
+    const volumeInput = document.getElementById('add-chapter-volume');
+    const chapterInput = document.getElementById('add-chapter-number');
+    const nameInput = document.getElementById('add-chapter-name');
+    const urlInput = document.getElementById('add-chapter-url');
+    const toneSelect = document.getElementById('add-chapter-tone');
+    const scheduleInput = document.getElementById('add-chapter-scheduled-at');
+    const editor = document.getElementById('add-chapter-editor');
+    if (volumeInput && !volumeInput.disabled && data.volume) volumeInput.value = data.volume;
+    if (chapterInput && !chapterInput.disabled && data.chapter) chapterInput.value = data.chapter;
+    if (nameInput) nameInput.value = data.name || '';
+    if (urlInput) urlInput.value = data.url || '';
+    if (toneSelect && data.tone) toneSelect.value = data.tone;
+    if (scheduleInput) data.scheduledAt ? scheduleInput.value = data.scheduledAt : scheduleInput.value = '';
+    if (editor) editor.innerHTML = data.editorHtml || '';
+    return true;
+}
+
+function loadChapterEditorDraft() {
+    if (!chapterEditorDraftKey) return false;
+    try {
+        const raw = localStorage.getItem(chapterEditorDraftKey);
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        return applyChapterEditorDraftData(parsed);
+    } catch (e) {
+        return false;
+    }
+}
+
+function clearChapterEditorDraft() {
+    if (!chapterEditorDraftKey) return;
+    try { localStorage.removeItem(chapterEditorDraftKey); } catch (e) { /* ignore */ }
+}
+
+function saveChapterEditorDraft() {
+    if (!chapterEditorDraftKey) return;
+    try {
+        localStorage.setItem(chapterEditorDraftKey, JSON.stringify({
+            ...collectChapterEditorDraftData(),
+            savedAt: Date.now(),
+        }));
+        setChapterEditorDraftStatus('Сохранено', 'saved');
+    } catch (e) {
+        setChapterEditorDraftStatus('Не сохранен', 'error');
+    }
+}
+
+function scheduleChapterEditorDraftSave() {
+    chapterEditorDirty = true;
+    setChapterEditorDraftStatus('Изменено', 'dirty');
+    if (chapterEditorDraftTimer) clearTimeout(chapterEditorDraftTimer);
+    chapterEditorDraftTimer = setTimeout(() => {
+        chapterEditorDraftTimer = null;
+        saveChapterEditorDraft();
+    }, 260);
+}
+
+function handleChapterEditorInput() {
+    updateAddChapterCounter();
+    updateChapterEditorPreview();
+    scheduleChapterEditorDraftSave();
+}
+
+function bindChapterEditorInputs() {
+    const ids = [
+        'add-chapter-volume',
+        'add-chapter-number',
+        'add-chapter-name',
+        'add-chapter-url',
+        'add-chapter-tone',
+        'add-chapter-scheduled-at',
+        'add-chapter-editor',
+    ];
+    ids.forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.chapterEditorBound === '1') return;
+        el.dataset.chapterEditorBound = '1';
+        el.addEventListener('input', handleChapterEditorInput);
+        el.addEventListener('change', handleChapterEditorInput);
+    });
 }
 
 function collectBulkUploadPayload() {
@@ -5399,6 +5513,7 @@ function openChapterEditor({ mode = 'create', chapterIdx = null } = {}) {
 
     chapterEditorMode = mode === 'edit' ? 'edit' : 'create';
     chapterEditorEditIdx = chapterEditorMode === 'edit' ? chapterIdx : null;
+    chapterEditorDirty = false;
 
     const chapterName = editingChapter?.custom_name || (editingChapter ? `Глава ${editingChapter.chapter}` : '');
     const sourceValue = editingChapter
@@ -5430,13 +5545,19 @@ function openChapterEditor({ mode = 'create', chapterIdx = null } = {}) {
         scheduleInput.value = '';
         scheduleInput.classList.add('hidden');
     }
+    chapterEditorDraftKey = getChapterEditorDraftKey(chapterEditorMode, editingChapter?.chapter);
+    const restoredDraft = loadChapterEditorDraft();
     updateAddChapterCounter();
+    updateChapterEditorPreview();
+    normalizeChapterEditorToolbarLabels();
+    bindChapterEditorInputs();
     const saveBtn = document.getElementById('add-chapter-save');
     if (saveBtn) {
         saveBtn.dataset.originalLabel = chapterEditorMode === 'edit' ? 'Сохранить' : 'Создать';
         saveBtn.textContent = saveBtn.dataset.originalLabel;
         saveBtn.disabled = false;
     }
+    setChapterEditorDraftStatus(restoredDraft ? 'Черновик' : 'Готово', restoredDraft ? 'saved' : 'idle');
     overlay.classList.remove('hidden');
     modal.classList.remove('hidden');
     document.body.classList.add('chapter-editor-open');
@@ -5450,11 +5571,25 @@ function openAddChapterModal(forIdx) {
     openChapterEditor({ mode: 'create' });
 }
 
-function closeAddChapterModal() {
+function closeAddChapterModal(options = {}) {
     const overlay = document.getElementById('add-chapter-overlay');
     const modal = document.getElementById('add-chapter-modal');
+    const visible = modal && !modal.classList.contains('hidden');
+    if (visible && chapterEditorDirty && !options.skipConfirm) {
+        const ok = window.confirm('Закрыть редактор? Черновик сохранен, но изменения еще не опубликованы.');
+        if (!ok) return false;
+    }
+    if (chapterEditorDraftTimer) {
+        clearTimeout(chapterEditorDraftTimer);
+        chapterEditorDraftTimer = null;
+        if (chapterEditorDirty && !options.clearDraft) saveChapterEditorDraft();
+    }
+    if (options.clearDraft) clearChapterEditorDraft();
     if (overlay) overlay.classList.add('hidden');
     if (modal) modal.classList.add('hidden');
+    modal?.querySelector('.chapter-editor-shell')?.classList.remove('preview-active');
+    const preview = document.getElementById('chapter-editor-preview');
+    if (preview) preview.classList.add('hidden');
     document.body.classList.remove('chapter-editor-open');
     restoreOriginalLabel(document.getElementById('add-chapter-save'));
     const volumeInput = document.getElementById('add-chapter-volume');
@@ -5463,6 +5598,8 @@ function closeAddChapterModal() {
     if (chapInput) chapInput.disabled = false;
     chapterEditorMode = 'create';
     chapterEditorEditIdx = null;
+    chapterEditorDirty = false;
+    return true;
 }
 
 function normalizeChapterEditorText(text) {
@@ -5531,6 +5668,69 @@ function insertChapterEditorImage() {
     updateAddChapterCounter();
 }
 
+function normalizeChapterEditorToolbarLabels() {
+    const labels = {
+        source: 'URL',
+        image: 'Img',
+    };
+    document.querySelectorAll('.chapter-editor-tool[data-editor-command], .chapter-editor-tool[data-editor-action]').forEach((btn) => {
+        const command = btn.dataset.editorCommand || '';
+        const action = btn.dataset.editorAction || '';
+        const next = labels[action] || ({
+            'formatBlock:H2': 'H2',
+            'formatBlock:H3': 'H3',
+            bold: 'B',
+            italic: 'I',
+            underline: 'U',
+            strikeThrough: 'S',
+            justifyLeft: 'L',
+            justifyCenter: 'C',
+            justifyRight: 'R',
+            insertOrderedList: '1.',
+            insertUnorderedList: 'List',
+            'formatBlock:BLOCKQUOTE': 'Q',
+            insertHorizontalRule: 'Line',
+            undo: 'Back',
+            redo: 'Next',
+        })[command];
+        if (next) btn.textContent = next;
+    });
+}
+
+function updateChapterEditorPreview() {
+    const preview = document.getElementById('chapter-editor-preview');
+    if (!preview) return;
+    preview.innerHTML = getChapterEditorHtml();
+}
+
+function toggleChapterEditorPreview() {
+    const modal = document.getElementById('add-chapter-modal');
+    const shell = modal?.querySelector('.chapter-editor-shell');
+    const preview = document.getElementById('chapter-editor-preview');
+    if (!shell || !preview) return;
+    const active = !shell.classList.contains('preview-active');
+    shell.classList.toggle('preview-active', active);
+    preview.classList.toggle('hidden', !active);
+    updateChapterEditorPreview();
+    document.querySelector('[data-editor-action="preview"]')?.classList.toggle('is-active', active);
+}
+
+function clearChapterEditorFormatting() {
+    focusChapterEditor();
+    document.execCommand('removeFormat', false, null);
+    document.execCommand('formatBlock', false, 'P');
+    handleChapterEditorInput();
+}
+
+function syncChapterEditorCommandState() {
+    const activeCommands = ['bold', 'italic', 'underline', 'strikeThrough'];
+    activeCommands.forEach((command) => {
+        let active = false;
+        try { active = document.queryCommandState(command); } catch (e) { active = false; }
+        document.querySelector(`[data-editor-command="${command}"]`)?.classList.toggle('is-active', !!active);
+    });
+}
+
 function handleChapterEditorToolbar(event) {
     const target = event?.currentTarget || event?.target;
     const command = target?.dataset?.editorCommand || '';
@@ -5543,7 +5743,17 @@ function handleChapterEditorToolbar(event) {
         insertChapterEditorImage();
         return;
     }
+    if (action === 'preview') {
+        toggleChapterEditorPreview();
+        return;
+    }
+    if (action === 'clear') {
+        clearChapterEditorFormatting();
+        return;
+    }
     execChapterEditorCommand(command);
+    syncChapterEditorCommandState();
+    handleChapterEditorInput();
 }
 
 function toggleChapterSchedulePicker() {
@@ -5634,7 +5844,7 @@ async function saveAddChapter() {
                     }
                 }
             }
-            closeAddChapterModal();
+            closeAddChapterModal({ skipConfirm: true, clearDraft: true });
             showToast(isEditing ? '✅ Глава обновлена!' : '✅ Глава добавлена!');
             haptic('success');
             if (document.getElementById('screen-chapters')?.classList.contains('active')) {

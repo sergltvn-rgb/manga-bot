@@ -643,6 +643,10 @@
             </div>
 
             <div class="chapter-editor-toolbar" role="toolbar" aria-label="Форматирование главы">
+                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-command="undo" onclick="handleChapterEditorToolbar(event)" aria-label="Отменить">Back</button>
+                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-command="redo" onclick="handleChapterEditorToolbar(event)" aria-label="Повторить">Next</button>
+                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-action="clear" onclick="handleChapterEditorToolbar(event)" aria-label="Очистить форматирование">Tx</button>
+                <span class="chapter-editor-separator"></span>
                 <button type="button" class="chapter-editor-tool" data-editor-action="source" onclick="handleChapterEditorToolbar(event)" aria-label="Источник или ссылка">⚙</button>
                 <span class="chapter-editor-separator"></span>
                 <button type="button" class="chapter-editor-tool" data-editor-command="formatBlock:H2" onclick="handleChapterEditorToolbar(event)" aria-label="Большой заголовок">H</button>
@@ -663,7 +667,9 @@
                 <button type="button" class="chapter-editor-tool" data-editor-command="formatBlock:BLOCKQUOTE" onclick="handleChapterEditorToolbar(event)" aria-label="Цитата">”</button>
                 <button type="button" class="chapter-editor-tool" data-editor-command="insertHorizontalRule" onclick="handleChapterEditorToolbar(event)" aria-label="Разделитель">−</button>
                 <button type="button" class="chapter-editor-tool" data-editor-action="image" onclick="handleChapterEditorToolbar(event)" aria-label="Изображение">▧</button>
+                <button type="button" class="chapter-editor-tool chapter-editor-tool-text" data-editor-action="preview" onclick="handleChapterEditorToolbar(event)" aria-label="Предпросмотр">View</button>
                 <span id="add-chapter-counter" class="chapter-editor-counter" aria-live="polite">0 / 0</span>
+                <span id="chapter-editor-draft-status" class="chapter-editor-draft-status" aria-live="polite">Готово</span>
             </div>
 
             <label id="chapter-editor-source-row" class="chapter-editor-source-row hidden">
@@ -675,7 +681,10 @@
                 <p>Пожалуйста, не забывайте сообщать об ошибках, связанных с редактором, при их обнаружении.</p>
             </div>
 
-            <div id="add-chapter-editor" class="chapter-editor-canvas" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Содержание главы..." oninput="updateAddChapterCounter()"></div>
+            <div class="chapter-editor-workspace">
+                <div id="add-chapter-editor" class="chapter-editor-canvas" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Содержание главы..." oninput="updateAddChapterCounter()"></div>
+                <aside id="chapter-editor-preview" class="chapter-editor-preview hidden" aria-label="Предпросмотр главы"></aside>
+            </div>
         </div>
     </section>
 

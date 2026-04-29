@@ -1712,6 +1712,55 @@ test.describe("Reader E2E smoke", () => {
     }).toBe(3);
   });
 
+  test("practical admin editor previews and preserves drafts", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=practical-editor");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.evaluate(() => openAddChapterModal());
+
+    await expect(page.locator("#add-chapter-modal")).not.toHaveClass(/hidden/);
+    await expect(page.locator('[data-editor-command="undo"]')).toBeVisible();
+    await expect(page.locator('[data-editor-command="redo"]')).toBeVisible();
+    await expect(page.locator('[data-editor-action="clear"]')).toBeVisible();
+    await expect(page.locator('[data-editor-action="preview"]')).toBeVisible();
+    await expect(page.locator("#chapter-editor-draft-status")).toBeVisible();
+
+    await page.fill("#add-chapter-name", "Draft chapter");
+    await page.locator("#add-chapter-editor").fill("Draft paragraph for preview.\n\nSecond draft paragraph.");
+    await expect(page.locator("#add-chapter-counter")).toContainText("2 /");
+
+    await page.click('[data-editor-action="preview"]');
+    await expect(page.locator("#add-chapter-modal .chapter-editor-shell")).toHaveClass(/preview-active/);
+    await expect(page.locator("#chapter-editor-preview")).toContainText("Draft paragraph for preview.");
+
+    let dismissedOnce = false;
+    page.on("dialog", async (dialog) => {
+      if (!dismissedOnce) {
+        dismissedOnce = true;
+        await dialog.dismiss();
+      } else {
+        await dialog.accept();
+      }
+    });
+    await page.click(".chapter-editor-close");
+    await expect(page.locator("#add-chapter-modal")).not.toHaveClass(/hidden/);
+    await page.click(".chapter-editor-close");
+    await expect(page.locator("#add-chapter-modal")).toHaveClass(/hidden/);
+
+    await page.evaluate(() => openAddChapterModal());
+    await expect(page.locator("#add-chapter-name")).toHaveValue("Draft chapter");
+    await expect(page.locator("#add-chapter-editor")).toContainText("Draft paragraph for preview.");
+    await expect(page.locator("#chapter-editor-draft-status")).toContainText("Черновик");
+
+    await page.click("#add-chapter-save");
+    await expect.poll(() => state.calls.chapterAdd).toBe(1);
+    const draftKeys = await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith("reader_chapter_editor_draft")));
+    expect(draftKeys).toHaveLength(0);
+  });
+
   test("admin chapter editor edits existing chapters and avoids fake header controls", async ({ page }) => {
     const state = createMockState();
     await installTelegramAndApiMocks(page, state);
