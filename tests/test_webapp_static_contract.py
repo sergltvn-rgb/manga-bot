@@ -61,3 +61,18 @@ def test_reader_inline_admin_handlers_are_exported_for_onclick_buttons():
     reader_js = read("reader.js")
 
     assert "window.openChapterEditModal = openChapterEditModal" in reader_js
+
+
+def test_reader_uses_explicit_boot_and_audit_layers():
+    html = read("reader.html")
+    boot_js = read("reader.boot.js")
+    audit_js = read("reader.audit.js")
+    reader_css = read("reader.css")
+    base_css = read("reader.base.css")
+
+    assert 'src="reader.boot.js' in html
+    assert "reader.audit.js" in boot_js
+    assert "reader.js" in boot_js
+    assert "READER_AUDIT_MAP" in audit_js
+    assert 'reader.base.css' in reader_css
+    assert "margin: 0" in base_css

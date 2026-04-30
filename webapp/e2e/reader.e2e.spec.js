@@ -225,12 +225,13 @@ function safeJson(request) {
   }
 }
 
-async function fulfillJson(route, payload, status = 200) {
+async function fulfillJson(route, payload, status = 200, extraHeaders = {}) {
   await route.fulfill({
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "access-control-allow-origin": "*",
+      ...extraHeaders,
     },
     body: JSON.stringify(payload),
   });
@@ -325,7 +326,22 @@ async function installTelegramAndApiMocks(page, state) {
 
     if (pathname === "/api/reader" && method === "GET") {
       state.calls.reader += 1;
-      await fulfillJson(route, state.readerData);
+      state.readerIfNoneMatchHeaders = state.readerIfNoneMatchHeaders || [];
+      const ifNoneMatch = request.headers()["if-none-match"] || "";
+      state.readerIfNoneMatchHeaders.push(ifNoneMatch);
+      if (state.readerEtag && state.readerNotModifiedWhenHeaderMatches && ifNoneMatch === state.readerEtag) {
+        await route.fulfill({
+          status: 304,
+          headers: {
+            "access-control-allow-origin": "*",
+            "etag": state.readerEtag,
+          },
+          body: "",
+        });
+        return;
+      }
+      const headers = state.readerEtag ? { etag: state.readerEtag } : {};
+      await fulfillJson(route, state.readerData, 200, headers);
       return;
     }
 
@@ -507,6 +523,15 @@ async function installTelegramAndApiMocks(page, state) {
             .split("\n")
             .map((x) => x.trim())
             .filter(Boolean);
+          if (body.content_html) {
+            chapter.text = String(body.url || "");
+            chapter.__chapterContent = {
+              ok: true,
+              source_type: "inline",
+              html: String(body.content_html || ""),
+              fallback_url: null,
+            };
+          }
         }
       }
       await fulfillJson(route, { ok: true });
@@ -1829,6 +1854,78 @@ test.describe("Reader E2E smoke", () => {
     expect(state.lastChapterEditPayload.content_html).toContain("Edited chapter body from the rich editor.");
   });
 
+  test("admin chapter save forces fresh reader snapshot instead of stale 304 cache", async ({ page }) => {
+    const state = createMockState();
+    state.readerEtag = "reader-v1";
+    state.readerNotModifiedWhenHeaderMatches = true;
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=admin-force-refresh");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .admin-link-btn").first().click();
+
+    await expect(page.locator("#add-chapter-modal")).not.toHaveClass(/hidden/);
+    await page.locator("#add-chapter-editor").fill("Fresh text that must not be hidden behind a stale reader snapshot.");
+    await page.click("#add-chapter-save");
+
+    await expect.poll(() => state.calls.chapterEdit).toBe(1);
+    await expect.poll(() => state.calls.reader).toBeGreaterThanOrEqual(2);
+    expect(state.readerIfNoneMatchHeaders.at(-1)).toBe("");
+  });
+
+  test("global admin manual refresh bypasses stale reader etag", async ({ page }) => {
+    const state = createMockState();
+    state.readerEtag = "reader-v1";
+    state.readerNotModifiedWhenHeaderMatches = true;
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=manual-force-refresh");
+    await page.evaluate(() => toggleAdminMode(true));
+    await expect(page.locator("#global-admin-fab")).toBeVisible();
+
+    await page.click("#global-admin-fab-btn");
+    await expect(page.locator(".global-admin-menu-item")).toHaveCount(2);
+    await page.locator(".global-admin-menu-item").first().click();
+
+    await expect.poll(() => state.calls.reader).toBeGreaterThanOrEqual(2);
+    expect(state.readerIfNoneMatchHeaders.at(-1)).toBe("");
+  });
+
+  test("edited chapter reopens with fresh body instead of stale payload cache", async ({ page }) => {
+    const state = createMockState();
+    state.readerData.series[0].volumes[0].chapters[0] = {
+      chapter: "1",
+      custom_name: "Cached chapter",
+      url: "https://teletype.in/@slitvin/cached-chapter",
+      __chapterContent: {
+        ok: true,
+        source_type: "teletype",
+        html: "<p>Old cached body that must disappear after edit.</p>",
+        fallback_url: "https://teletype.in/@slitvin/cached-chapter",
+      },
+    };
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=edited-cache-invalidates");
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#reader-text")).toContainText("Old cached body");
+
+    await page.evaluate(() => openChapterEditModal(0));
+    await expect(page.locator("#add-chapter-modal")).not.toHaveClass(/hidden/);
+    await page.locator("#add-chapter-editor").fill("Fresh edited body that should win over every cache.");
+    await page.click("#add-chapter-save");
+    await expect.poll(() => state.calls.chapterEdit).toBe(1);
+
+    await page.locator("#reader-top-bar .back-btn").click();
+    await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#reader-text")).toContainText("Fresh edited body");
+    await expect(page.locator("#reader-text")).not.toContainText("Old cached body");
+  });
+
   test("admin chapter edit opens rich editor for url-backed chapters without leaving only blur", async ({ page }) => {
     const state = createMockState();
     state.readerData.series[0].volumes[0].chapters[0] = {
@@ -2063,6 +2160,113 @@ test.describe("Reader E2E smoke", () => {
     await ctx.close();
   });
 
+  test("ranobe volumes keep duplicate chapter numbers isolated", async ({ page }) => {
+    const state = createMobileSelectionState();
+    const alya = state.readerData.series.find((item) => item.id === "ranobe_alya");
+    alya.volumes = [
+      {
+        volume: 1,
+        custom_name: "Том 1",
+        chapters: [
+          {
+            chapter: "1",
+            custom_name: "Пролог",
+            url: "https://example.org/alya-v1-c1",
+            __chapterContent: { ok: true, source_type: "inline", html: "<p>Том 1 / Глава 1</p>" },
+          },
+        ],
+      },
+      {
+        volume: 2,
+        custom_name: "Том 2",
+        chapters: [
+          {
+            chapter: "1",
+            custom_name: "Пролог",
+            url: "https://example.org/alya-v2-c1",
+            __chapterContent: { ok: true, source_type: "inline", html: "<p>Том 2 / Глава 1</p>" },
+          },
+        ],
+      },
+      {
+        volume: 4,
+        custom_name: "Том 4",
+        chapters: [
+          {
+            chapter: "1",
+            custom_name: "Пролог",
+            url: "https://example.org/alya-v4-c1",
+            __chapterContent: { ok: true, source_type: "inline", html: "<p>Том 4 / Глава 1</p>" },
+          },
+        ],
+      },
+    ];
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=alya-volume-isolation");
+    await page.locator('.series-card[data-series-id="ranobe_alya"]').click();
+    await expect(page.locator(".vol-tab")).toHaveCount(3);
+
+    await page.locator(".vol-tab", { hasText: "Том 2" }).click();
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(1);
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#reader-text")).toContainText("Том 2 / Глава 1");
+    expect(state.chapterContentRequests).toContain("ranobe_alya::2::1");
+    expect(state.chapterContentRequests).not.toContain("ranobe_alya::1::1");
+  });
+
+  test("library flow keeps current and read state scoped to the selected volume", async ({ page }) => {
+    const state = createMobileSelectionState();
+    const alya = state.readerData.series.find((item) => item.id === "ranobe_alya");
+    alya.volumes = [
+      {
+        volume: 1,
+        custom_name: "Том 1",
+        chapters: [
+          {
+            chapter: "1",
+            custom_name: "Пролог первого тома",
+            url: "https://example.org/alya-v1-c1",
+            __chapterContent: { ok: true, source_type: "inline", html: "<p>Volume 1 body.</p>" },
+          },
+        ],
+      },
+      {
+        volume: 2,
+        custom_name: "Том 2",
+        chapters: [
+          {
+            chapter: "1",
+            custom_name: "Пролог второго тома",
+            url: "https://example.org/alya-v2-c1",
+            __chapterContent: { ok: true, source_type: "inline", html: "<p>Volume 2 body.</p>" },
+          },
+        ],
+      },
+    ];
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=library-flow-state");
+    await page.locator('.series-card[data-series-id="ranobe_alya"]').click();
+    await page.locator(".vol-tab", { hasText: "Том 2" }).click();
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#reader-text")).toContainText("Volume 2 body.");
+
+    await page.locator("#reader-top-bar .back-btn").click();
+    await expect(page.locator(".vol-tab.active")).toContainText("Том 2");
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(1);
+    await expect(page.locator("#chapters-list .chapter-item").first()).toHaveClass(/current-chapter/);
+    await expect(page.locator("#chapters-list .chapter-item").first()).toHaveClass(/read/);
+
+    await page.locator(".vol-tab", { hasText: "Том 1" }).click();
+    await expect(page.locator(".vol-tab.active")).toContainText("Том 1");
+    await expect(page.locator("#chapters-list .chapter-item")).toHaveCount(1);
+    await expect(page.locator("#chapters-list .chapter-item").first()).not.toHaveClass(/current-chapter/);
+    await expect(page.locator("#chapters-list .chapter-item").first()).not.toHaveClass(/read/);
+    expect(state.chapterContentRequests).toEqual(expect.arrayContaining(["ranobe_alya::2::1"]));
+    expect(state.chapterContentRequests).not.toContain("ranobe_alya::1::1");
+  });
+
   test("non-admin cannot enable editor mode", async ({ page }) => {
     const state = createMockState();
     state.readerData.admin_ids = []; // strip admin rights
@@ -2078,5 +2282,70 @@ test.describe("Reader E2E smoke", () => {
     }));
     expect(result.isAdmin).toBe(false);
     expect(result.stored).toBeNull();
+  });
+
+  test("static fallback does not show social API errors and keeps teletype chapters actionable", async ({ page }) => {
+    await page.goto("/reader.html?rev=static-teletype-fallback");
+    await page.locator('.series-card[data-series-id="ranobe_alya"]').click();
+    await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
+
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator(".external-chapter-fallback")).toBeVisible();
+    await expect(page.locator(".external-chapter-fallback")).toContainText("Глава открывается из Teletype");
+    await expect(page.locator(".external-chapter-fallback-btn")).toHaveCSS("color", "rgb(255, 255, 255)");
+    await expect(page.locator("#social-section")).toBeHidden();
+    await expect(page.locator("#comments-list")).not.toContainText("Не удалось загрузить комментарии");
+  });
+
+  test("reader audit map covers core surfaces and stays available at runtime", async ({ page }) => {
+    const state = createMockState();
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=audit-map");
+
+    const auditMap = await page.evaluate(() => window.READER_AUDIT_MAP);
+    expect(auditMap?.version).toBeTruthy();
+    expect(auditMap?.screens?.map((screen) => screen.id)).toEqual([
+      "screen-series",
+      "screen-chapters",
+      "screen-reader",
+      "screen-library",
+    ]);
+    expect(auditMap?.domains?.map((domain) => domain.id)).toEqual(
+      expect.arrayContaining([
+        "auth",
+        "state-cache",
+        "data-loading",
+        "library-navigation",
+        "chapter-rendering",
+        "reader-chrome",
+        "admin-tools",
+        "social",
+        "settings",
+        "offline-sync",
+        "telemetry",
+      ])
+    );
+    expect(auditMap?.apiEndpoints).toEqual(
+      expect.arrayContaining([
+        "/api/reader",
+        "/api/chapter-content",
+        "/api/progress",
+        "/api/comments",
+        "/api/reactions",
+        "/api/chapters",
+        "/api/typo",
+        "/api/telemetry",
+      ])
+    );
+    expect(auditMap?.storageKeys).toEqual(
+      expect.arrayContaining([
+        "reader_admin_mode",
+        "reader_library_filter",
+        "reader_api_snapshot_v2",
+        "reader_chapter_payload_v2",
+      ])
+    );
   });
 });

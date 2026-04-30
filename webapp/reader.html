@@ -13,7 +13,7 @@
     <script>
         (function () {
             const params = new URLSearchParams(window.location.search);
-            const rev = params.get('rev') || '20260430-reader-sync-1';
+            const rev = params.get('rev') || '20260430-reader-polish-2';
             window.__READER_REV = rev;
             window.__WEBAPP_BUILD = { rev };
             const css = document.createElement('link');
@@ -721,13 +721,6 @@
         </div>
     </div>
 
-    <script>
-        (function () {
-            const rev = window.__READER_REV || '27';
-            const script = document.createElement('script');
-            script.src = `reader.js?v=${encodeURIComponent(rev)}`;
-            document.body.appendChild(script);
-        })();
-    </script>
+    <script src="reader.boot.js?v=20260430-reader-sync-1"></script>
 </body>
 </html>
