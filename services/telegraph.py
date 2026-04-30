@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from html.parser import HTMLParser
 
 from database import get_setting, set_setting
@@ -141,8 +142,23 @@ def _html_to_nodes(html_text: str) -> list:
     """Переводит HTML → Telegraph content-nodes (JSON-сериализуемая структура).
     Оборачивает inline-текст/элементы в <p>, оставляя block-level теги как есть.
     """
+    raw_html = str(html_text or "")
+    if "<" not in raw_html and ">" not in raw_html:
+        nodes: list = []
+        for block in re.split(r"\n\s*\n", raw_html.strip()):
+            lines = [line.rstrip() for line in block.splitlines() if line.strip()]
+            if not lines:
+                continue
+            children: list = []
+            for idx, line in enumerate(lines):
+                if idx:
+                    children.append({"tag": "br"})
+                children.append(line)
+            nodes.append({"tag": "p", "children": children})
+        return nodes
+
     parser = _TelegraphHTMLParser()
-    parser.feed(html_text)
+    parser.feed(raw_html)
 
     wrapped_nodes: list = []
     for n in parser.nodes:

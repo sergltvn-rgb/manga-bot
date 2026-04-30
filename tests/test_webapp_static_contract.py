@@ -55,3 +55,9 @@ def test_report_to_admin_has_real_client_action():
     assert "client_report_to_admin" in shared_js
     assert "openTelegramLink" in shared_js
     assert "navigator.clipboard" in shared_js
+
+
+def test_reader_inline_admin_handlers_are_exported_for_onclick_buttons():
+    reader_js = read("reader.js")
+
+    assert "window.openChapterEditModal = openChapterEditModal" in reader_js

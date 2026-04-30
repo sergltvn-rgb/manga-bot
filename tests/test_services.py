@@ -429,6 +429,16 @@ class TestTelegraph:
         assert nodes[0]["tag"] == "p"
         assert nodes[0]["children"] == ["Hello world"]
 
+    def test_html_to_nodes_preserves_plain_text_paragraphs_and_line_breaks(self):
+        from services.telegraph import _html_to_nodes
+
+        nodes = _html_to_nodes("First line\nsecond line\n\nNext paragraph")
+
+        assert nodes == [
+            {"tag": "p", "children": ["First line", {"tag": "br"}, "second line"]},
+            {"tag": "p", "children": ["Next paragraph"]},
+        ]
+
     def test_html_to_nodes_drops_script(self):
         from services.telegraph import _html_to_nodes
 

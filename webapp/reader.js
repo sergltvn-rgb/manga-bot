@@ -1299,7 +1299,7 @@ if (!Object.values(LIBRARY_FILTERS).includes(libraryFilter)) {
 // На GitHub Pages (без ?api=) остаётся '' — функции, зависящие от API, корректно отключаются
 const urlParams = new URLSearchParams(window.location.search);
 const WEBAPP_BUILD_META = window.__WEBAPP_BUILD || {};
-const READER_REV = String(urlParams.get('rev') || window.__READER_REV || WEBAPP_BUILD_META.rev || '20260428-stability-1').trim() || '20260428-stability-1';
+const READER_REV = String(urlParams.get('rev') || window.__READER_REV || WEBAPP_BUILD_META.rev || '20260430-reader-sync-1').trim() || '20260430-reader-sync-1';
 const API_URL = urlParams.get('api') || (window.location.hostname.includes('github.io') ? '' : window.location.origin);
 
 function getReaderApiCacheKey(rev = READER_REV) {
@@ -5078,6 +5078,7 @@ function openChapterEditModal(chIdx) {
     }
     openChapterEditor({ mode: 'edit', chapterIdx: chIdx });
 }
+window.openChapterEditModal = openChapterEditModal;
 
 function openEditUrlModal(chIdx) {
     openChapterEditModal(chIdx);
