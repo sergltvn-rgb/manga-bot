@@ -247,6 +247,20 @@
       "cover_url": "https://img2.teletype.in/files/1a/9e/1a9e21a8-e5f9-41b1-9e72-89b2f54e2f9c.png",
       "volumes": [
         {
+          "volume": 1,
+          "custom_name": "Том 1",
+          "chapters": [
+            {
+              "chapter": "Иллюстрации",
+              "custom_name": "Глава Иллюстрации",
+              "url": "https://telegra.ph/Britanskaya-krasavica-Odinokij-Cvetok-stala-moej-svodnoj-sestroj-i-teper-privyazalas-ko-mne-1-tom-illyustracii-07-09",
+              "urls": [
+                "https://telegra.ph/Britanskaya-krasavica-Odinokij-Cvetok-stala-moej-svodnoj-sestroj-i-teper-privyazalas-ko-mne-1-tom-illyustracii-07-09"
+              ]
+            }
+          ]
+        },
+        {
           "volume": 4,
           "custom_name": "Том 4",
           "chapters": [
