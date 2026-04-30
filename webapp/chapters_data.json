@@ -322,6 +322,20 @@
           ]
         },
         {
+          "volume": 2,
+          "custom_name": "Том 2",
+          "chapters": [
+            {
+              "chapter": "Иллюстрации",
+              "custom_name": "Глава Иллюстрации",
+              "url": "https://telegra.ph/Britanskaya-krasavica-Odinokij-Cvetok-stala-moej-svodnoj-sestroj-i-teper-privyazalas-ko-mne-2-tom-illyustracii-08-28",
+              "urls": [
+                "https://telegra.ph/Britanskaya-krasavica-Odinokij-Cvetok-stala-moej-svodnoj-sestroj-i-teper-privyazalas-ko-mne-2-tom-illyustracii-08-28"
+              ]
+            }
+          ]
+        },
+        {
           "volume": 4,
           "custom_name": "Том 4",
           "chapters": [
