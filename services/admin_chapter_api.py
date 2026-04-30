@@ -49,6 +49,16 @@ from services.validators import (
 from services.webapp_cors import CORS_HEADERS
 
 
+def _volume_int(value, default: int = 1) -> int:
+    if value in (None, "", "null"):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
 def _get_table_info(series_id: str, volume):
     """Маппинг `series_id` → `(table_name, chapter_col, where_clause, params_fn)`.
 
@@ -61,7 +71,12 @@ def _get_table_info(series_id: str, volume):
         return ("british_ranobe", "chapter", "volume = ? AND chapter = ?", lambda v, c: (v, c))
     elif series_id.startswith("ranobe_"):
         lang = series_id.replace("ranobe_", "")
-        return ("ranobe_urls", "chapter_number", "chapter_number = ? AND lang = ?", lambda v, c: (c, lang))
+        return (
+            "ranobe_urls",
+            "chapter_number",
+            "chapter_number = ? AND lang = ? AND volume = ?",
+            lambda v, c: (c, lang, _volume_int(v)),
+        )
     elif series_id.startswith("manga_"):
         lang = series_id.replace("manga_", "")
         return ("chapters_urls", "chapter_number", "chapter_number = ? AND lang = ?", lambda v, c: (c, lang))
@@ -219,6 +234,18 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
                     (volume, chapter, new_url, next_order),
                 )
                 vol_token = volume
+            elif series_id.startswith("ranobe_"):
+                lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
+                volume_int = _volume_int(volume)
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=? AND volume=?", (lang, volume_int)) as cur:
+                    row = await cur.fetchone()
+                    next_order = (row[0] or 0) + 1
+                await db.execute(
+                    f"INSERT INTO {table} (chapter_number, lang, volume, url, sort_order) VALUES (?, ?, ?, ?, ?) "
+                    f"ON CONFLICT(chapter_number, lang, volume) DO UPDATE SET url=excluded.url",
+                    (chapter, lang, volume_int, new_url, next_order),
+                )
+                vol_token = volume_int
             else:
                 lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
                 async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=?", (lang,)) as cur:
@@ -307,12 +334,20 @@ async def handle_chapter_bulk_preview(request: aiohttp.web.Request) -> aiohttp.w
             return aiohttp.web.json_response({"error": "unknown series"}, status=400, headers=CORS_HEADERS)
 
         table, chapter_col, _, _ = info
-        id_col = "lang" if series_id.startswith(("manga_", "ranobe_")) else "volume"
-        idx_val = series_id.split("_", 1)[1] if "_" in series_id else volume
+        if series_id.startswith("ranobe_"):
+            lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
+            where_clause = "lang = ? AND volume = ?"
+            where_params = (lang, _volume_int(volume))
+        elif series_id.startswith("manga_"):
+            where_clause = "lang = ?"
+            where_params = (series_id.split("_", 1)[1],)
+        else:
+            where_clause = "volume = ?"
+            where_params = (str(volume),)
 
         existing_chapters: set[str] = set()
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(f"SELECT {chapter_col} FROM {table} WHERE {id_col} = ?", (str(idx_val),)) as cursor:
+            async with db.execute(f"SELECT {chapter_col} FROM {table} WHERE {where_clause}", where_params) as cursor:
                 existing_chapters = {str(row[0]) for row in await cursor.fetchall()}
 
         items = []
@@ -434,11 +469,24 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
         table, _, _, _ = info
         added = 0
 
-        id_col = "lang" if series_id.startswith(("manga_", "ranobe_")) else "volume"
-        idx_val = series_id.split("_", 1)[1] if "_" in series_id else volume
+        if series_id.startswith("ranobe_"):
+            lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
+            volume_int = _volume_int(volume)
+            where_clause = "lang = ? AND volume = ?"
+            where_params = (lang, volume_int)
+        elif series_id.startswith("manga_"):
+            lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
+            volume_int = 1
+            where_clause = "lang = ?"
+            where_params = (lang,)
+        else:
+            lang = ""
+            volume_int = volume
+            where_clause = "volume = ?"
+            where_params = (str(volume),)
 
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE {id_col} = ?", (str(idx_val),)) as cursor:
+            async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE {where_clause}", where_params) as cursor:
                 row = await cursor.fetchone()
                 current_max = row[0] or 0
 
@@ -455,8 +503,13 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
                         f"ON CONFLICT(volume, chapter) DO UPDATE SET url=excluded.url",
                         (volume, ch_num, url, next_order),
                     )
+                elif series_id.startswith("ranobe_"):
+                    await db.execute(
+                        f"INSERT INTO {table} (chapter_number, lang, volume, url, sort_order) VALUES (?, ?, ?, ?, ?) "
+                        f"ON CONFLICT(chapter_number, lang, volume) DO UPDATE SET url=excluded.url",
+                        (ch_num, lang, volume_int, url, next_order),
+                    )
                 else:
-                    lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
                     await db.execute(
                         f"INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?) "
                         f"ON CONFLICT(chapter_number, lang) DO UPDATE SET url=excluded.url",
@@ -566,6 +619,24 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
                     f"INSERT INTO {table} (volume, chapter, url, sort_order) VALUES (?, ?, ?, ?)",
                     (volume, chapter, new_url, next_order),
                 )
+            elif series_id.startswith("ranobe_"):
+                lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
+                volume_int = _volume_int(volume)
+                async with db.execute(
+                    f"SELECT 1 FROM {table} WHERE chapter_number=? AND lang=? AND volume=?",
+                    (chapter, lang, volume_int),
+                ) as cur:
+                    exists_row = await cur.fetchone()
+                if exists_row:
+                    return aiohttp.web.json_response({"error": "chapter already exists"}, status=409, headers=CORS_HEADERS)
+
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=? AND volume=?", (lang, volume_int)) as cur:
+                    row = await cur.fetchone()
+                    next_order = (row[0] or 0) + 1
+                await db.execute(
+                    f"INSERT INTO {table} (chapter_number, lang, volume, url, sort_order) VALUES (?, ?, ?, ?, ?)",
+                    (chapter, lang, volume_int, new_url, next_order),
+                )
             else:
                 lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
                 async with db.execute(f"SELECT 1 FROM {table} WHERE chapter_number=? AND lang=?", (chapter, lang)) as cur:
@@ -583,7 +654,13 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
 
             # Сохраняем кастомное имя главы, если указано.
             if name:
-                vol_token = volume if series_id in ("akashic_records", "british_belle") else 1
+                vol_token = (
+                    _volume_int(volume)
+                    if series_id.startswith("ranobe_")
+                    else volume
+                    if series_id in ("akashic_records", "british_belle")
+                    else 1
+                )
                 name_clean = name[:MAX_RENAME_OBJECT_ID_LENGTH]
                 await db.execute(
                     "INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)",
@@ -659,6 +736,16 @@ async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
                 deleted = cursor.rowcount or 0
                 await cursor.close()
                 vol_token = volume
+            elif series_id.startswith("ranobe_"):
+                lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
+                volume_int = _volume_int(volume)
+                cursor = await db.execute(
+                    f"DELETE FROM {table} WHERE chapter_number=? AND lang=? AND volume=?",
+                    (chapter, lang, volume_int),
+                )
+                deleted = cursor.rowcount or 0
+                await cursor.close()
+                vol_token = volume_int
             else:
                 lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
                 cursor = await db.execute(f"DELETE FROM {table} WHERE chapter_number=? AND lang=?", (chapter, lang))

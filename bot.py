@@ -84,6 +84,7 @@ from database import (
     get_chapters,
     get_chapter_link,
     get_user_marriage,
+    get_ranobe_volumes,
     get_ranobe_chapters,
     get_ranobe_chapter_link,
     get_all_users,
@@ -3917,28 +3918,39 @@ def get_chapters_menu(lang: str, chapters: list, page: int = 0):
     return builder.as_markup()
 
 
-def get_ranobe_chapters_menu(lang: str, chapters: list, page: int = 0):
+def get_ranobe_volumes_menu(lang: str, volumes: list):
+    builder = InlineKeyboardBuilder()
+    if not volumes:
+        return builder.row(types.InlineKeyboardButton(text="Тома пока не добавлены 😔", callback_data="read_ranobe_langs")).as_markup()
+    for volume in volumes:
+        builder.button(text=f"Том {volume}", callback_data=f"readranobevol_{lang}_{volume}")
+    builder.adjust(2)
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="read_ranobe_langs"))
+    return builder.as_markup()
+
+
+def get_ranobe_chapters_menu(lang: str, chapters: list, page: int = 0, volume: int = 1):
     builder = InlineKeyboardBuilder()
     if not chapters:
         return builder.row(types.InlineKeyboardButton(text="Главы пока не добавлены 😔", callback_data="read_ranobe_langs")).as_markup()
 
     total_pages = math.ceil(len(chapters) / ITEMS_PER_PAGE)
     for ch in chapters[page * ITEMS_PER_PAGE : (page + 1) * ITEMS_PER_PAGE]:
-        builder.button(text=f"Глава {ch}", callback_data=f"read_ranobe_{lang}_{ch}")
+        builder.button(text=f"Глава {ch}", callback_data=f"read_ranobe_{lang}_{volume}_{ch}")
     builder.adjust(3)
 
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(types.InlineKeyboardButton(text="◀️ Пред.", callback_data=f"page_ranobe_{lang}_{page-1}"))
+        nav_buttons.append(types.InlineKeyboardButton(text="◀️ Пред.", callback_data=f"page_ranobe_{lang}_{volume}_{page-1}"))
     if page < total_pages - 1:
-        nav_buttons.append(types.InlineKeyboardButton(text="След. ▶️", callback_data=f"page_ranobe_{lang}_{page+1}"))
+        nav_buttons.append(types.InlineKeyboardButton(text="След. ▶️", callback_data=f"page_ranobe_{lang}_{volume}_{page+1}"))
     if nav_buttons:
         builder.row(*nav_buttons)
 
     # Кнопка перехода на страницу
-    builder.row(types.InlineKeyboardButton(text="🔢 На страницу", callback_data=f"jump_ranobe_{lang}"))
+    builder.row(types.InlineKeyboardButton(text="🔢 На страницу", callback_data=f"jump_ranobe_{lang}_{volume}"))
 
-    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data="read_ranobe_langs"))
+    builder.row(types.InlineKeyboardButton(text="⬅️ К томам", callback_data=f"readranobelang_{lang}"))
     return builder.as_markup()
 
 
@@ -3990,9 +4002,32 @@ async def process_read_ranobe_langs(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("readranobelang_"))
 async def process_read_ranobe_chapters(callback: types.CallbackQuery):
     lang_code = callback.data.split("_")[1]
-    chapters = await get_ranobe_chapters(lang_code)
+    volumes = await get_ranobe_volumes(lang_code)
+    if len(volumes) > 1:
+        await callback.message.edit_text(
+            f"📚 Доступные тома ({RANOBE_LANGUAGES[lang_code]}):",
+            reply_markup=get_ranobe_volumes_menu(lang_code, volumes),
+        )
+        return
+    volume = volumes[0] if volumes else 1
+    chapters = await get_ranobe_chapters(lang_code, volume)
     await callback.message.edit_text(
-        f"📚 Доступные главы ({RANOBE_LANGUAGES[lang_code]}):", reply_markup=get_ranobe_chapters_menu(lang_code, chapters, page=0)
+        f"📚 Доступные главы ({RANOBE_LANGUAGES[lang_code]}, Том {volume}):",
+        reply_markup=get_ranobe_chapters_menu(lang_code, chapters, page=0, volume=volume),
+    )
+
+
+@dp.callback_query(F.data.startswith("readranobevol_"))
+async def process_read_ranobe_volume(callback: types.CallbackQuery):
+    _, lang_code, volume_raw = callback.data.split("_", 2)
+    try:
+        volume = int(volume_raw)
+    except (TypeError, ValueError):
+        volume = 1
+    chapters = await get_ranobe_chapters(lang_code, volume)
+    await callback.message.edit_text(
+        f"📚 Доступные главы ({RANOBE_LANGUAGES[lang_code]}, Том {volume}):",
+        reply_markup=get_ranobe_chapters_menu(lang_code, chapters, page=0, volume=volume),
     )
 
 
@@ -4005,9 +4040,18 @@ async def process_manga_page_change(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("page_ranobe_"))
 async def process_ranobe_page_change(callback: types.CallbackQuery):
-    _, _, lang_code, page_str = callback.data.split("_")
-    chapters = await get_ranobe_chapters(lang_code)
-    await callback.message.edit_reply_markup(reply_markup=get_ranobe_chapters_menu(lang_code, chapters, page=int(page_str)))
+    parts = callback.data.split("_")
+    if len(parts) >= 5:
+        _, _, lang_code, volume_raw, page_str = parts[:5]
+        try:
+            volume = int(volume_raw)
+        except (TypeError, ValueError):
+            volume = 1
+    else:
+        _, _, lang_code, page_str = parts
+        volume = 1
+    chapters = await get_ranobe_chapters(lang_code, volume)
+    await callback.message.edit_reply_markup(reply_markup=get_ranobe_chapters_menu(lang_code, chapters, page=int(page_str), volume=volume))
 
 
 @dp.callback_query(F.data.startswith("read_manga_") | F.data.startswith("read_"))
@@ -4020,14 +4064,20 @@ async def send_chapter(callback: types.CallbackQuery):
     is_ranobe = "ranobe" in data
 
     if is_ranobe:
-        # read_ranobe_lang_num
+        # read_ranobe_lang_volume_num (legacy: read_ranobe_lang_num)
         lang = data[2]
-        chapter_num = data[3]
-        link = await get_ranobe_chapter_link(lang, chapter_num)
+        if len(data) >= 5:
+            volume = int(data[3]) if str(data[3]).isdigit() else 1
+            chapter_num = data[4]
+        else:
+            volume = 1
+            chapter_num = data[3]
+        link = await get_ranobe_chapter_link(lang, chapter_num, volume)
     else:
         # read_lang_num
         lang = data[1]
         chapter_num = data[2]
+        volume = 1
         link = await get_chapter_link(lang, chapter_num)
 
     if link:
@@ -4039,7 +4089,8 @@ async def send_chapter(callback: types.CallbackQuery):
         builder = InlineKeyboardBuilder()
         if is_url:
             builder.button(text=f"🔗 Читать главу {chapter_num}", url=link)
-        builder.button(text="📚 К главам", callback_data=f"readlang_{lang}")
+        back_callback = f"readranobevol_{lang}_{volume}" if is_ranobe else f"readlang_{lang}"
+        builder.button(text="📚 К главам", callback_data=back_callback)
 
         admins = await get_admins()
         if user_id in admins:
@@ -4265,9 +4316,11 @@ async def handle_manga_jump(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("jump_ranobe_"))
 async def trigger_ranobe_jump(callback: types.CallbackQuery, state: FSMContext):
-    lang = callback.data.split("_")[2]
+    parts = callback.data.split("_")
+    lang = parts[2]
+    volume = int(parts[3]) if len(parts) > 3 and str(parts[3]).isdigit() else 1
     await state.set_state(ChapterJump.waiting_for_ranobe_page)
-    await state.update_data(lang=lang)
+    await state.update_data(lang=lang, volume=volume)
     await callback.message.answer("🔢 <b>Введите номер страницы ранобэ</b> (например, 2):", parse_mode="HTML")
     await callback.answer()
 
@@ -4277,15 +4330,16 @@ async def handle_ranobe_jump(message: types.Message, state: FSMContext):
     page = int(message.text) - 1
     data = await state.get_data()
     lang = data.get("lang")
+    volume = data.get("volume") or 1
     await state.clear()
 
-    chapters = await get_ranobe_chapters(lang)
+    chapters = await get_ranobe_chapters(lang, volume)
     total_pages = math.ceil(len(chapters) / ITEMS_PER_PAGE)
     if page < 0 or page >= total_pages:
         return await message.answer(f"❌ Неверный номер страницы! Доступно от 1 до {total_pages}.")
 
     await message.answer(f"Перехожу на страницу {page + 1}...")
-    await message.answer("📚 Доступные главы (Ранобэ):", reply_markup=get_ranobe_chapters_menu(lang, chapters, page=page))
+    await message.answer("📚 Доступные главы (Ранобэ):", reply_markup=get_ranobe_chapters_menu(lang, chapters, page=page, volume=volume))
 
 
 # process_user_art_delete, send_user_art_item, view_arts, process_user_art_view,
@@ -4406,25 +4460,32 @@ async def build_reader_data() -> dict:
         async with db.execute('SELECT DISTINCT lang FROM ranobe_urls') as cursor:
             langs_ro = [row[0] for row in await cursor.fetchall()]
         for lang in langs_ro:
-            async with db.execute(
-                'SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? ORDER BY sort_order, CAST(chapter_number AS REAL)', (lang,)
-            ) as c:
-                chapters = []
-                for row in await c.fetchall():
-                    extracted = _clean_urls(row[1])
-                    url_val = extracted[0] if len(extracted) == 1 else ""
-                    custom_chap = custom_names.get(f"chap_ranobe_{lang}_1_{row[0]}") or f"Глава {row[0]}"
-                    chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
-            if chapters:
+            async with db.execute('SELECT DISTINCT volume FROM ranobe_urls WHERE lang = ? ORDER BY volume', (lang,)) as cursor:
+                volumes = [row[0] for row in await cursor.fetchall()]
+            series_volumes = []
+            for vol in volumes:
+                async with db.execute(
+                    'SELECT chapter_number, url FROM ranobe_urls WHERE lang = ? AND volume = ? ORDER BY sort_order, CAST(chapter_number AS REAL)',
+                    (lang, vol),
+                ) as c:
+                    chapters = []
+                    for row in await c.fetchall():
+                        extracted = _clean_urls(row[1])
+                        url_val = extracted[0] if len(extracted) == 1 else ""
+                        custom_chap = custom_names.get(f"chap_ranobe_{lang}_{vol}_{row[0]}") or f"Глава {row[0]}"
+                        chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
+                if chapters:
+                    custom_vol = custom_names.get(f"vol_ranobe_{lang}_{vol}") or f"Том {vol}"
+                    series_volumes.append({"volume": vol, "custom_name": custom_vol, "chapters": chapters})
+            if series_volumes:
                 lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
                 custom_title = custom_names.get(f"series_ranobe_{lang}") or f"Ранобэ ({lname})"
-                custom_vol = custom_names.get(f"vol_ranobe_{lang}_1") or "Том 1"
                 result["series"].append(
                     {
                         "id": f"ranobe_{lang}",
                         "title": custom_title,
                         "cover_url": custom_names.get(f"cover_ranobe_{lang}", ""),
-                        "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}],
+                        "volumes": series_volumes,
                     }
                 )
 
@@ -5152,33 +5213,47 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
         id_col = None
         chapter_col = None
         idx_val = volume
+        where_clause = None
+        where_params = None
 
         if series_id.startswith('manga_'):
             table = 'chapters_urls'
             id_col = 'lang'
             chapter_col = 'chapter_number'
             idx_val = series_id.replace('manga_', '')
+            where_clause = f"{id_col} = ?"
+            where_params = (str(idx_val),)
         elif series_id.startswith('ranobe_'):
             table = 'ranobe_urls'
             id_col = 'lang'
             chapter_col = 'chapter_number'
             idx_val = series_id.replace('ranobe_', '')
+            try:
+                volume_int = int(volume or 1)
+            except (TypeError, ValueError):
+                volume_int = 1
+            where_clause = f"{id_col} = ? AND volume = ?"
+            where_params = (str(idx_val), volume_int)
         elif 'akashic' in series_id:
             table = 'akashic_ranobe'
             id_col = 'volume'
             chapter_col = 'chapter'
+            where_clause = f"{id_col} = ?"
+            where_params = (str(idx_val),)
         elif 'british' in series_id:
             table = 'british_ranobe'
             id_col = 'volume'
             chapter_col = 'chapter'
+            where_clause = f"{id_col} = ?"
+            where_params = (str(idx_val),)
 
-        if not table:
+        if not table or where_clause is None or where_params is None:
             return aiohttp.web.json_response({"error": "unknown series type"}, status=400, headers=CORS_HEADERS)
 
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
-                f'SELECT {chapter_col} FROM {table} WHERE {id_col} = ?',
-                (str(idx_val),),
+                f'SELECT {chapter_col} FROM {table} WHERE {where_clause}',
+                where_params,
             ) as cur:
                 existing_chapters = {str(row[0]) for row in await cur.fetchall()}
             existing_rows = len(existing_chapters)
@@ -5227,7 +5302,8 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
             total_changes = 0
             for idx, chapter_id in enumerate(normalized_order):
                 cursor = await db.execute(
-                    f'UPDATE {table} SET sort_order = ? WHERE {id_col} = ? AND {chapter_col} = ?', (idx, str(idx_val), str(chapter_id))
+                    f'UPDATE {table} SET sort_order = ? WHERE {where_clause} AND {chapter_col} = ?',
+                    (idx, *where_params, str(chapter_id)),
                 )
                 changed = cursor.rowcount or 0
                 total_changes += changed

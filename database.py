@@ -48,6 +48,45 @@ async def repair_akashic_volume_11_illustrations(db):
     )
 
 
+async def ensure_ranobe_volume_schema(db) -> None:
+    """Ensure ranobe_urls can store the same chapter number in different volumes."""
+    async with db.execute("PRAGMA table_info(ranobe_urls)") as cursor:
+        columns_info = await cursor.fetchall()
+    if not columns_info:
+        return
+
+    columns = [row[1] for row in columns_info]
+    pk_columns = [row[1] for row in sorted((row for row in columns_info if row[5]), key=lambda row: row[5])]
+    if "volume" in columns and pk_columns == ["chapter_number", "lang", "volume"]:
+        return
+
+    legacy_table = "ranobe_urls_legacy_volume_migration"
+    await db.execute(f"DROP TABLE IF EXISTS {legacy_table}")
+    await db.execute(f"ALTER TABLE ranobe_urls RENAME TO {legacy_table}")
+    await db.execute(
+        """
+        CREATE TABLE ranobe_urls (
+            chapter_number TEXT,
+            lang TEXT,
+            volume INTEGER DEFAULT 1,
+            url TEXT,
+            sort_order INTEGER DEFAULT 0,
+            PRIMARY KEY (chapter_number, lang, volume)
+        )
+        """
+    )
+    volume_expr = "COALESCE(volume, 1)" if "volume" in columns else "1"
+    sort_expr = "COALESCE(sort_order, 0)" if "sort_order" in columns else "0"
+    await db.execute(
+        f"""
+        INSERT OR REPLACE INTO ranobe_urls (chapter_number, lang, volume, url, sort_order)
+        SELECT chapter_number, lang, {volume_expr}, url, {sort_expr}
+        FROM {legacy_table}
+        """
+    )
+    await db.execute(f"DROP TABLE {legacy_table}")
+
+
 async def _ensure_column(db, table: str, column: str, definition: str) -> None:
     async with db.execute(f"PRAGMA table_info({table})") as cursor:
         columns = {row[1] for row in await cursor.fetchall()}
@@ -110,7 +149,14 @@ async def init_db():
             'CREATE TABLE IF NOT EXISTS chapters_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))'
         )
         await db.execute(
-            'CREATE TABLE IF NOT EXISTS ranobe_urls (chapter_number TEXT, lang TEXT, url TEXT, PRIMARY KEY (chapter_number, lang))'
+            '''CREATE TABLE IF NOT EXISTS ranobe_urls (
+                chapter_number TEXT,
+                lang TEXT,
+                volume INTEGER DEFAULT 1,
+                url TEXT,
+                sort_order INTEGER DEFAULT 0,
+                PRIMARY KEY (chapter_number, lang, volume)
+            )'''
         )
         await db.execute(
             'CREATE TABLE IF NOT EXISTS akashic_ranobe (volume INTEGER, chapter TEXT, url TEXT, PRIMARY KEY (volume, chapter))'
@@ -219,6 +265,8 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_ai_memory_lookup ON ai_memory(chat_id, user_id, char_id, ts)')
 
         # Миграция: добавляем колонку для Drag-and-Drop сортировки
+        await ensure_ranobe_volume_schema(db)
+
         for tbl in ['chapters_urls', 'ranobe_urls', 'akashic_ranobe', 'british_ranobe']:
             async with db.execute(f"PRAGMA table_info({tbl})") as cursor:
                 columns = [row[1] for row in await cursor.fetchall()]
@@ -769,18 +817,29 @@ async def get_chapter_link(lang: str, chapter_number: str):
             return row[0] if row else None
 
 
-async def get_ranobe_chapters(lang: str):
+async def get_ranobe_volumes(lang: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute('SELECT DISTINCT volume FROM ranobe_urls WHERE lang = ? ORDER BY volume', (lang,)) as cursor:
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows] if rows else []
+
+
+async def get_ranobe_chapters(lang: str, volume: int = 1):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            'SELECT chapter_number FROM ranobe_urls WHERE lang = ? ORDER BY sort_order, CAST(chapter_number AS REAL)', (lang,)
+            'SELECT chapter_number FROM ranobe_urls WHERE lang = ? AND volume = ? ORDER BY sort_order, CAST(chapter_number AS REAL)',
+            (lang, volume),
         ) as cursor:
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
 
-async def get_ranobe_chapter_link(lang: str, chapter_number: str):
+async def get_ranobe_chapter_link(lang: str, chapter_number: str, volume: int = 1):
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute('SELECT url FROM ranobe_urls WHERE chapter_number = ? AND lang = ?', (chapter_number, lang)) as cursor:
+        async with db.execute(
+            'SELECT url FROM ranobe_urls WHERE chapter_number = ? AND lang = ? AND volume = ?',
+            (chapter_number, lang, volume),
+        ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None
 
