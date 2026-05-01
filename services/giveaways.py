@@ -60,6 +60,8 @@ JOINED_STATUSES = {"member", "administrator", "creator"}
 SUPPORTED_MEDIA_TYPES = {"photo", "video", "document", "animation"}
 GIVEAWAY_HISTORY_PAGE_SIZE = 4
 GIVEAWAY_RISK_REVIEW_THRESHOLD = 50
+GIVEAWAY_CAPTCHA_TTL_SECONDS = 5 * 60
+GIVEAWAY_CAPTCHA_MAX_ATTEMPTS = 3
 _DURATION_RE = re.compile(r"^(?P<count>\d+)(?P<unit>[mhd])$", re.IGNORECASE)
 
 
@@ -1358,13 +1360,20 @@ async def list_giveaway_participant_stats() -> list[GiveawayParticipantStats]:
 def _make_verification_answer() -> tuple[str, str, list[str]]:
     left = random.randint(2, 9)
     right = random.randint(2, 9)
-    answer = left + right
+    operation = random.choice(["+", "-", "+"])
+    if operation == "-":
+        left, right = max(left, right), min(left, right)
+        answer = left - right
+        question = f"{left} - {right}"
+    else:
+        answer = left + right
+        question = f"{left} + {right}"
     options = {answer, answer + random.choice([-2, -1, 1, 2]), answer + random.choice([3, 4, -3, -4])}
     while len(options) < 3:
         options.add(answer + random.randint(-5, 5))
     ordered = [str(value) for value in options]
     random.shuffle(ordered)
-    return f"{left} + {right}", str(answer), ordered
+    return question, str(answer), ordered
 
 
 async def create_giveaway_verification_challenge(
@@ -1372,20 +1381,64 @@ async def create_giveaway_verification_challenge(
     user_id: int,
     *,
     answer_factory: Callable[[], tuple[str, str, list[str]]] | None = None,
+    now: datetime | None = None,
+    ttl_seconds: int = GIVEAWAY_CAPTCHA_TTL_SECONDS,
 ) -> GiveawayVerificationChallenge:
     question, answer, options = (answer_factory or _make_verification_answer)()
+    now_utc = (now or _utcnow()).astimezone(timezone.utc)
+    expires_at = now_utc + timedelta(seconds=max(30, int(ttl_seconds)))
     async with aiosqlite.connect(database.DB_PATH) as db:
         await db.execute(
             """
             INSERT OR REPLACE INTO giveaway_verifications (
-                giveaway_id, user_id, question, answer, options_json, verified, created_at, verified_at
+                giveaway_id, user_id, question, answer, options_json, verified, created_at, verified_at, expires_at, attempts_count
             )
-            VALUES (?, ?, ?, ?, ?, 0, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?, 0)
             """,
-            (giveaway_id, user_id, question, answer, json.dumps(options, ensure_ascii=False), _dt_to_db(_utcnow())),
+            (
+                giveaway_id,
+                user_id,
+                question,
+                answer,
+                json.dumps(options, ensure_ascii=False),
+                _dt_to_db(now_utc),
+                _dt_to_db(expires_at),
+            ),
         )
         await db.commit()
     return GiveawayVerificationChallenge(question=question, answer=answer, options=list(options))
+
+
+async def get_giveaway_verification_challenge(
+    giveaway_id: int,
+    user_id: int,
+    *,
+    now: datetime | None = None,
+) -> GiveawayVerificationChallenge | None:
+    now_utc = (now or _utcnow()).astimezone(timezone.utc)
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT question, answer, options_json, verified, expires_at, attempts_count
+            FROM giveaway_verifications
+            WHERE giveaway_id = ? AND user_id = ?
+            """,
+            (giveaway_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if not row or bool(row[3]):
+            return None
+        expires_at = _maybe_dt_from_db(row[4])
+        attempts_count = int(row[5] or 0)
+        if (expires_at and now_utc > expires_at) or attempts_count >= GIVEAWAY_CAPTCHA_MAX_ATTEMPTS:
+            await db.execute("DELETE FROM giveaway_verifications WHERE giveaway_id = ? AND user_id = ?", (giveaway_id, user_id))
+            await db.commit()
+            return None
+    try:
+        options = json.loads(str(row[2] or "[]"))
+    except json.JSONDecodeError:
+        options = []
+    return GiveawayVerificationChallenge(question=str(row[0]), answer=str(row[1]), options=[str(option) for option in options])
 
 
 async def is_giveaway_verified(giveaway_id: int, user_id: int) -> bool:
@@ -1398,18 +1451,42 @@ async def is_giveaway_verified(giveaway_id: int, user_id: int) -> bool:
             return bool(row and row[0])
 
 
-async def verify_giveaway_answer(giveaway_id: int, user_id: int, answer: str) -> bool:
+async def verify_giveaway_answer(giveaway_id: int, user_id: int, answer: str, *, now: datetime | None = None) -> bool:
+    now_utc = (now or _utcnow()).astimezone(timezone.utc)
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(
-            "SELECT answer FROM giveaway_verifications WHERE giveaway_id = ? AND user_id = ?",
+            """
+            SELECT answer, verified, expires_at, attempts_count
+            FROM giveaway_verifications
+            WHERE giveaway_id = ? AND user_id = ?
+            """,
             (giveaway_id, user_id),
         ) as cursor:
             row = await cursor.fetchone()
-        if not row or str(row[0]) != str(answer).strip():
+        if not row or bool(row[1]):
+            return False
+        expires_at = _maybe_dt_from_db(row[2])
+        attempts_count = int(row[3] or 0)
+        if expires_at and now_utc > expires_at:
+            await db.execute("DELETE FROM giveaway_verifications WHERE giveaway_id = ? AND user_id = ?", (giveaway_id, user_id))
+            await db.commit()
+            return False
+        if attempts_count >= GIVEAWAY_CAPTCHA_MAX_ATTEMPTS:
+            return False
+        if str(row[0]) != str(answer).strip():
+            attempts_count += 1
+            if attempts_count >= GIVEAWAY_CAPTCHA_MAX_ATTEMPTS:
+                await db.execute("DELETE FROM giveaway_verifications WHERE giveaway_id = ? AND user_id = ?", (giveaway_id, user_id))
+            else:
+                await db.execute(
+                    "UPDATE giveaway_verifications SET attempts_count = ? WHERE giveaway_id = ? AND user_id = ?",
+                    (attempts_count, giveaway_id, user_id),
+                )
+            await db.commit()
             return False
         await db.execute(
             "UPDATE giveaway_verifications SET verified = 1, verified_at = ? WHERE giveaway_id = ? AND user_id = ?",
-            (_dt_to_db(_utcnow()), giveaway_id, user_id),
+            (_dt_to_db(now_utc), giveaway_id, user_id),
         )
         await db.commit()
         return True
@@ -1767,7 +1844,9 @@ async def join_giveaway_from_webapp(
                 captcha_error = True
 
         if captcha_answer is None or captcha_error:
-            challenge = await create_giveaway_verification_challenge(giveaway_id, user_id)
+            challenge = await get_giveaway_verification_challenge(giveaway_id, user_id)
+            if challenge is None:
+                challenge = await create_giveaway_verification_challenge(giveaway_id, user_id)
             status.update(
                 {
                     "added": False,
@@ -2888,7 +2967,9 @@ async def giveaway_join(callback: types.CallbackQuery):
             show_alert=True,
         )
     if not await is_giveaway_verified(giveaway_id, callback.from_user.id):
-        challenge = await create_giveaway_verification_challenge(giveaway_id, callback.from_user.id)
+        challenge = await get_giveaway_verification_challenge(giveaway_id, callback.from_user.id)
+        if challenge is None:
+            challenge = await create_giveaway_verification_challenge(giveaway_id, callback.from_user.id)
         try:
             await callback.bot.send_message(
                 chat_id=callback.from_user.id,

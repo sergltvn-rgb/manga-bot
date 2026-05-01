@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 import pytest
@@ -392,6 +392,45 @@ class TestGiveawayDb:
         assert run(giveaways.verify_giveaway_answer(1, 1001, "4")) is True
         assert run(giveaways.is_giveaway_verified(1, 1001)) is True
 
+    def test_verification_challenge_expires_and_rejects_stale_answer(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        now = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+        run(database.init_db())
+        run(
+            giveaways.create_giveaway_verification_challenge(
+                1,
+                1001,
+                answer_factory=lambda: ("2 + 2", "4", ["3", "4", "5"]),
+                now=now,
+                ttl_seconds=60,
+            )
+        )
+
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "4", now=now + timedelta(seconds=61))) is False
+        assert run(giveaways.is_giveaway_verified(1, 1001)) is False
+
+    def test_verification_challenge_rotates_after_three_wrong_answers(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        run(database.init_db())
+        run(giveaways.create_giveaway_verification_challenge(1, 1001, answer_factory=lambda: ("2 + 2", "4", ["3", "4", "5"])))
+
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "3")) is False
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "5")) is False
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "6")) is False
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "4")) is False
+
 
 class TestGiveawayWinnerSelection:
     def test_selects_only_current_subscribers_and_counts_replacements(self):
@@ -655,6 +694,73 @@ class TestGiveawayWinnerSelection:
         assert result["added"] is True
         assert result["captcha_required"] is False
         assert result["entries_count"] == 1
+        assert run(giveaways.has_giveaway_entry(giveaway_id, 1001)) is True
+
+    def test_webapp_join_keeps_same_captcha_after_wrong_answer(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+        generated = iter(
+            [
+                ("2 + 2", "4", ["3", "4", "5"]),
+                ("3 + 3", "6", ["5", "6", "7"]),
+            ]
+        )
+        monkeypatch.setattr(giveaways, "_make_verification_answer", lambda: next(generated))
+
+        class Member:
+            status = "member"
+
+        class BotStub:
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member()
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 10))
+
+        challenge = run(
+            giveaways.join_giveaway_from_webapp(
+                BotStub(),
+                giveaway_id,
+                {"id": 1001, "username": "alice", "first_name": "Alice"},
+            )
+        )
+        wrong = run(
+            giveaways.join_giveaway_from_webapp(
+                BotStub(),
+                giveaway_id,
+                {"id": 1001, "username": "alice", "first_name": "Alice"},
+                captcha_answer="3",
+            )
+        )
+
+        assert challenge["captcha"]["question"] == "2 + 2"
+        assert wrong["captcha_error"] is True
+        assert wrong["captcha"]["question"] == "2 + 2"
+
+        result = run(
+            giveaways.join_giveaway_from_webapp(
+                BotStub(),
+                giveaway_id,
+                {"id": 1001, "username": "alice", "first_name": "Alice"},
+                captcha_answer="4",
+            )
+        )
+
+        assert result["joined"] is True
         assert run(giveaways.has_giveaway_entry(giveaway_id, 1001)) is True
 
 

@@ -406,8 +406,12 @@ async def init_db():
             verified INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             verified_at TEXT DEFAULT NULL,
+            expires_at TEXT DEFAULT NULL,
+            attempts_count INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (giveaway_id, user_id)
         )''')
+        await _ensure_column(db, "giveaway_verifications", "expires_at", "expires_at TEXT DEFAULT NULL")
+        await _ensure_column(db, "giveaway_verifications", "attempts_count", "attempts_count INTEGER NOT NULL DEFAULT 0")
         await db.execute('''CREATE TABLE IF NOT EXISTS giveaway_entry_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             giveaway_id INTEGER NOT NULL,
