@@ -954,7 +954,7 @@ class TestGiveawayPublishing:
         assert buttons[0].callback_data == "giveaway_join:1"
         assert "1" in buttons[0].text
 
-    def test_finalize_sends_result_without_editing_original_post(self, tmp_path, monkeypatch):
+    def test_finalize_sends_private_review_without_channel_publish(self, tmp_path, monkeypatch):
         import database
 
         from services import giveaways
@@ -997,11 +997,13 @@ class TestGiveawayPublishing:
 
         assert run(giveaways.finalize_giveaway(bot, giveaway)) is True
 
+        updated = run(giveaways.get_giveaway(giveaway_id))
         assert "edit_message_reply_markup" not in [call[0] for call in bot.calls]
-        assert bot.calls[0][0] == "send_message"
-        assert bot.calls[0][1]["chat_id"] == "@main_channel"
+        assert [call[1]["chat_id"] for call in bot.calls] == [6210312655]
+        assert updated.status == giveaways.GIVEAWAY_STATUS_REVIEW_PENDING
+        assert run(giveaways.get_giveaway_winners(giveaway_id))[0].user_id == 1001
 
-    def test_finalize_sends_private_admin_summary(self, tmp_path, monkeypatch):
+    def test_publish_reviewed_giveaway_results_posts_to_channel_and_finishes(self, tmp_path, monkeypatch):
         import database
 
         from services import giveaways
@@ -1040,8 +1042,124 @@ class TestGiveawayPublishing:
         bot = BotStub()
 
         assert run(giveaways.finalize_giveaway(bot, giveaway)) is True
+        bot.calls.clear()
+
+        reviewed = run(giveaways.get_giveaway(giveaway_id))
+        assert run(giveaways.publish_reviewed_giveaway_results(bot, reviewed, actor_user_id=6210312655)) is True
 
         assert [call[1]["chat_id"] for call in bot.calls] == ["@main_channel", 6210312655]
+        assert run(giveaways.get_giveaway(giveaway_id)).status == giveaways.GIVEAWAY_STATUS_FINISHED
+
+    def test_reroll_is_available_before_publication_and_does_not_post_to_channel(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class Member:
+            status = "member"
+
+        class BotStub:
+            def __init__(self):
+                self.calls = []
+
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member()
+
+            async def send_message(self, **kwargs):
+                self.calls.append(("send_message", kwargs))
+                return type("Msg", (), {"message_id": 77})()
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 24, 11, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 123))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1002, "bob", "Bob"))
+        bot = BotStub()
+        giveaway = run(giveaways.get_giveaway(giveaway_id))
+
+        assert run(giveaways.finalize_giveaway(bot, giveaway)) is True
+        bot.calls.clear()
+        reviewed = run(giveaways.get_giveaway(giveaway_id))
+        result = run(giveaways.reroll_giveaway_place(bot, reviewed, 1, actor_user_id=10, reason="Review", shuffle=lambda values: values))
+
+        assert result.old_winner.user_id == 1001
+        assert result.new_winner.user_id == 1002
+        assert [call[1]["chat_id"] for call in bot.calls] == [6210312655]
+        assert run(giveaways.get_giveaway(giveaway_id)).status == giveaways.GIVEAWAY_STATUS_REVIEW_PENDING
+
+    def test_publish_review_blocks_excluded_winner_until_reroll(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        class Member:
+            status = "member"
+
+        class BotStub:
+            def __init__(self):
+                self.calls = []
+
+            async def get_chat_member(self, *, chat_id, user_id):
+                return Member()
+
+            async def send_message(self, **kwargs):
+                self.calls.append(("send_message", kwargs))
+                return type("Msg", (), {"message_id": 77})()
+
+        run(database.init_db())
+        giveaway_id = run(
+            giveaways.create_giveaway(
+                channel_id="@main_channel",
+                prize="Prize",
+                post_text="Post",
+                winners_count=1,
+                ends_at_utc=datetime(2026, 4, 24, 11, 0, tzinfo=timezone.utc),
+                created_by=6210312655,
+            )
+        )
+        run(giveaways.set_giveaway_published(giveaway_id, 123))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1001, "alice", "Alice"))
+        run(giveaways.add_giveaway_entry(giveaway_id, 1002, "bob", "Bob"))
+        bot = BotStub()
+        giveaway = run(giveaways.get_giveaway(giveaway_id))
+
+        assert run(giveaways.finalize_giveaway(bot, giveaway)) is True
+        original_winner = run(giveaways.get_giveaway_winners(giveaway_id))[0]
+        assert run(
+            giveaways.set_giveaway_entry_moderation(
+                giveaway_id,
+                original_winner.user_id,
+                "excluded",
+                actor_user_id=10,
+                reason="Bot review",
+            )
+        )
+        reviewed = run(giveaways.get_giveaway(giveaway_id))
+
+        try:
+            run(giveaways.publish_reviewed_giveaway_results(bot, reviewed, actor_user_id=10))
+        except giveaways.GiveawayValidationError as exc:
+            assert "перевыберите" in str(exc).lower()
+        else:
+            raise AssertionError("publish should require reroll for excluded winners")
+
+        winners = run(giveaways.get_giveaway_winners(giveaway_id))
+        assert [(winner.user_id, winner.status, winner.winner_place) for winner in winners] == [(original_winner.user_id, "excluded", 1)]
 
     def test_preview_markup_has_publish_and_edit_buttons(self):
         from services.giveaways import _preview_markup

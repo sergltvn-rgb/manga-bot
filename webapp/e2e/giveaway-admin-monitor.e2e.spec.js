@@ -23,26 +23,40 @@ test.describe("admin giveaway monitor", () => {
     await page.route("**/api/reader", route => route.fulfill({ json: { ok: true, series: [] } }));
     await page.route("**/api/arts?limit=12", route => route.fulfill({ json: { ok: true, items: [] } }));
     await page.route("**/api/admin/audit?**", route => route.fulfill({ json: { ok: true, items: [], total: 0, offset: 0, limit: 20 } }));
-    await page.route("**/api/admin/giveaways", route =>
+    let rerollCalls = 0;
+    let publishCalls = 0;
+    const fulfillGiveaways = route =>
       route.fulfill({
         json: {
           ok: true,
-          active: [{ id: 7, status: "active", post_text: "VIP launch", prize: "VIP", participants: 12, winners_count: 1, ends_at: "02.05.2026 20:00", monitor: { suspicious: 3, watch: 4, removed: 1, new_1m: 2 } }],
+          active: [{ id: 7, status: "review_pending", post_text: "VIP launch", prize: "VIP", participants: 12, winners_count: 1, ends_at: "02.05.2026 20:00", monitor: { suspicious: 3, watch: 4, removed: 1, new_1m: 2 } }],
           recent: [],
           total: 1,
-          status_counts: { active: 1, scheduled: 0, finished: 0, cancelled: 0, all: 1 },
+          status_counts: { active: 1, review_pending: 1, scheduled: 0, finished: 0, cancelled: 0, all: 1 },
         },
-      }),
-    );
+      });
+    await page.route("**/api/admin/giveaways", fulfillGiveaways);
+    await page.route("**/api/admin/giveaways?**", fulfillGiveaways);
     await page.route("**/api/admin/giveaways/7/participants?**", route =>
       route.fulfill({
         json: {
           ok: true,
           giveaway_id: 7,
+          status: "review_pending",
           filter: "all",
-          counters: { total: 12, suspicious: 3, watch: 4, removed: 1, winners: 0, new_1m: 2, new_5m: 5, new_15m: 9, active_now: 4 },
+          counters: { total: 12, suspicious: 3, watch: 4, removed: 1, winners: 1, new_1m: 2, new_5m: 5, new_15m: 9, active_now: 4 },
           referrals: [{ source: "promoA", participants: 8, suspicious: 3, watch: 4 }],
           timeline: [{ bucket: "12:00", count: 6 }],
+          winners: [{
+            user_id: 1002,
+            first_name: "Warm User",
+            username: "warmuser",
+            display_name: "Warm User",
+            status: "joined",
+            is_winner: true,
+            winner_place: 1,
+            risk_score: 45,
+          }],
           participants: [{
             user_id: 1001,
             first_name: "Fast User",
@@ -70,6 +84,8 @@ test.describe("admin giveaway monitor", () => {
             is_premium: true,
             premium_label: "Premium да",
             status: "joined",
+            is_winner: true,
+            winner_place: 1,
             risk_score: 45,
             risk_level: "watch",
             risk_label: "Низкий",
@@ -82,6 +98,14 @@ test.describe("admin giveaway monitor", () => {
         },
       }),
     );
+    await page.route("**/api/admin/giveaways/7/reroll", async route => {
+      rerollCalls += 1;
+      await route.fulfill({ json: { ok: true, giveaway_id: 7, result: { place: 1, old_user_id: 1002, new_user_id: 1003 }, history: [] } });
+    });
+    await page.route("**/api/admin/giveaways/7/publish-results", async route => {
+      publishCalls += 1;
+      await route.fulfill({ json: { ok: true, giveaway_id: 7, status: "finished" } });
+    });
 
     await page.goto("/admin.html");
     await page.locator("nav").getByRole("button", { name: /Розыгрыши/ }).click();
@@ -92,6 +116,11 @@ test.describe("admin giveaway monitor", () => {
     await expect(page.locator("#participantRows")).toContainText("Fast User");
     await expect(page.locator("#participantRows")).toContainText("35");
     await expect(page.locator("#participantRows")).toContainText("Premium нет");
+    await expect(page.locator("#winnerReviewPanel")).toContainText("Проверка победителей");
+    await expect(page.locator("#winnerReviewPanel")).toContainText("Warm User");
+    await expect(page.locator("#winnerReviewPanel")).toContainText("Опубликовать итоги");
+    await expect(page.locator("#winnerReviewPanel")).toContainText("Перевыбрать");
+    await expect(page.locator("#participantRows")).toContainText("1 место");
     await expect(page.locator("#participantRows")).toContainText("01.05.2026 15:09 МСК");
     await expect(page.locator("#participantRows")).toContainText("прямой вход");
     await expect(page.locator("#participantRows")).toContainText("язык ru");
@@ -112,5 +141,13 @@ test.describe("admin giveaway monitor", () => {
     await expect(page.locator("#participantRows")).not.toContainText("lang ?");
     await expect(page.locator("[data-entry-action='exclude']").first()).toBeVisible();
     await expect(page.locator("[data-entry-action='trust']").first()).toBeVisible();
+
+    page.once("dialog", dialog => dialog.accept("review"));
+    await page.locator("#winnerReviewPanel [data-giveaway-reroll-place='1']").click();
+    await expect.poll(() => rerollCalls).toBe(1);
+
+    await page.locator("[data-giveaway-publish-results='7']").click();
+    await page.getByRole("button", { name: "Опубликовать", exact: true }).click();
+    await expect.poll(() => publishCalls).toBe(1);
   });
 });

@@ -19,11 +19,14 @@ from services.giveaways import (
     count_recent_giveaways,
     format_giveaway_end,
     format_giveaway_publish,
+    get_giveaway,
     get_giveaway_required_channels,
     get_giveaway_monitor_snapshot,
     get_giveaway_reroll_history,
+    GiveawayValidationError,
     list_active_giveaways,
     list_recent_giveaways,
+    publish_reviewed_giveaway_results,
     reroll_giveaway_place,
     set_giveaway_entry_moderation,
     split_place_prizes,
@@ -83,7 +86,7 @@ async def _admin_summary_counts() -> dict[str, int]:
             ]
         )
         giveaways_scheduled = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'scheduled'")
-        giveaways_active = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status IN ('active', 'finishing')")
+        giveaways_active = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status IN ('active', 'finishing', 'review_pending')")
         giveaways_finished = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'finished'")
         giveaways_cancelled = await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'cancelled'")
         return {
@@ -369,7 +372,8 @@ async def _giveaway_status_counts() -> dict[str, int]:
     async with aiosqlite.connect(database.DB_PATH) as db:
         return {
             "scheduled": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'scheduled'"),
-            "active": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status IN ('active', 'finishing')"),
+            "active": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status IN ('active', 'finishing', 'review_pending')"),
+            "review_pending": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'review_pending'"),
             "finished": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'finished'"),
             "cancelled": await _count(db, "SELECT COUNT(*) FROM giveaways WHERE status = 'cancelled'"),
             "all": await _count(db, "SELECT COUNT(*) FROM giveaways"),
@@ -490,6 +494,27 @@ async def handle_admin_giveaway_reroll(request: aiohttp.web.Request) -> aiohttp.
             "history": await get_giveaway_reroll_history(giveaway_id),
         }
     )
+
+
+async def handle_admin_giveaway_publish_results(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    user = await _require_admin(request)
+    if isinstance(user, aiohttp.web.Response):
+        return user
+    try:
+        giveaway_id = _path_int(request, "giveaway_id", r"/api/admin/giveaways/(\d+)/publish-results")
+    except (TypeError, ValueError):
+        return webapp_error("bad_request", status=400)
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return webapp_error("not_found", status=404)
+    try:
+        await publish_reviewed_giveaway_results(request.app["bot"], giveaway, actor_user_id=user["id"])
+    except GiveawayValidationError as exc:
+        return webapp_error("bad_request", status=400, message=str(exc))
+    except Exception as exc:  # noqa: BLE001 - convert Telegram/API failures to an admin-visible response.
+        return webapp_error("bad_request", status=400, message=str(exc))
+    updated = await get_giveaway(giveaway_id)
+    return _json({"ok": True, "giveaway_id": giveaway_id, "status": updated.status if updated else "finished"})
 
 
 def _parse_payload(raw: Any) -> Any:

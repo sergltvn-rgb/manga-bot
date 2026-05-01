@@ -4899,6 +4899,7 @@ from services.admin_webapp_api import (  # noqa: E402,F401
     handle_admin_audit,
     handle_admin_giveaway_participant_moderation,
     handle_admin_giveaway_participants,
+    handle_admin_giveaway_publish_results,
     handle_admin_giveaway_reroll,
     handle_admin_giveaways,
     handle_admin_health,
@@ -5421,6 +5422,7 @@ def create_webapp_api_app() -> aiohttp.web.Application:
         "/api/admin/giveaways/{giveaway_id}/participants/{user_id}/moderation", handle_admin_giveaway_participant_moderation
     )
     app.router.add_post("/api/admin/giveaways/{giveaway_id}/reroll", handle_admin_giveaway_reroll)
+    app.router.add_post("/api/admin/giveaways/{giveaway_id}/publish-results", handle_admin_giveaway_publish_results)
     app.router.add_post("/api/admin/sync", handle_admin_sync)
     app.router.add_get("/api/webapp/health", handle_webapp_health)
 
@@ -5446,6 +5448,7 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_options("/api/admin/giveaways/{giveaway_id}/participants", handle_cors_preflight)
     app.router.add_options("/api/admin/giveaways/{giveaway_id}/participants/{user_id}/moderation", handle_cors_preflight)
     app.router.add_options("/api/admin/giveaways/{giveaway_id}/reroll", handle_cors_preflight)
+    app.router.add_options("/api/admin/giveaways/{giveaway_id}/publish-results", handle_cors_preflight)
     app.router.add_options("/api/admin/sync", handle_cors_preflight)
     app.router.add_options("/api/webapp/health", handle_cors_preflight)
 

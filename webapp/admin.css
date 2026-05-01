@@ -928,6 +928,65 @@ tr.is-editing td {
   line-height: 1.45;
 }
 
+.winner-review {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.winner-review.is-pending {
+  border-color: rgba(201, 138, 24, .28);
+  background: rgba(201, 138, 24, .06);
+}
+
+.winner-review__head,
+.winner-review__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.winner-review__head h4 {
+  margin: 0 0 4px;
+}
+
+.winner-review__head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.winner-review__warning {
+  color: var(--rose) !important;
+  font-weight: 800;
+}
+
+.winner-review__list {
+  display: grid;
+  gap: 8px;
+}
+
+.winner-review__row {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.winner-review__row.is-excluded {
+  border-color: rgba(220, 63, 95, .24);
+  background: rgba(220, 63, 95, .06);
+}
+
+.winner-review-empty:empty {
+  display: none;
+}
+
 .risk-feed {
   display: grid;
   gap: 10px;
@@ -999,6 +1058,8 @@ tr.is-editing td {
   .content-quality { grid-template-columns: 1fr; }
   .detail-grid { grid-template-columns: 1fr; }
   .participant-monitor__head { display: grid; }
+  .winner-review__head,
+  .winner-review__row { display: grid; }
   .participant-monitor .table-wrap {
     margin-inline: -12px;
     border-radius: 0;

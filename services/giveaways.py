@@ -50,6 +50,7 @@ GIVEAWAY_STATUS_DRAFT = "draft"
 GIVEAWAY_STATUS_SCHEDULED = "scheduled"
 GIVEAWAY_STATUS_ACTIVE = "active"
 GIVEAWAY_STATUS_FINISHING = "finishing"
+GIVEAWAY_STATUS_REVIEW_PENDING = "review_pending"
 GIVEAWAY_STATUS_FINISHED = "finished"
 GIVEAWAY_STATUS_CANCELLED = "cancelled"
 GIVEAWAY_ENTRY_STATUS_JOINED = "joined"
@@ -464,10 +465,10 @@ async def list_active_giveaways() -> list[Giveaway]:
             SELECT id, status, channel_id, message_id, prize, post_text, media_type,
                    media_file_id, winners_count, ends_at_utc, created_by, publish_at_utc, replacements_count
             FROM giveaways
-            WHERE status IN (?, ?, ?)
+            WHERE status IN (?, ?, ?, ?)
             ORDER BY ends_at_utc, id
             """,
-            (GIVEAWAY_STATUS_SCHEDULED, GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING),
+            (GIVEAWAY_STATUS_SCHEDULED, GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING, GIVEAWAY_STATUS_REVIEW_PENDING),
         ) as cursor:
             rows = await cursor.fetchall()
     return [_row_to_giveaway(row) for row in rows]
@@ -489,7 +490,7 @@ async def mark_giveaway_finished(giveaway_id: int, *, replacements_count: int = 
             """
             UPDATE giveaways
             SET status = ?, finished_at = COALESCE(finished_at, ?), replacements_count = ?
-            WHERE id = ? AND status IN (?, ?)
+            WHERE id = ? AND status IN (?, ?, ?)
             """,
             (
                 GIVEAWAY_STATUS_FINISHED,
@@ -498,6 +499,28 @@ async def mark_giveaway_finished(giveaway_id: int, *, replacements_count: int = 
                 giveaway_id,
                 GIVEAWAY_STATUS_ACTIVE,
                 GIVEAWAY_STATUS_FINISHING,
+                GIVEAWAY_STATUS_REVIEW_PENDING,
+            ),
+        )
+        await db.commit()
+        return cursor.rowcount == 1
+
+
+async def mark_giveaway_review_pending(giveaway_id: int, *, replacements_count: int = 0) -> bool:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            UPDATE giveaways
+            SET status = ?, replacements_count = ?
+            WHERE id = ? AND status IN (?, ?, ?)
+            """,
+            (
+                GIVEAWAY_STATUS_REVIEW_PENDING,
+                replacements_count,
+                giveaway_id,
+                GIVEAWAY_STATUS_ACTIVE,
+                GIVEAWAY_STATUS_FINISHING,
+                GIVEAWAY_STATUS_REVIEW_PENDING,
             ),
         )
         await db.commit()
@@ -507,7 +530,7 @@ async def mark_giveaway_finished(giveaway_id: int, *, replacements_count: int = 
 async def cancel_giveaway(giveaway_id: int) -> bool:
     async with aiosqlite.connect(database.DB_PATH) as db:
         cursor = await db.execute(
-            "UPDATE giveaways SET status = ?, finished_at = ? WHERE id = ? AND status IN (?, ?, ?)",
+            "UPDATE giveaways SET status = ?, finished_at = ? WHERE id = ? AND status IN (?, ?, ?, ?)",
             (
                 GIVEAWAY_STATUS_CANCELLED,
                 _dt_to_db(_utcnow()),
@@ -515,6 +538,7 @@ async def cancel_giveaway(giveaway_id: int) -> bool:
                 GIVEAWAY_STATUS_ACTIVE,
                 GIVEAWAY_STATUS_DRAFT,
                 GIVEAWAY_STATUS_SCHEDULED,
+                GIVEAWAY_STATUS_REVIEW_PENDING,
             ),
         )
         await db.commit()
@@ -1027,12 +1051,17 @@ async def get_giveaway_monitor_snapshot(
         "new_15m": len([item for item in participants if item["is_new"]]),
         "active_now": len([item for item in participants if item["activity"]["active_now"]]),
     }
+    winner_items = sorted(
+        [item for item in participants if item["is_winner"]],
+        key=lambda item: (item["winner_place"] or 9999, item["joined_at"], item["user_id"]),
+    )
     return {
         "ok": True,
         "giveaway_id": giveaway_id,
         "status": giveaway.status,
         "filter": filter_value,
         "counters": counters,
+        "winners": winner_items,
         "participants": filtered,
         "referrals": referrals,
         "timeline": timeline,
@@ -1066,8 +1095,6 @@ async def set_giveaway_entry_moderation(
             """
             UPDATE giveaway_entries
             SET status = ?,
-                is_winner = CASE WHEN ? = ? THEN 0 ELSE is_winner END,
-                winner_place = CASE WHEN ? = ? THEN NULL ELSE winner_place END,
                 moderated_at = ?,
                 moderated_by = ?,
                 moderation_reason = ?
@@ -1075,10 +1102,6 @@ async def set_giveaway_entry_moderation(
             """,
             (
                 normalized,
-                normalized,
-                GIVEAWAY_ENTRY_STATUS_EXCLUDED,
-                normalized,
-                GIVEAWAY_ENTRY_STATUS_EXCLUDED,
                 now_db,
                 str(actor_user_id),
                 reason_text,
@@ -1217,9 +1240,11 @@ def _history_status_filter(status: str | None) -> tuple[str, list[object]]:
     if value in {"", "all"}:
         return "", []
     if value == "active":
-        return "status IN (?, ?)", [GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING]
+        return "status IN (?, ?, ?)", [GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING, GIVEAWAY_STATUS_REVIEW_PENDING]
     if value == "scheduled":
         return "status = ?", [GIVEAWAY_STATUS_SCHEDULED]
+    if value == "review_pending":
+        return "status = ?", [GIVEAWAY_STATUS_REVIEW_PENDING]
     if value == "finished":
         return "status = ?", [GIVEAWAY_STATUS_FINISHED]
     if value == "cancelled":
@@ -1498,11 +1523,11 @@ async def list_giveaway_participant_stats() -> list[GiveawayParticipantStats]:
             SELECT g.id, g.channel_id, g.prize, g.winners_count, g.ends_at_utc, COUNT(e.user_id)
             FROM giveaways g
             LEFT JOIN giveaway_entries e ON e.giveaway_id = g.id
-            WHERE g.status IN (?, ?, ?)
+            WHERE g.status IN (?, ?, ?, ?)
             GROUP BY g.id, g.channel_id, g.prize, g.winners_count, g.ends_at_utc
             ORDER BY g.ends_at_utc, g.id
             """,
-            (GIVEAWAY_STATUS_SCHEDULED, GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING),
+            (GIVEAWAY_STATUS_SCHEDULED, GIVEAWAY_STATUS_ACTIVE, GIVEAWAY_STATUS_FINISHING, GIVEAWAY_STATUS_REVIEW_PENDING),
         ) as cursor:
             rows = await cursor.fetchall()
     return [
@@ -1752,8 +1777,8 @@ async def reroll_giveaway_place(
     reason: str = "",
     shuffle: Callable[[list[GiveawayEntry]], list[GiveawayEntry] | None] | None = None,
 ) -> GiveawayRerollResult:
-    if giveaway.status != GIVEAWAY_STATUS_FINISHED:
-        raise GiveawayValidationError("Перевыбор доступен только после завершения розыгрыша.")
+    if giveaway.status not in {GIVEAWAY_STATUS_REVIEW_PENDING, GIVEAWAY_STATUS_FINISHED}:
+        raise GiveawayValidationError("Перевыбор доступен после подведения итогов розыгрыша.")
     if place < 1 or place > giveaway.winners_count:
         raise GiveawayValidationError("Некорректное место для перевыбора.")
 
@@ -1824,7 +1849,10 @@ async def reroll_giveaway_place(
             winner_place=place,
         ),
     )
-    await publish_giveaway_reroll_result(bot, giveaway, result)
+    if giveaway.status == GIVEAWAY_STATUS_FINISHED:
+        await publish_giveaway_reroll_result(bot, giveaway, result)
+    else:
+        await send_giveaway_review_summary(bot, giveaway)
     return result
 
 
@@ -2330,6 +2358,83 @@ def format_winner_lines(winners: list[GiveawayEntry], prize_text: str) -> str:
     return "\n\n".join(lines)
 
 
+def _giveaway_results_text(giveaway: Giveaway, winners: list[GiveawayEntry], participants_count: int) -> str:
+    if winners:
+        winners_text = format_winner_lines(winners, giveaway.prize)
+        shortage = ""
+        if len(winners) < giveaway.winners_count:
+            shortage = f"\n\nПодходящих участников было меньше, чем мест: выбрано {len(winners)} из {giveaway.winners_count}."
+        replaced = f"\nЗамен из-за отписки: {giveaway.replacements_count}." if giveaway.replacements_count else ""
+        return (
+            "🎉 <b>Итоги розыгрыша</b>\n\n"
+            f"👥 Участников: <b>{participants_count}</b>\n\n"
+            f"Победители:\n{winners_text}{replaced}{shortage}"
+        )
+    return (
+        "🎉 <b>Итоги розыгрыша</b>\n\n"
+        f"👥 Участников: <b>{participants_count}</b>\n"
+        "Победителей нет: не нашлось участников с актуальной подпиской."
+    )
+
+
+def _giveaway_review_markup(giveaway_id: int, winners: list[GiveawayEntry]) -> types.InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="✅ Опубликовать итоги", callback_data=f"giveaway_publish_results:{giveaway_id}")
+    if winners:
+        builder.button(text="🎲 Перевыбрать место", callback_data=f"giveaway_reroll_menu:{giveaway_id}")
+    builder.button(text="📊 Excel", callback_data=f"giveaway_export:{giveaway_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+async def send_giveaway_review_summary(bot, giveaway: Giveaway) -> None:
+    winners = await get_giveaway_winners(giveaway.id)
+    entries = await get_giveaway_entries(giveaway.id)
+    excluded_count = sum(1 for entry in entries if entry.status == GIVEAWAY_ENTRY_STATUS_EXCLUDED)
+    active_count = sum(1 for entry in entries if _entry_is_active_for_winner(entry))
+    text = (
+        f"🧾 <b>Итоги розыгрыша #{giveaway.id} готовы к проверке</b>\n\n"
+        f"Канал: {escape_html_text(giveaway.channel_id)}\n"
+        f"Всего записей: <b>{len(entries)}</b>\n"
+        f"В пуле выбора: <b>{active_count}</b>\n"
+        f"Исключено антиботом/админом: <b>{excluded_count}</b>\n"
+        f"Замен из-за отписки: <b>{giveaway.replacements_count}</b>\n\n"
+        f"{_giveaway_results_text(giveaway, winners, active_count)}\n\n"
+        "Проверьте победителей. В канал ничего не публикуется, пока вы не нажмёте «Опубликовать итоги»."
+    )
+    await bot.send_message(
+        chat_id=giveaway.created_by,
+        text=text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=_giveaway_review_markup(giveaway.id, winners),
+    )
+
+
+async def publish_reviewed_giveaway_results(bot, giveaway: Giveaway, *, actor_user_id: int | str | None = None) -> bool:
+    if giveaway.status != GIVEAWAY_STATUS_REVIEW_PENDING:
+        raise GiveawayValidationError("Итоги ещё не готовы к публикации.")
+    winners = await get_giveaway_winners(giveaway.id)
+    excluded_winners = [winner for winner in winners if winner.status == GIVEAWAY_ENTRY_STATUS_EXCLUDED]
+    if excluded_winners:
+        places = ", ".join(str(winner.winner_place or "?") for winner in excluded_winners)
+        raise GiveawayValidationError(f"Сначала перевыберите исключённых победителей: место {places}.")
+    entries = await get_giveaway_entries(giveaway.id)
+    participants_count = sum(1 for entry in entries if _entry_is_active_for_winner(entry))
+    text = _giveaway_results_text(giveaway, winners, participants_count)
+    await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+    await mark_giveaway_finished(giveaway.id, replacements_count=giveaway.replacements_count)
+    await _notify_giveaway_creator(bot, giveaway, f"Розыгрыш #{giveaway.id} опубликован в канал.\n\n{text}")
+    await database.write_admin_audit_log(
+        "giveaway_results_published",
+        str(actor_user_id or giveaway.created_by),
+        target=f"giveaway:{giveaway.id}",
+        payload_json=_json_dumps({"giveaway_id": giveaway.id}),
+        result="ok",
+    )
+    return True
+
+
 async def publish_giveaway_reroll_result(bot, giveaway: Giveaway, result: GiveawayRerollResult) -> None:
     prizes = split_place_prizes(giveaway.prize)
     prize = prizes[result.place - 1] if result.place - 1 < len(prizes) else (prizes[-1] if prizes else "Приз")
@@ -2363,37 +2468,13 @@ async def finalize_giveaway(bot, giveaway: Giveaway) -> bool:
 
     result = await select_winners(entries, giveaway.winners_count, is_subscribed=is_subscribed)
     await mark_winners(giveaway.id, result.winners)
-    await mark_giveaway_finished(giveaway.id, replacements_count=result.replaced_count)
-
-    participants_count = len(entries)
-    if result.winners:
-        winners_text = format_winner_lines(result.winners, giveaway.prize)
-        shortage = ""
-        if len(result.winners) < giveaway.winners_count:
-            shortage = f"\n\nПодходящих участников было меньше, чем мест: выбрано {len(result.winners)} из {giveaway.winners_count}."
-        replaced = f"\nЗамен из-за отписки: {result.replaced_count}." if result.replaced_count else ""
-        text = (
-            "🎉 <b>Итоги розыгрыша</b>\n\n"
-            f"👥 Участников: <b>{participants_count}</b>\n\n"
-            f"Победители:\n{winners_text}{replaced}{shortage}"
-        )
-    else:
-        text = (
-            "🎉 <b>Итоги розыгрыша</b>\n\n"
-            f"👥 Участников: <b>{participants_count}</b>\n"
-            "Победителей нет: не нашлось участников с актуальной подпиской."
-        )
+    await mark_giveaway_review_pending(giveaway.id, replacements_count=result.replaced_count)
+    reviewed = await get_giveaway(giveaway.id)
     try:
-        await bot.send_message(chat_id=giveaway.channel_id, text=text, parse_mode="HTML", disable_web_page_preview=True)
+        await send_giveaway_review_summary(bot, reviewed or giveaway)
     except TelegramAPIError as exc:
-        logging.warning("giveaway result post failed: id=%s error=%s", giveaway.id, _telegram_error_text(exc))
-        await _notify_giveaway_creator(
-            bot,
-            giveaway,
-            f"Итоги розыгрыша #{giveaway.id} посчитаны, но пост в канал отправить не удалось:\n{escape_html_text(_telegram_error_text(exc))}\n\n{text}",
-        )
+        logging.warning("giveaway review summary failed: id=%s error=%s", giveaway.id, _telegram_error_text(exc))
         return True
-    await _notify_giveaway_creator(bot, giveaway, f"Розыгрыш #{giveaway.id} завершен.\n\n{text}")
     return True
 
 
@@ -2430,6 +2511,7 @@ def _giveaway_status_label(status: str) -> str:
         GIVEAWAY_STATUS_SCHEDULED: "запланирован",
         GIVEAWAY_STATUS_ACTIVE: "активен",
         GIVEAWAY_STATUS_FINISHING: "завершается",
+        GIVEAWAY_STATUS_REVIEW_PENDING: "ожидает публикации итогов",
         GIVEAWAY_STATUS_FINISHED: "завершен",
         GIVEAWAY_STATUS_CANCELLED: "отменен",
     }
@@ -2441,6 +2523,7 @@ def _giveaway_status_icon(status: str) -> str:
         GIVEAWAY_STATUS_SCHEDULED: "🕒",
         GIVEAWAY_STATUS_ACTIVE: "🟢",
         GIVEAWAY_STATUS_FINISHING: "🟡",
+        GIVEAWAY_STATUS_REVIEW_PENDING: "🧾",
         GIVEAWAY_STATUS_FINISHED: "✅",
         GIVEAWAY_STATUS_CANCELLED: "⛔",
     }
@@ -2846,6 +2929,9 @@ async def admin_giveaway_active(callback: types.CallbackQuery):
         if item.status == GIVEAWAY_STATUS_ACTIVE:
             builder.button(text=f"🏁 Завершить #{item.id}", callback_data=f"giveaway_finish:{item.id}")
             builder.button(text=f"🔄 Обновить кнопку #{item.id}", callback_data=f"giveaway_refresh_markup:{item.id}")
+        if item.status == GIVEAWAY_STATUS_REVIEW_PENDING:
+            builder.button(text=f"✅ Опубликовать итоги #{item.id}", callback_data=f"giveaway_publish_results:{item.id}")
+            builder.button(text=f"🎲 Перевыбор #{item.id}", callback_data=f"giveaway_reroll_menu:{item.id}")
         builder.button(text=f"⛔ Отменить #{item.id}", callback_data=f"giveaway_cancel:{item.id}")
     builder.button(text="🔄 Обновить кнопки всех активных", callback_data="giveaway_refresh_markups")
     builder.button(text="⬅️ Назад", callback_data="admin_giveaways")
@@ -2968,8 +3054,10 @@ async def _render_giveaway_history_item(
     text = _format_admin_giveaway_card(giveaway, entries_count=count, required_channels=required)
     builder = InlineKeyboardBuilder()
     builder.button(text=f"📊 Excel #{giveaway_id}", callback_data=f"giveaway_export:{giveaway_id}")
-    if giveaway.status == GIVEAWAY_STATUS_FINISHED:
+    if giveaway.status in {GIVEAWAY_STATUS_REVIEW_PENDING, GIVEAWAY_STATUS_FINISHED}:
         builder.button(text=f"🎲 Перевыбор #{giveaway_id}", callback_data=f"giveaway_reroll_menu:{giveaway_id}")
+    if giveaway.status == GIVEAWAY_STATUS_REVIEW_PENDING:
+        builder.button(text=f"✅ Опубликовать итоги #{giveaway_id}", callback_data=f"giveaway_publish_results:{giveaway_id}")
     builder.button(text=f"🔁 Повторить #{giveaway_id}", callback_data=f"giveaway_repeat:{giveaway_id}")
     builder.button(text="⬅️ К странице", callback_data=f"admin_giveaway_history_page:{scope}:{page}")
     builder.adjust(1)
@@ -3042,8 +3130,8 @@ async def admin_giveaway_reroll_menu(callback: types.CallbackQuery):
         return
     giveaway_id = int(callback.data.split(":", 1)[1])
     giveaway = await get_giveaway(giveaway_id)
-    if giveaway is None or giveaway.status != GIVEAWAY_STATUS_FINISHED:
-        return await callback.answer("Перевыбор доступен только для завершенного розыгрыша.", show_alert=True)
+    if giveaway is None or giveaway.status not in {GIVEAWAY_STATUS_REVIEW_PENDING, GIVEAWAY_STATUS_FINISHED}:
+        return await callback.answer("Перевыбор доступен после подведения итогов.", show_alert=True)
     winners = await _normalize_winner_places(giveaway_id)
     if not winners:
         return await callback.answer("В этом розыгрыше нет победителей для перевыбора.", show_alert=True)
@@ -3080,6 +3168,24 @@ async def admin_giveaway_reroll_place(callback: types.CallbackQuery):
     await callback.answer("Готово.")
 
 
+@giveaway_router.callback_query(F.data.startswith("giveaway_publish_results:"))
+async def admin_giveaway_publish_results(callback: types.CallbackQuery):
+    if not await _require_admin(callback):
+        return
+    giveaway_id = int(callback.data.split(":", 1)[1])
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return await callback.answer("Розыгрыш не найден.", show_alert=True)
+    try:
+        await publish_reviewed_giveaway_results(callback.bot, giveaway, actor_user_id=callback.from_user.id)
+    except GiveawayValidationError as exc:
+        return await callback.answer(str(exc), show_alert=True)
+    except TelegramAPIError as exc:
+        return await callback.answer(f"Не удалось опубликовать итоги: {_telegram_error_text(exc)}", show_alert=True)
+    await callback.message.answer(f"Итоги розыгрыша #{giveaway_id} опубликованы в канал.")
+    await callback.answer("Опубликовано.")
+
+
 @giveaway_router.callback_query(F.data.startswith("giveaway_finish:"))
 async def admin_giveaway_finish_now(callback: types.CallbackQuery):
     if not await _require_admin(callback):
@@ -3089,7 +3195,7 @@ async def admin_giveaway_finish_now(callback: types.CallbackQuery):
     if giveaway is None or giveaway.status != GIVEAWAY_STATUS_ACTIVE:
         return await callback.answer("Розыгрыш не найден или уже закрыт.", show_alert=True)
     await finalize_giveaway(callback.bot, giveaway)
-    await callback.answer("Розыгрыш завершён.")
+    await callback.answer("Итоги отправлены в ЛС на проверку.")
     await admin_giveaway_active(callback)
 
 

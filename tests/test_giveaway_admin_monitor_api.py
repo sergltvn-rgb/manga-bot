@@ -119,3 +119,61 @@ def test_admin_giveaway_moderation_endpoint_requires_reason(tmp_path, monkeypatc
     assert response.status == 400
     assert payload["ok"] is False
     assert payload["error"]["code"] == "bad_request"
+
+
+def test_admin_giveaway_publish_results_endpoint_posts_reviewed_results(tmp_path, monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import make_mocked_request
+
+    import database
+    import services.admin_webapp_api as admin_api
+    from services import giveaways
+
+    db_path = tmp_path / "admin-giveaway-publish.db"
+    monkeypatch.setattr(database, "DB_PATH", str(db_path))
+    run(database.init_db())
+    install_auth(monkeypatch)
+
+    class Member:
+        status = "member"
+
+    class BotStub:
+        def __init__(self):
+            self.calls = []
+
+        async def get_chat_member(self, *, chat_id, user_id):
+            return Member()
+
+        async def send_message(self, **kwargs):
+            self.calls.append(("send_message", kwargs))
+            return type("Msg", (), {"message_id": 77})()
+
+    giveaway_id = run(
+        giveaways.create_giveaway(
+            channel_id="@main_channel",
+            prize="VIP",
+            post_text="Post",
+            winners_count=1,
+            ends_at_utc=datetime(2026, 5, 1, 17, 0, tzinfo=timezone.utc),
+            created_by=10,
+        )
+    )
+    run(giveaways.set_giveaway_published(giveaway_id, 321))
+    run(giveaways.add_giveaway_entry(giveaway_id, 1001, "winner", "Winner"))
+    bot = BotStub()
+    run(giveaways.finalize_giveaway(bot, run(giveaways.get_giveaway(giveaway_id))))
+    bot.calls.clear()
+    app = web.Application()
+    app["bot"] = bot
+
+    response = run(
+        admin_api.handle_admin_giveaway_publish_results(
+            make_mocked_request("POST", f"/api/admin/giveaways/{giveaway_id}/publish-results", app=app)
+        )
+    )
+    payload = body_json(response)
+
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["status"] == giveaways.GIVEAWAY_STATUS_FINISHED
+    assert [call[1]["chat_id"] for call in bot.calls] == ["@main_channel", 10]

@@ -202,6 +202,7 @@
           <div class="toolbar" id="giveawayFilters">
             <button class="btn active-filter" data-giveaway-status="all">Все</button>
             <button class="btn" data-giveaway-status="active">Активные</button>
+            <button class="btn" data-giveaway-status="review_pending">Ждут итогов</button>
             <button class="btn" data-giveaway-status="scheduled">Запланированные</button>
             <button class="btn" data-giveaway-status="finished">Завершенные</button>
           </div>
@@ -844,6 +845,7 @@
       root.innerHTML = `
         <div class="giveaway-summary">
           <div><span>Активные</span><b>${counts.active || active.length}</b></div>
+          <div><span>Ждут итогов</span><b>${counts.review_pending || 0}</b></div>
           <div><span>Запланированные</span><b>${counts.scheduled || 0}</b></div>
           <div><span>Завершенные</span><b>${counts.finished || 0}</b></div>
           <div><span>Всего в истории</span><b>${escapeHtml(payload.total || 0)}</b></div>
@@ -868,6 +870,7 @@
             </select>
           </div>
           <div id="giveawayRiskFeed" class="risk-feed"><span class="label">Откройте карточку розыгрыша, чтобы загрузить участников.</span></div>
+          <div id="winnerReviewPanel" class="winner-review-empty"></div>
           <div class="table-wrap compact-table">
             <table>
               <thead><tr><th>Участник</th><th>Источник</th><th>Активность</th><th>Риск</th><th>Причины</th><th>Действия</th></tr></thead>
@@ -938,6 +941,54 @@
       return 'Нет сигналов';
     }
 
+    function winnerReviewPanelHtml(payload, rows) {
+      const winners = asArray(payload.winners).length
+        ? asArray(payload.winners)
+        : asArray(rows).filter((item) => item.is_winner);
+      const isReview = payload.status === 'review_pending';
+      if (!isReview && !winners.length) return '';
+      const excludedWinners = winners.filter((item) => item.status === 'excluded');
+      const publishButton = isReview
+        ? `<button class="btn primary" data-giveaway-publish-results="${escapeHtml(payload.giveaway_id)}">Опубликовать итоги</button>`
+        : '';
+      const warning = excludedWinners.length
+        ? '<p class="winner-review__warning">Есть исключённый победитель. Перед публикацией перевыберите его место.</p>'
+        : '<p>Итоги пока видит только админ. В канал они попадут только после публикации.</p>';
+      const winnerRows = winners.length ? winners.map((item) => {
+        const place = item.winner_place || '?';
+        const name = item.display_name || item.first_name || item.username || item.user_id;
+        const status = participantStatusLabel(item.status);
+        const moderateButton = item.status === 'excluded'
+          ? `<button class="btn" data-entry-action="restore" data-giveaway-id="${escapeHtml(payload.giveaway_id)}" data-user-id="${escapeHtml(item.user_id)}">Восстановить</button>`
+          : `<button class="btn danger" data-entry-action="exclude" data-giveaway-id="${escapeHtml(payload.giveaway_id)}" data-user-id="${escapeHtml(item.user_id)}">Исключить</button>`;
+        const rerollButton = isReview
+          ? `<button class="btn" data-giveaway-reroll-place="${escapeHtml(place)}" data-giveaway-id="${escapeHtml(payload.giveaway_id)}">Перевыбрать</button>`
+          : '';
+        return `
+          <div class="winner-review__row ${item.status === 'excluded' ? 'is-excluded' : ''}">
+            <div>
+              <b>${escapeHtml(place)} место · ${escapeHtml(name)}</b>
+              <span class="label">ID ${escapeHtml(item.user_id)} ${item.username ? `@${escapeHtml(item.username)}` : ''} · ${escapeHtml(status)}</span>
+            </div>
+            <span class="badge ${riskTone(item.risk_score)}">риск ${escapeHtml(item.risk_score || 0)}</span>
+            <div class="actions-cell">${rerollButton}${moderateButton}</div>
+          </div>
+        `;
+      }).join('') : '<div class="empty-state"><b>Победители ещё не выбраны</b><span>Когда розыгрыш завершится, они появятся здесь для проверки.</span></div>';
+      return `
+        <div class="winner-review ${isReview ? 'is-pending' : ''}">
+          <div class="winner-review__head">
+            <div>
+              <h4>Проверка победителей</h4>
+              ${warning}
+            </div>
+            <div class="actions-cell">${publishButton}</div>
+          </div>
+          <div class="winner-review__list">${winnerRows}</div>
+        </div>
+      `;
+    }
+
     function renderParticipants(payload) {
       state.giveawayParticipants = payload;
       const counters = payload.counters || {};
@@ -957,8 +1008,11 @@
         </div>
       `;
       const rows = asArray(payload.participants);
+      const winnerPanel = document.getElementById('winnerReviewPanel');
+      if (winnerPanel) winnerPanel.innerHTML = winnerReviewPanelHtml(payload, rows);
       document.getElementById('participantRows').innerHTML = rows.length ? rows.map((item) => {
         const flags = asArray(item.risk_flags);
+        const winnerBadge = item.is_winner ? ` <span class="badge amber">${escapeHtml(item.winner_place || '?')} место</span>` : '';
         const actions = item.status === 'excluded'
           ? `<button class="btn" data-entry-action="restore" data-giveaway-id="${escapeHtml(payload.giveaway_id)}" data-user-id="${escapeHtml(item.user_id)}">Восстановить</button>`
           : `<button class="btn danger" data-entry-action="exclude" data-giveaway-id="${escapeHtml(payload.giveaway_id)}" data-user-id="${escapeHtml(item.user_id)}">Исключить</button><button class="btn" data-entry-action="trust" data-giveaway-id="${escapeHtml(payload.giveaway_id)}" data-user-id="${escapeHtml(item.user_id)}">Нормальный</button>`;
@@ -968,7 +1022,7 @@
         const premium = item.premium_label || premiumLabel(item.is_premium);
         return `
           <tr>
-            <td><b>${escapeHtml(item.display_name || item.first_name || item.username || item.user_id)}</b><br><span class="label">ID ${escapeHtml(item.user_id)} ${item.username ? `@${escapeHtml(item.username)}` : ''} · ${escapeHtml(participantStatusLabel(item.status))}</span></td>
+            <td><b>${escapeHtml(item.display_name || item.first_name || item.username || item.user_id)}</b>${winnerBadge}<br><span class="label">ID ${escapeHtml(item.user_id)} ${item.username ? `@${escapeHtml(item.username)}` : ''} · ${escapeHtml(participantStatusLabel(item.status))}</span></td>
             <td>${escapeHtml(referral)}<br><span class="label">${escapeHtml(language)} · ${escapeHtml(premium)}</span></td>
             <td><span class="label">${escapeHtml(joinedAt)}</span><br><b>${escapeHtml(activityLabel(item.activity))}</b></td>
             <td><span class="badge ${riskTone(item.risk_score)}">${escapeHtml(item.risk_score)}</span><br><span class="label">${escapeHtml(riskLevelLabel(item))}</span></td>
@@ -993,6 +1047,7 @@
         scheduled: 'Запланирован',
         active: 'Активен',
         finishing: 'Завершается',
+        review_pending: 'Ожидает публикации итогов',
         finished: 'Завершен',
         cancelled: 'Отменен'
       })[status] || status || 'Неизвестно';
@@ -1403,6 +1458,34 @@
           button.classList.toggle('active-filter', button === giveawayFilter);
         });
         await loadGiveaways();
+      }
+      const rerollBtn = event.target.closest('[data-giveaway-reroll-place]');
+      if (rerollBtn) {
+        const place = Number(rerollBtn.dataset.giveawayRerollPlace || 1);
+        const giveawayId = rerollBtn.dataset.giveawayId;
+        const reason = window.prompt('Причина перевыбора для audit log', 'Проверка победителя перед публикацией');
+        if (!reason) return;
+        await api(`/api/admin/giveaways/${encodeURIComponent(giveawayId)}/reroll`, {
+          method: 'POST',
+          body: JSON.stringify({ place, reason })
+        });
+        await loadGiveaways();
+        await loadGiveawayParticipants(giveawayId);
+        showToast(`${place} место перевыбрано`);
+      }
+      const publishResultsBtn = event.target.closest('[data-giveaway-publish-results]');
+      if (publishResultsBtn) {
+        const giveawayId = publishResultsBtn.dataset.giveawayPublishResults;
+        const approved = await confirmAction({
+          title: 'Опубликовать итоги',
+          text: 'Итоги будут отправлены в канал. Убедитесь, что подозрительные победители проверены или перевыбраны.',
+          confirmText: 'Опубликовать'
+        });
+        if (!approved) return;
+        await api(`/api/admin/giveaways/${encodeURIComponent(giveawayId)}/publish-results`, { method: 'POST' });
+        await loadGiveaways();
+        await loadGiveawayParticipants(giveawayId);
+        showToast('Итоги опубликованы в канал');
       }
       const entryAction = event.target.closest('[data-entry-action]');
       if (entryAction) {
