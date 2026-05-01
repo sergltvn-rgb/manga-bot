@@ -60,8 +60,11 @@ JOINED_STATUSES = {"member", "administrator", "creator"}
 SUPPORTED_MEDIA_TYPES = {"photo", "video", "document", "animation"}
 GIVEAWAY_HISTORY_PAGE_SIZE = 4
 GIVEAWAY_RISK_REVIEW_THRESHOLD = 50
+GIVEAWAY_AUTO_EXCLUDE_THRESHOLD = 70
 GIVEAWAY_CAPTCHA_TTL_SECONDS = 5 * 60
 GIVEAWAY_CAPTCHA_MAX_ATTEMPTS = 3
+GIVEAWAY_CAPTCHA_MIN_SOLVE_SECONDS = 3
+GIVEAWAY_SYSTEM_ANTIBOT_ACTOR = "system:antibot"
 GIVEAWAY_RISK_FLAG_LABELS = {
     "fast_registration": "Слишком быстрое участие",
     "referral_burst": "Всплеск по рефералке",
@@ -1082,6 +1085,52 @@ async def set_giveaway_entry_moderation(
     return True
 
 
+async def auto_moderate_giveaway_entry_if_needed(
+    giveaway_id: int,
+    user_id: int,
+    *,
+    now: datetime | None = None,
+) -> dict:
+    snapshot = await get_giveaway_monitor_snapshot(giveaway_id, now=now)
+    participant = next((item for item in snapshot.get("participants", []) if int(item.get("user_id") or 0) == int(user_id)), None)
+    if not participant:
+        return {"excluded": False, "risk_score": 0, "flags": [], "reason": "participant_not_found"}
+
+    risk_score = int(participant.get("risk_score") or 0)
+    flag_codes = {str(flag.get("code") or "") for flag in participant.get("risk_flags", [])}
+    status = str(participant.get("status") or "")
+    if status != GIVEAWAY_ENTRY_STATUS_JOINED:
+        return {"excluded": False, "risk_score": risk_score, "flags": sorted(flag_codes), "reason": "status_not_joined"}
+    if risk_score < GIVEAWAY_AUTO_EXCLUDE_THRESHOLD:
+        return {"excluded": False, "risk_score": risk_score, "flags": sorted(flag_codes), "reason": "below_threshold"}
+
+    has_strong_combo = ("fast_registration" in flag_codes and ("referral_burst" in flag_codes or "time_burst" in flag_codes)) or (
+        "referral_burst" in flag_codes and "time_burst" in flag_codes
+    )
+    if not has_strong_combo:
+        return {"excluded": False, "risk_score": risk_score, "flags": sorted(flag_codes), "reason": "no_strong_combo"}
+
+    labels = [
+        str(flag.get("label") or flag.get("code") or "")
+        for flag in participant.get("risk_flags", [])
+        if str(flag.get("code") or "") in flag_codes
+    ]
+    reason = f"Авто: высокий технический риск {risk_score}. Сигналы: {', '.join(labels[:4])}."
+    changed = await set_giveaway_entry_moderation(
+        giveaway_id,
+        user_id,
+        GIVEAWAY_ENTRY_STATUS_EXCLUDED,
+        actor_user_id=GIVEAWAY_SYSTEM_ANTIBOT_ACTOR,
+        reason=reason,
+    )
+    return {
+        "excluded": changed,
+        "risk_score": risk_score,
+        "flags": sorted(flag_codes),
+        "reason": reason if changed else "moderation_not_changed",
+    }
+
+
 async def has_giveaway_entry(giveaway_id: int, user_id: int) -> bool:
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(
@@ -1093,7 +1142,10 @@ async def has_giveaway_entry(giveaway_id: int, user_id: int) -> bool:
 
 async def count_giveaway_entries(giveaway_id: int) -> int:
     async with aiosqlite.connect(database.DB_PATH) as db:
-        async with db.execute("SELECT COUNT(*) FROM giveaway_entries WHERE giveaway_id = ?", (giveaway_id,)) as cursor:
+        async with db.execute(
+            "SELECT COUNT(*) FROM giveaway_entries WHERE giveaway_id = ? AND status != ?",
+            (giveaway_id, GIVEAWAY_ENTRY_STATUS_EXCLUDED),
+        ) as cursor:
             row = await cursor.fetchone()
             return int(row[0] if row else 0)
 
@@ -1539,12 +1591,28 @@ async def is_giveaway_verified(giveaway_id: int, user_id: int) -> bool:
             return bool(row and row[0])
 
 
+async def _record_giveaway_verification_failure(
+    db: aiosqlite.Connection,
+    giveaway_id: int,
+    user_id: int,
+    attempts_count: int,
+) -> None:
+    attempts_count += 1
+    if attempts_count >= GIVEAWAY_CAPTCHA_MAX_ATTEMPTS:
+        await db.execute("DELETE FROM giveaway_verifications WHERE giveaway_id = ? AND user_id = ?", (giveaway_id, user_id))
+        return
+    await db.execute(
+        "UPDATE giveaway_verifications SET attempts_count = ? WHERE giveaway_id = ? AND user_id = ?",
+        (attempts_count, giveaway_id, user_id),
+    )
+
+
 async def verify_giveaway_answer(giveaway_id: int, user_id: int, answer: str, *, now: datetime | None = None) -> bool:
     now_utc = (now or _utcnow()).astimezone(timezone.utc)
     async with aiosqlite.connect(database.DB_PATH) as db:
         async with db.execute(
             """
-            SELECT answer, verified, expires_at, attempts_count
+            SELECT answer, verified, expires_at, attempts_count, created_at
             FROM giveaway_verifications
             WHERE giveaway_id = ? AND user_id = ?
             """,
@@ -1562,14 +1630,13 @@ async def verify_giveaway_answer(giveaway_id: int, user_id: int, answer: str, *,
         if attempts_count >= GIVEAWAY_CAPTCHA_MAX_ATTEMPTS:
             return False
         if str(row[0]) != str(answer).strip():
-            attempts_count += 1
-            if attempts_count >= GIVEAWAY_CAPTCHA_MAX_ATTEMPTS:
-                await db.execute("DELETE FROM giveaway_verifications WHERE giveaway_id = ? AND user_id = ?", (giveaway_id, user_id))
-            else:
-                await db.execute(
-                    "UPDATE giveaway_verifications SET attempts_count = ? WHERE giveaway_id = ? AND user_id = ?",
-                    (attempts_count, giveaway_id, user_id),
-                )
+            await _record_giveaway_verification_failure(db, giveaway_id, user_id, attempts_count)
+            await db.commit()
+            return False
+        created_at = _maybe_dt_from_db(row[4])
+        min_solve_seconds = max(0, int(GIVEAWAY_CAPTCHA_MIN_SOLVE_SECONDS))
+        if created_at and min_solve_seconds and (now_utc - created_at).total_seconds() < min_solve_seconds:
+            await _record_giveaway_verification_failure(db, giveaway_id, user_id, attempts_count)
             await db.commit()
             return False
         await db.execute(
@@ -1962,6 +2029,7 @@ async def join_giveaway_from_webapp(
         language_code=user.get("language_code"),
         is_premium=user.get("is_premium"),
     )
+    auto_moderation = await auto_moderate_giveaway_entry_if_needed(giveaway_id, user_id) if added else {"excluded": False}
     if added and refresh_markup:
         try:
             await refresh_giveaway_participation_markup(bot, giveaway)
@@ -1970,6 +2038,7 @@ async def join_giveaway_from_webapp(
     status["joined"] = True
     status["added"] = added
     status["captcha_required"] = False
+    status["auto_moderation"] = auto_moderation
     status["entries_count"] = await count_giveaway_entries(giveaway_id)
     return status
 
@@ -3087,8 +3156,11 @@ async def giveaway_join(callback: types.CallbackQuery):
         language_code=getattr(callback.from_user, "language_code", None),
         is_premium=getattr(callback.from_user, "is_premium", None),
     )
+    auto_moderation = await auto_moderate_giveaway_entry_if_needed(giveaway_id, callback.from_user.id) if added else {"excluded": False}
     if added:
         await refresh_giveaway_participation_markup(callback.bot, giveaway)
+    if auto_moderation.get("excluded"):
+        return await callback.answer("Заявка отправлена на проверку антиботом.", show_alert=True)
     await callback.answer("Вы участвуете!" if added else "Вы уже участвуете.", show_alert=False)
 
 
@@ -3158,9 +3230,16 @@ async def giveaway_verify(callback: types.CallbackQuery):
         language_code=getattr(callback.from_user, "language_code", None),
         is_premium=getattr(callback.from_user, "is_premium", None),
     )
+    auto_moderation = await auto_moderate_giveaway_entry_if_needed(giveaway_id, callback.from_user.id) if added else {"excluded": False}
     if added:
         await refresh_giveaway_participation_markup(callback.bot, giveaway)
-    text = "Проверка пройдена, вы добавлены в участники." if added else "Проверка пройдена, вы уже участвуете."
+    text = (
+        "Заявка отправлена на проверку антиботом."
+        if auto_moderation.get("excluded")
+        else "Проверка пройдена, вы добавлены в участники."
+        if added
+        else "Проверка пройдена, вы уже участвуете."
+    )
     try:
         await callback.message.edit_text(text)
     except Exception:  # noqa: BLE001 - callback answer is enough if DM message can't be edited.

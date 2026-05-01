@@ -382,15 +382,46 @@ class TestGiveawayDb:
         db_path = str(tmp_path / "giveaways.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
 
+        now = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
         run(database.init_db())
-        challenge = run(giveaways.create_giveaway_verification_challenge(1, 1001, answer_factory=lambda: ("2 + 2", "4", ["3", "4", "5"])))
+        challenge = run(
+            giveaways.create_giveaway_verification_challenge(
+                1,
+                1001,
+                answer_factory=lambda: ("2 + 2", "4", ["3", "4", "5"]),
+                now=now,
+            )
+        )
 
         assert challenge.question == "2 + 2"
         assert challenge.options == ["3", "4", "5"]
         assert run(giveaways.is_giveaway_verified(1, 1001)) is False
-        assert run(giveaways.verify_giveaway_answer(1, 1001, "3")) is False
-        assert run(giveaways.verify_giveaway_answer(1, 1001, "4")) is True
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "3", now=now + timedelta(seconds=1))) is False
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "4", now=now + timedelta(seconds=5))) is True
         assert run(giveaways.is_giveaway_verified(1, 1001)) is True
+
+    def test_verification_challenge_rejects_too_fast_correct_answer(self, tmp_path, monkeypatch):
+        import database
+
+        from services import giveaways
+
+        db_path = str(tmp_path / "giveaways.db")
+        monkeypatch.setattr(database, "DB_PATH", db_path)
+
+        now = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+        run(database.init_db())
+        run(
+            giveaways.create_giveaway_verification_challenge(
+                1,
+                1001,
+                answer_factory=lambda: ("2 + 2", "4", ["3", "4", "5"]),
+                now=now,
+            )
+        )
+
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "4", now=now + timedelta(seconds=1))) is False
+        assert run(giveaways.is_giveaway_verified(1, 1001)) is False
+        assert run(giveaways.verify_giveaway_answer(1, 1001, "4", now=now + timedelta(seconds=5))) is True
 
     def test_verification_challenge_expires_and_rejects_stale_answer(self, tmp_path, monkeypatch):
         import database
@@ -629,6 +660,7 @@ class TestGiveawayWinnerSelection:
         db_path = str(tmp_path / "giveaways.db")
         monkeypatch.setattr(database, "DB_PATH", db_path)
         monkeypatch.setattr(giveaways, "_make_verification_answer", lambda: ("2 + 2", "4", ["3", "4", "5"]))
+        monkeypatch.setattr(giveaways, "GIVEAWAY_CAPTCHA_MIN_SOLVE_SECONDS", 0)
 
         class Member:
             status = "member"
@@ -710,6 +742,7 @@ class TestGiveawayWinnerSelection:
             ]
         )
         monkeypatch.setattr(giveaways, "_make_verification_answer", lambda: next(generated))
+        monkeypatch.setattr(giveaways, "GIVEAWAY_CAPTCHA_MIN_SOLVE_SECONDS", 0)
 
         class Member:
             status = "member"

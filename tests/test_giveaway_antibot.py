@@ -86,6 +86,104 @@ def test_monitor_snapshot_scores_fast_referral_burst_with_explanations(tmp_path,
     assert participant["activity"]["label"] == "2 действия"
 
 
+def test_auto_moderation_excludes_strong_technical_risk_after_join(tmp_path, monkeypatch):
+    import database
+    from services import giveaways
+
+    _db_path, giveaway_id = seed_active_giveaway(tmp_path, monkeypatch)
+    opened_at = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+
+    for offset, user_id in enumerate(range(3001, 3007)):
+        run(
+            giveaways.record_giveaway_participant_event(
+                giveaway_id,
+                user_id,
+                "webapp_open",
+                referral_source="promoA",
+                username=f"promo{offset}",
+                first_name=f"Promo {offset}",
+                created_at=opened_at + timedelta(seconds=offset),
+            )
+        )
+        assert run(giveaways.add_giveaway_entry(giveaway_id, user_id, f"promo{offset}", f"Promo {offset}")) is True
+        run(
+            giveaways.record_giveaway_participant_event(
+                giveaway_id,
+                user_id,
+                "giveaway_join",
+                referral_source="promoA",
+                created_at=opened_at + timedelta(seconds=offset + 4),
+            )
+        )
+
+    result = run(
+        giveaways.auto_moderate_giveaway_entry_if_needed(
+            giveaway_id,
+            3001,
+            now=opened_at + timedelta(minutes=3),
+        )
+    )
+    entries = run(giveaways.get_giveaway_entries(giveaway_id))
+    entry = next(item for item in entries if item.user_id == 3001)
+    snapshot = run(giveaways.get_giveaway_monitor_snapshot(giveaway_id, now=opened_at + timedelta(minutes=3)))
+
+    async def audit_rows():
+        async with aiosqlite.connect(database.DB_PATH) as db:
+            async with db.execute("SELECT action, actor_user_id, target, payload_json FROM admin_audit_log ORDER BY id") as cursor:
+                return await cursor.fetchall()
+
+    rows = run(audit_rows())
+
+    assert result["excluded"] is True
+    assert result["risk_score"] >= giveaways.GIVEAWAY_AUTO_EXCLUDE_THRESHOLD
+    assert {"fast_registration", "referral_burst"}.issubset(set(result["flags"]))
+    assert entry.status == giveaways.GIVEAWAY_ENTRY_STATUS_EXCLUDED
+    assert snapshot["counters"]["removed"] == 1
+    assert rows[-1][0] == "giveaway_entry_excluded"
+    assert rows[-1][1] == giveaways.GIVEAWAY_SYSTEM_ANTIBOT_ACTOR
+    assert rows[-1][2] == f"giveaway:{giveaway_id}:user:3001"
+
+
+def test_auto_moderation_keeps_watch_only_participant_joined(tmp_path, monkeypatch):
+    from services import giveaways
+
+    _db_path, giveaway_id = seed_active_giveaway(tmp_path, monkeypatch)
+    opened_at = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+
+    run(
+        giveaways.record_giveaway_participant_event(
+            giveaway_id,
+            3101,
+            "webapp_open",
+            username="normal_user",
+            first_name="Normal",
+            created_at=opened_at,
+        )
+    )
+    assert run(giveaways.add_giveaway_entry(giveaway_id, 3101, "normal_user", "Normal")) is True
+    run(
+        giveaways.record_giveaway_participant_event(
+            giveaway_id,
+            3101,
+            "giveaway_join",
+            created_at=opened_at + timedelta(seconds=4),
+        )
+    )
+
+    result = run(
+        giveaways.auto_moderate_giveaway_entry_if_needed(
+            giveaway_id,
+            3101,
+            now=opened_at + timedelta(minutes=3),
+        )
+    )
+    entry = run(giveaways.get_giveaway_entries(giveaway_id))[0]
+
+    assert result["excluded"] is False
+    assert result["risk_score"] < giveaways.GIVEAWAY_AUTO_EXCLUDE_THRESHOLD
+    assert entry.status == giveaways.GIVEAWAY_ENTRY_STATUS_JOINED
+
+
 def test_legacy_batch_entries_are_watch_not_suspicious_without_activity_events(tmp_path, monkeypatch):
     import database
 
