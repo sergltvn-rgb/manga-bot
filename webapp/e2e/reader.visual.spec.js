@@ -622,6 +622,77 @@ test.describe("Reader visual regression", () => {
     await assertViewportFit("typo-modal", ["#typo-modal"]);
   });
 
+  test("admin controls use grouped hierarchy and explicit motion properties", async ({ page }) => {
+    const state = createVisualState();
+    state.readerData.series[0].volumes = Array.from({ length: 3 }, (_, idx) => ({
+      volume: idx + 1,
+      custom_name: `Том ${idx + 1}`,
+      chapters: [
+        {
+          chapter: "1",
+          custom_name: "Глава с админскими действиями",
+          text: "Admin hierarchy body.",
+          url: ""
+        }
+      ]
+    }));
+    await installVisualMocks(page, state);
+
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=admin-hierarchy-motion");
+    await expect(page.locator("#series-list .series-card")).toHaveCount(1);
+    await page.evaluate(() => toggleAdminMode(true));
+    await page.locator("#series-list .series-card").first().click();
+    await expect(page.locator("#screen-chapters")).toHaveClass(/active/);
+    await expect(page.locator("#global-admin-fab-btn")).toBeVisible();
+
+    await page.click("#global-admin-fab-btn");
+    await expect(page.locator("#global-admin-menu")).toBeVisible();
+    await expect(page.locator("#global-admin-menu .admin-menu-section-label").first()).toContainText("Главы");
+    await expect(page.locator("#global-admin-menu .global-admin-menu-item-detail").first()).toBeVisible();
+    const globalMenuLayer = await page.evaluate(() => {
+      const firstLabel = document.querySelector("#global-admin-menu .admin-menu-section-label");
+      const menu = document.querySelector("#global-admin-menu");
+      const rect = firstLabel.getBoundingClientRect();
+      const topElement = document.elementFromPoint(rect.left + 8, rect.top + rect.height / 2);
+      const menuRect = menu.getBoundingClientRect();
+      return {
+        labelIsTopTarget: !!topElement?.closest("#global-admin-menu"),
+        topInsideViewport: menuRect.top >= 0,
+        bottomInsideViewport: menuRect.bottom <= innerHeight,
+      };
+    });
+    expect(globalMenuLayer.labelIsTopTarget).toBe(true);
+    expect(globalMenuLayer.topInsideViewport).toBe(true);
+    expect(globalMenuLayer.bottomInsideViewport).toBe(true);
+    await page.click("#global-admin-fab-btn");
+
+    await page.locator("#chapters-list .chapter-item").first().click();
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await page.click("#admin-fab-btn");
+    await expect(page.locator("#admin-menu")).toBeVisible();
+    await expect(page.locator("#admin-menu .admin-menu-section-label")).toHaveCount(3);
+    await expect(page.locator("#admin-menu .admin-menu-item.is-danger")).toContainText("Удалить");
+    const readerMenuLayout = await page.evaluate(() => {
+      const menu = document.querySelector("#admin-menu").getBoundingClientRect();
+      return {
+        topInsideViewport: menu.top >= 0,
+        bottomInsideViewport: menu.bottom <= innerHeight,
+      };
+    });
+    expect(readerMenuLayout.topInsideViewport).toBe(true);
+    expect(readerMenuLayout.bottomInsideViewport).toBe(true);
+
+    const motion = await page.evaluate(() => {
+      const search = getComputedStyle(document.querySelector("#reader-search-panel")).transitionProperty;
+      const editor = getComputedStyle(document.querySelector("#add-chapter-modal")).transitionProperty;
+      return { search, editor };
+    });
+    expect(motion.search.split(",").map((part) => part.trim())).not.toContain("all");
+    expect(motion.editor.split(",").map((part) => part.trim())).not.toContain("all");
+  });
+
   test("polish A+B: immersive reader chrome and chapter navigation use calm constraints", async ({ page }) => {
     const state = createVisualState();
     state.readerData.series[0].title = "Alya Reader Polish With A Long Title That Still Needs Quiet Layout";

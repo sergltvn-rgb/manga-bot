@@ -447,13 +447,44 @@ function syncGlobalAdminFab(screenName) {
 function buildGlobalAdminMenuItems(screenName) {
     const items = [];
     if (screenName === 'chapters' && currentSeries && currentVolume) {
-        items.push({ icon: '📦', label: 'Массовая загрузка глав', onClick: 'openBulkModal()' });
-        items.push({ icon: '📄', label: 'Добавить главу', onClick: 'openAddChapterForCurrent()' });
-        items.push({ icon: '🖼️', label: 'Обложка серии', onClick: 'openCoverEditForCurrent()' });
+        items.push({
+            group: 'Главы',
+            icon: '📦',
+            label: 'Массовая загрузка',
+            detail: 'Превью, дубли и ошибки перед публикацией',
+            onClick: 'openBulkModal()'
+        });
+        items.push({
+            group: 'Главы',
+            icon: '📄',
+            label: 'Добавить главу',
+            detail: 'Одна глава в текущий том',
+            onClick: 'openAddChapterForCurrent()'
+        });
+        items.push({
+            group: 'Серия',
+            icon: '🖼️',
+            label: 'Обложка серии',
+            detail: 'Обновить витрину и постер',
+            onClick: 'openCoverEditForCurrent()'
+        });
     } else if (screenName === 'series' || screenName === 'library') {
-        items.push({ icon: '🔄', label: 'Обновить данные', onClick: 'refreshReaderDataInBackground()' });
+        items.push({
+            group: 'Данные',
+            icon: '🔄',
+            label: 'Обновить данные',
+            detail: 'Force refresh без stale If-None-Match',
+            onClick: 'refreshReaderDataInBackground()'
+        });
     }
-    items.push({ icon: '🚪', label: 'Выйти из режима редактора', onClick: 'toggleAdminMode(false)' });
+    items.push({
+        group: 'Режим',
+        tone: 'quiet',
+        icon: '🚪',
+        label: 'Выйти из режима редактора',
+        detail: 'Скрыть админские кнопки',
+        onClick: 'toggleAdminMode(false)'
+    });
     return items;
 }
 
@@ -470,11 +501,25 @@ function toggleGlobalAdminMenu() {
     // Заполнить меню согласно текущему экрану
     const screenName = fab.getAttribute('data-screen') || 'series';
     const items = buildGlobalAdminMenuItems(screenName);
-    menu.innerHTML = items.map(it => `
-        <button type="button" class="global-admin-menu-item" onclick="toggleGlobalAdminMenu(); ${it.onClick}">
-            <span class="icon">${it.icon}</span><span>${escapeHtml(it.label)}</span>
-        </button>
-    `).join('');
+    let lastGroup = '';
+    menu.innerHTML = items.map(it => {
+        const group = String(it.group || '');
+        const groupHtml = group && group !== lastGroup
+            ? `<div class="admin-menu-section-label">${escapeHtml(group)}</div>`
+            : '';
+        lastGroup = group || lastGroup;
+        const toneClass = it.tone ? ` is-${escapeHtml(it.tone)}` : '';
+        return `
+            ${groupHtml}
+            <button type="button" class="global-admin-menu-item${toneClass}" onclick="toggleGlobalAdminMenu(); ${it.onClick}">
+                <span class="icon">${it.icon}</span>
+                <span class="global-admin-menu-item-copy">
+                    <span class="global-admin-menu-item-label">${escapeHtml(it.label)}</span>
+                    ${it.detail ? `<span class="global-admin-menu-item-detail">${escapeHtml(it.detail)}</span>` : ''}
+                </span>
+            </button>
+        `;
+    }).join('');
     menu.hidden = false;
     requestAnimationFrame(() => fab.classList.add('is-open'));
 }

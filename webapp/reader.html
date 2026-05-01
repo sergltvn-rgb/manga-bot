@@ -13,7 +13,7 @@
     <script>
         (function () {
             const params = new URLSearchParams(window.location.search);
-            const rev = params.get('rev') || '20260501-reader-search-admin-1';
+            const rev = params.get('rev') || '20260501-reader-search-admin-2';
             window.__READER_REV = rev;
             window.__WEBAPP_BUILD = { rev };
             const css = document.createElement('link');
@@ -247,14 +247,17 @@
                     <svg class="icon-sm" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
                 <div id="admin-menu" class="admin-menu glass-panel hidden">
-                    <div class="admin-menu-header">Инструменты Админа</div>
-                    <button class="admin-menu-item" onclick="renameChapterCurrent()"><span class="icon">📝</span> Переименовать главу</button>
-                    <button class="admin-menu-item" onclick="resetCurrentChapterName()"><span class="icon">🔄</span> Сброс имени</button>
-                    <button class="admin-menu-item" onclick="openChapterEditModal(currentChapterIdx)"><span class="icon">✎</span> Редактировать главу</button>
-                    <button class="admin-menu-item" onclick="openAddChapterForCurrent()"><span class="icon">📄</span> Добавить главу</button>
-                    <button class="admin-menu-item" onclick="deleteChapterCurrent()"><span class="icon">🗑️</span> Удалить главу</button>
-                    <button class="admin-menu-item" onclick="openBulkModal()"><span class="icon">📦</span> Масс. загрузка</button>
-                    <button class="admin-menu-item" onclick="openCoverEditForCurrent()"><span class="icon">🖼️</span> Обложка серии</button>
+                    <div class="admin-menu-header">Инструменты админа</div>
+                    <div class="admin-menu-section-label">Текущая глава</div>
+                    <button class="admin-menu-item" onclick="openChapterEditModal(currentChapterIdx)"><span class="icon">✎</span><span><span class="admin-menu-item-label">Редактировать главу</span><span class="admin-menu-item-detail">Текст, ссылки и предпросмотр</span></span></button>
+                    <button class="admin-menu-item" onclick="renameChapterCurrent()"><span class="icon">📝</span><span><span class="admin-menu-item-label">Переименовать</span><span class="admin-menu-item-detail">Название в списке глав</span></span></button>
+                    <button class="admin-menu-item" onclick="resetCurrentChapterName()"><span class="icon">↺</span><span><span class="admin-menu-item-label">Сброс имени</span><span class="admin-menu-item-detail">Вернуть стандартное название</span></span></button>
+                    <div class="admin-menu-section-label">Добавление</div>
+                    <button class="admin-menu-item" onclick="openAddChapterForCurrent()"><span class="icon">📄</span><span><span class="admin-menu-item-label">Добавить главу</span><span class="admin-menu-item-detail">Одна глава в этот том</span></span></button>
+                    <button class="admin-menu-item" onclick="openBulkModal()"><span class="icon">📦</span><span><span class="admin-menu-item-label">Массовая загрузка</span><span class="admin-menu-item-detail">Проверка дублей и ошибок</span></span></button>
+                    <button class="admin-menu-item" onclick="openCoverEditForCurrent()"><span class="icon">🖼️</span><span><span class="admin-menu-item-label">Обложка серии</span><span class="admin-menu-item-detail">Постер в библиотеке</span></span></button>
+                    <div class="admin-menu-section-label">Опасная зона</div>
+                    <button class="admin-menu-item is-danger" onclick="deleteChapterCurrent()"><span class="icon">🗑️</span><span><span class="admin-menu-item-label">Удалить главу</span><span class="admin-menu-item-detail">Потребуется подтверждение</span></span></button>
                 </div>
             </div>
             <div class="reader-bottom-bar" id="reader-bottom-bar">
@@ -722,6 +725,6 @@
         </div>
     </div>
 
-    <script src="reader.boot.js?v=20260501-reader-search-admin-1"></script>
+    <script src="reader.boot.js?v=20260501-reader-search-admin-2"></script>
 </body>
 </html>

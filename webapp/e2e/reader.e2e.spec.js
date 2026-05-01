@@ -1361,6 +1361,12 @@ test.describe("Reader E2E smoke", () => {
     await expect(page.locator(".reader-search-result")).toHaveCount(3);
     await expect(page.locator(".reader-search-result", { hasText: "Volume 4" })).toContainText("Alya AI Volume Search");
 
+    await page.evaluate(() => refreshReaderDataInBackground());
+    await expect.poll(() => state.calls.reader).toBeGreaterThanOrEqual(2);
+    expect(state.readerIfNoneMatchHeaders.at(-1)).toBe("");
+    await expect(page.locator("#reader-search-results")).toBeVisible();
+    await expect(page.locator(".reader-search-result")).toHaveCount(3);
+
     await page.locator(".reader-search-result", { hasText: "Volume 4" }).click();
 
     await expect(page.locator("#screen-reader")).toHaveClass(/active/);
