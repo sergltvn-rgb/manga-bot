@@ -402,6 +402,15 @@ class TestWebappMiddleware:
 
         assert _webapp_cache_control_for_request(request) == "no-cache"
 
+    def test_admin_html_revalidates_cache(self):
+        from types import SimpleNamespace
+
+        from services.webapp_middleware import _webapp_cache_control_for_request
+
+        request = SimpleNamespace(path="/webapp/admin.html", rel_url=SimpleNamespace(query={}))
+
+        assert _webapp_cache_control_for_request(request) == "no-cache"
+
 
 # --- services.telegraph ---
 

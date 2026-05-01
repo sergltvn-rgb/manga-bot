@@ -79,6 +79,11 @@ def test_monitor_snapshot_scores_fast_referral_burst_with_explanations(tmp_path,
     assert all(flag["reason"] for flag in participant["risk_flags"])
     assert all(flag.get("label") for flag in participant["risk_flags"])
     assert participant["risk_level"] in {"review", "high"}
+    assert participant["joined_at_label"]
+    assert participant["referral_label"] == "promoA"
+    assert participant["language_label"] == "язык ar"
+    assert participant["premium_label"] == "Premium нет"
+    assert participant["activity"]["label"] == "2 действия"
 
 
 def test_legacy_batch_entries_are_watch_not_suspicious_without_activity_events(tmp_path, monkeypatch):
@@ -113,6 +118,11 @@ def test_legacy_batch_entries_are_watch_not_suspicious_without_activity_events(t
     assert participant["risk_score"] > 0
     assert participant["risk_level"] == "watch"
     assert participant["risk_label"] == "Низкий"
+    assert participant["joined_at_label"] == "24.04.2026 23:31 МСК"
+    assert participant["referral_label"] == "прямой вход"
+    assert participant["language_label"] == "язык неизвестен"
+    assert participant["premium_label"] == "Premium неизвестно"
+    assert participant["activity"]["label"] == "активность не собиралась"
     assert participant["is_suspicious"] is False
     assert "time_burst" in flag_codes
     assert "low_activity" not in flag_codes

@@ -748,6 +748,36 @@ def _risk_level(score: int) -> str:
     return "clear"
 
 
+def _format_monitor_dt(value: datetime | None) -> str:
+    if value is None:
+        return ""
+    return value.astimezone(MSK_TZ).strftime("%d.%m.%Y %H:%M МСК")
+
+
+def _referral_label(value: str) -> str:
+    return value if value else "прямой вход"
+
+
+def _language_label(value: str) -> str:
+    return f"язык {value}" if value else "язык неизвестен"
+
+
+def _premium_label(value: object) -> str:
+    if value is None:
+        return "Premium неизвестно"
+    return "Premium да" if bool(value) else "Premium нет"
+
+
+def _activity_label(actions: int, telemetry_available: bool) -> str:
+    if not telemetry_available and actions == 0:
+        return "активность не собиралась"
+    if actions == 1:
+        return "1 действие"
+    if 2 <= actions <= 4:
+        return f"{actions} действия"
+    return f"{actions} действий"
+
+
 def _build_risk_flags(
     entry: dict,
     events: list[dict],
@@ -865,6 +895,10 @@ async def get_giveaway_monitor_snapshot(
         last_seen_at = _maybe_dt_from_db(entry.get("last_seen_at"))
         status = str(entry.get("status") or GIVEAWAY_ENTRY_STATUS_JOINED)
         activity_actions = int(entry.get("action_count") or len(user_events) or 0)
+        referral_source = str(entry.get("referral_source") or "")
+        language_code = str(entry.get("language_code") or "")
+        premium_value = None if entry.get("is_premium") is None else bool(entry.get("is_premium"))
+        telemetry_available = bool(user_events or activity_actions)
         participant = {
             "giveaway_id": giveaway_id,
             "user_id": user_id,
@@ -872,9 +906,13 @@ async def get_giveaway_monitor_snapshot(
             "first_name": str(entry.get("first_name") or ""),
             "display_name": _entry_display_name(entry),
             "joined_at": _dt_to_db(joined_at) if joined_at else "",
-            "referral_source": str(entry.get("referral_source") or ""),
-            "language_code": str(entry.get("language_code") or ""),
-            "is_premium": None if entry.get("is_premium") is None else bool(entry.get("is_premium")),
+            "joined_at_label": _format_monitor_dt(joined_at),
+            "referral_source": referral_source,
+            "referral_label": _referral_label(referral_source),
+            "language_code": language_code,
+            "language_label": _language_label(language_code),
+            "is_premium": premium_value,
+            "premium_label": _premium_label(premium_value),
             "status": status,
             "is_winner": bool(entry.get("is_winner")),
             "winner_place": entry.get("winner_place"),
@@ -885,7 +923,8 @@ async def get_giveaway_monitor_snapshot(
             "activity": {
                 "actions": activity_actions,
                 "events": len(user_events),
-                "telemetry_available": bool(user_events or activity_actions),
+                "telemetry_available": telemetry_available,
+                "label": _activity_label(activity_actions, telemetry_available),
                 "last_seen_at": _dt_to_db(last_seen_at) if last_seen_at else "",
                 "active_now": bool(last_seen_at and now_utc - last_seen_at <= timedelta(minutes=5)),
             },

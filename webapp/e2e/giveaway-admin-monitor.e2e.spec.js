@@ -56,6 +56,28 @@ test.describe("admin giveaway monitor", () => {
             risk_level: "watch",
             risk_label: "Низкий",
             risk_flags: [{ code: "time_burst", label: "Всплеск регистраций", reason: "16 регистраций в одну минуту.", weight: 20 }],
+            activity: { actions: 0, telemetry_available: false, label: "активность не собиралась" },
+          }, {
+            user_id: 1002,
+            first_name: "Warm User",
+            username: "warmuser",
+            joined_at: "2026-05-01T12:09:28.291902+00:00",
+            joined_at_label: "01.05.2026 15:09 МСК",
+            referral_source: "",
+            referral_label: "прямой вход",
+            language_code: "ru",
+            language_label: "язык ru",
+            is_premium: true,
+            premium_label: "Premium да",
+            status: "joined",
+            risk_score: 45,
+            risk_level: "watch",
+            risk_label: "Низкий",
+            risk_flags: [
+              { code: "fast_registration", label: "Слишком быстрое участие", reason: "Вступил через 6 сек. после первого открытия бота или WebApp.", weight: 30 },
+              { code: "low_activity", label: "Мало активности", reason: "Видны только действия вокруг участия в конкурсе.", weight: 15 },
+            ],
+            activity: { actions: 2, telemetry_available: true, label: "2 действия" },
           }],
         },
       }),
@@ -69,11 +91,25 @@ test.describe("admin giveaway monitor", () => {
     await expect(page.locator("#participantFilter")).toBeVisible();
     await expect(page.locator("#participantRows")).toContainText("Fast User");
     await expect(page.locator("#participantRows")).toContainText("35");
+    await expect(page.locator("#participantRows")).toContainText("01.05.2026 15:09 МСК");
+    await expect(page.locator("#participantRows")).toContainText("прямой вход");
+    await expect(page.locator("#participantRows")).toContainText("язык ru");
+    await expect(page.locator("#participantRows")).toContainText("Premium да");
+    await expect(page.locator("#participantRows")).toContainText("2 действия");
+    await expect(page.locator("#participantRows")).toContainText("активность не собиралась");
     await expect(page.locator("#participantRows")).toContainText("Низкий");
     await expect(page.locator("#participantRows")).toContainText("Всплеск регистраций");
+    await expect(page.locator("#participantRows")).toContainText("Слишком быстрое участие");
+    await expect(page.locator("#participantRows")).toContainText("Мало активности");
     await expect(page.locator("#participantRows")).not.toContainText("time_burst");
+    await expect(page.locator("#participantRows")).not.toContainText("fast_registration");
+    await expect(page.locator("#participantRows")).not.toContainText("low_activity");
     await expect(page.locator("#participantRows")).not.toContainText("Registered");
-    await expect(page.locator("[data-entry-action='exclude']")).toBeVisible();
-    await expect(page.locator("[data-entry-action='trust']")).toBeVisible();
+    await expect(page.locator("#participantRows")).not.toContainText("+00:00");
+    await expect(page.locator("#participantRows")).not.toContainText(" actions");
+    await expect(page.locator("#participantRows")).not.toContainText("direct");
+    await expect(page.locator("#participantRows")).not.toContainText("lang ?");
+    await expect(page.locator("[data-entry-action='exclude']").first()).toBeVisible();
+    await expect(page.locator("[data-entry-action='trust']").first()).toBeVisible();
   });
 });

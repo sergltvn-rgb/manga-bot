@@ -393,7 +393,18 @@
 
     function formatDate(value) {
       const text = String(value || '').trim();
-      return text ? text.replace('T', ' ').replace('+00:00', '') : 'не указано';
+      if (!text) return 'не указано';
+      const date = new Date(text);
+      if (!Number.isNaN(date.getTime())) {
+        return new Intl.DateTimeFormat('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        }).format(date).replace(',', '');
+      }
+      return text.replace('T', ' ').replace('+00:00', '');
     }
 
     const sharedApi = window.AlyaWebApp?.createApiClient({ baseUrl: API_URL, initData, timeoutMs: 12000 });
@@ -904,6 +915,7 @@
     }
 
     function activityLabel(activity = {}) {
+      if (activity.label) return activity.label;
       const actions = Number(activity.actions || 0);
       if (!activity.telemetry_available && actions === 0) return 'активность не собиралась';
       if (actions === 1) return '1 действие';
@@ -944,11 +956,15 @@
         const actions = item.status === 'excluded'
           ? `<button class="btn" data-entry-action="restore" data-giveaway-id="${escapeHtml(payload.giveaway_id)}" data-user-id="${escapeHtml(item.user_id)}">Восстановить</button>`
           : `<button class="btn danger" data-entry-action="exclude" data-giveaway-id="${escapeHtml(payload.giveaway_id)}" data-user-id="${escapeHtml(item.user_id)}">Исключить</button><button class="btn" data-entry-action="trust" data-giveaway-id="${escapeHtml(payload.giveaway_id)}" data-user-id="${escapeHtml(item.user_id)}">Нормальный</button>`;
+        const joinedAt = item.joined_at_label || formatDate(item.joined_at);
+        const referral = item.referral_label || sourceLabel(item.referral_source);
+        const language = item.language_label || languageLabel(item.language_code);
+        const premium = item.premium_label || premiumLabel(item.is_premium);
         return `
           <tr>
             <td><b>${escapeHtml(item.display_name || item.first_name || item.username || item.user_id)}</b><br><span class="label">ID ${escapeHtml(item.user_id)} ${item.username ? `@${escapeHtml(item.username)}` : ''} · ${escapeHtml(participantStatusLabel(item.status))}</span></td>
-            <td>${escapeHtml(sourceLabel(item.referral_source))}<br><span class="label">${escapeHtml(languageLabel(item.language_code))} · ${escapeHtml(premiumLabel(item.is_premium))}</span></td>
-            <td><span class="label">${escapeHtml(item.joined_at || '')}</span><br><b>${escapeHtml(activityLabel(item.activity))}</b></td>
+            <td>${escapeHtml(referral)}<br><span class="label">${escapeHtml(language)} · ${escapeHtml(premium)}</span></td>
+            <td><span class="label">${escapeHtml(joinedAt)}</span><br><b>${escapeHtml(activityLabel(item.activity))}</b></td>
             <td><span class="badge ${riskTone(item.risk_score)}">${escapeHtml(item.risk_score)}</span><br><span class="label">${escapeHtml(riskLevelLabel(item))}</span></td>
             <td>${flags.length ? flags.map((flag) => `<span class="flag-line"><b>${escapeHtml(flag.label || riskFlagLabels[flag.code] || flag.code)}</b> ${escapeHtml(flag.reason)}</span>`).join('') : '<span class="label">Нет сильных сигналов</span>'}</td>
             <td class="actions-cell">${actions}</td>
