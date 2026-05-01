@@ -872,7 +872,29 @@ test.describe("Reader visual regression", () => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=search-compose-surfaces");
     await expect(page.locator("#reader-search-panel")).not.toHaveClass(/hidden/);
+    await page.locator("#reader-search-input").fill("Chapter 1");
+    await expect(page.locator("#reader-search-results")).toBeVisible();
+    await expect(page.locator(".reader-search-result").first()).toContainText("Visual Test Series");
+
+    const searchResultLayout = await page.evaluate(() => {
+      const panel = document.querySelector("#reader-search-panel").getBoundingClientRect();
+      const results = document.querySelector("#reader-search-results").getBoundingClientRect();
+      const firstResult = document.querySelector(".reader-search-result").getBoundingClientRect();
+      const topElement = document.elementFromPoint(firstResult.left + firstResult.width / 2, firstResult.top + firstResult.height / 2);
+      return {
+        panelInsideViewport: panel.left >= 0 && panel.right <= innerWidth,
+        resultsInsideViewport: results.left >= 0 && results.right <= innerWidth && results.bottom <= innerHeight,
+        firstResultTappable: !!topElement?.closest(".reader-search-result"),
+        overflow: document.documentElement.scrollWidth - innerWidth,
+      };
+    });
+    expect(searchResultLayout.panelInsideViewport).toBe(true);
+    expect(searchResultLayout.resultsInsideViewport).toBe(true);
+    expect(searchResultLayout.firstResultTappable).toBe(true);
+    expect(searchResultLayout.overflow).toBeLessThanOrEqual(2);
+
     await page.locator("#reader-search-input").fill("no results with a long query");
+    await expect(page.locator("#reader-search-results")).toHaveClass(/hidden/);
     await expect(page.locator("#reader-search-clear")).not.toHaveClass(/hidden/);
 
     const searchHitTarget = await page.evaluate(() => {

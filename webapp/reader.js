@@ -2069,6 +2069,96 @@ function matchesChapterSearch(chapter, query, volume) {
     return chapterSearchText(chapter, volume).includes(query);
 }
 
+function getReaderSearchResults(query, limit = 8) {
+    if (!query || !Array.isArray(allData?.series)) return [];
+
+    const results = [];
+    for (const series of allData.series) {
+        const volumes = Array.isArray(series?.volumes) ? series.volumes : [];
+        for (const volume of volumes) {
+            const chapters = Array.isArray(volume?.chapters) ? volume.chapters : [];
+            for (const chapter of chapters) {
+                const searchText = normalizeReaderSearchText([
+                    series?.title,
+                    series?.id,
+                    volume?.custom_name,
+                    volume?.volume !== undefined ? `volume ${volume.volume}` : '',
+                    volume?.volume !== undefined ? `том ${volume.volume}` : '',
+                    chapterSearchText(chapter, volume?.volume)
+                ].filter(Boolean).join(' '));
+                if (!searchText.includes(query)) continue;
+
+                results.push({ series, volume, chapter });
+                if (results.length >= limit) return results;
+            }
+        }
+    }
+
+    return results;
+}
+
+function renderReaderSearchResults() {
+    const panel = document.getElementById('reader-search-panel');
+    const container = document.getElementById('reader-search-results');
+    if (!panel || !container) return;
+
+    const active = getActiveScreenName();
+    const visible = active === 'series' || active === 'chapters';
+    const query = readerSearchQuery;
+    if (!visible || !query) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        panel.classList.remove('has-results');
+        return;
+    }
+
+    const results = getReaderSearchResults(query);
+    if (results.length === 0) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        panel.classList.remove('has-results');
+        return;
+    }
+
+    container.innerHTML = results.map(({ series, volume, chapter }) => {
+        const seriesTitle = series?.title || series?.id || '\u0421\u0435\u0440\u0438\u044f';
+        const volumeLabel = volume?.custom_name || `\u0422\u043e\u043c ${volume?.volume ?? ''}`;
+        const chapterTitle = chapter?.custom_name || `\u0413\u043b\u0430\u0432\u0430 ${chapter?.chapter ?? ''}`;
+        const readLabel = isRead(series?.id, volume?.volume, chapter?.chapter)
+            ? '\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043e'
+            : '\u043d\u0435 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043e';
+
+        return `
+            <button type="button" class="reader-search-result"
+                data-series-id="${escapeHtml(series?.id)}"
+                data-volume-id="${escapeHtml(volume?.volume)}"
+                data-chapter-id="${escapeHtml(chapter?.chapter)}"
+                onclick="openReaderSearchResultFromElement(this)">
+                <span class="reader-search-result-kicker">${escapeHtml(seriesTitle)}</span>
+                <span class="reader-search-result-title">${escapeHtml(chapterTitle)}</span>
+                <span class="reader-search-result-meta">${escapeHtml(volumeLabel)} · \u0413\u043b\u0430\u0432\u0430 ${escapeHtml(chapter?.chapter)} · ${readLabel}</span>
+            </button>
+        `;
+    }).join('');
+    container.classList.remove('hidden');
+    panel.classList.add('has-results');
+}
+
+function openReaderSearchResult(seriesId, volumeId, chapterId) {
+    if (!seriesId || volumeId === undefined || chapterId === undefined) return;
+    const resultPanel = document.getElementById('reader-search-results');
+    if (resultPanel) {
+        resultPanel.classList.add('hidden');
+    }
+    document.getElementById('reader-search-panel')?.classList.remove('has-results');
+    openSeriesChapter(seriesId, volumeId, chapterId, false);
+}
+
+function openReaderSearchResultFromElement(element) {
+    if (!element?.dataset) return;
+    openReaderSearchResult(element.dataset.seriesId, element.dataset.volumeId, element.dataset.chapterId);
+}
+
 function updateReaderSearchEmpty(message = '') {
     const empty = document.getElementById('reader-search-empty');
     if (!empty) return;
@@ -2088,6 +2178,7 @@ function syncReaderSearchVisibility() {
     const visible = screenName === 'series' || screenName === 'chapters';
     panel.classList.toggle('hidden', !visible);
     if (!visible) {
+        renderReaderSearchResults();
         updateReaderSearchEmpty('');
         return;
     }
@@ -2095,6 +2186,7 @@ function syncReaderSearchVisibility() {
     const clear = document.getElementById('reader-search-clear');
     if (input && input.value !== readerSearchQuery) input.value = readerSearchQuery;
     if (clear) clear.classList.toggle('hidden', !readerSearchQuery);
+    renderReaderSearchResults();
 }
 
 function handleReaderSearchInput(value) {

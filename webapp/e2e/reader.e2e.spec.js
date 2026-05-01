@@ -1313,6 +1313,62 @@ test.describe("Reader E2E smoke", () => {
     await expect(page.locator("#chapters-list .chapter-item").first()).toContainText("Chapter 2");
   });
 
+  test("reader search surfaces chapter results and opens the exact volume match", async ({ page }) => {
+    const state = createMobileSelectionState();
+    const alya = state.readerData.series.find((item) => item.id === "ranobe_alya");
+    alya.title = "Alya AI Volume Search";
+    alya.volumes = [
+      {
+        volume: 1,
+        custom_name: "Volume 1",
+        chapters: [
+          {
+            chapter: "1",
+            custom_name: "Duplicate opening",
+            __chapterContent: { ok: true, source_type: "inline", html: "<p>Volume 1 body.</p>" },
+          },
+        ],
+      },
+      {
+        volume: 2,
+        custom_name: "Volume 2",
+        chapters: [
+          {
+            chapter: "1",
+            custom_name: "Duplicate opening",
+            __chapterContent: { ok: true, source_type: "inline", html: "<p>Volume 2 body.</p>" },
+          },
+        ],
+      },
+      {
+        volume: 4,
+        custom_name: "Volume 4",
+        chapters: [
+          {
+            chapter: "1",
+            custom_name: "Duplicate opening",
+            __chapterContent: { ok: true, source_type: "inline", html: "<p>Volume 4 body.</p>" },
+          },
+        ],
+      },
+    ];
+    await installTelegramAndApiMocks(page, state);
+
+    await page.goto("/reader.html?api=http://127.0.0.1:4173&rev=search-volume-results");
+    await page.fill("#reader-search-input", "duplicate opening");
+
+    await expect(page.locator("#reader-search-results")).toBeVisible();
+    await expect(page.locator(".reader-search-result")).toHaveCount(3);
+    await expect(page.locator(".reader-search-result", { hasText: "Volume 4" })).toContainText("Alya AI Volume Search");
+
+    await page.locator(".reader-search-result", { hasText: "Volume 4" }).click();
+
+    await expect(page.locator("#screen-reader")).toHaveClass(/active/);
+    await expect(page.locator("#reader-text")).toContainText("Volume 4 body.");
+    expect(state.chapterContentRequests).toContain("ranobe_alya::4::1");
+    expect(state.chapterContentRequests).not.toContain("ranobe_alya::1::1");
+  });
+
   test("reader startup does not start background polling before reading", async ({ page }) => {
     const state = createMockState();
     await page.addInitScript(() => {

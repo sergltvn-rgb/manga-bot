@@ -13,7 +13,7 @@
     <script>
         (function () {
             const params = new URLSearchParams(window.location.search);
-            const rev = params.get('rev') || '20260430-reader-polish-2';
+            const rev = params.get('rev') || '20260501-reader-search-admin-1';
             window.__READER_REV = rev;
             window.__WEBAPP_BUILD = { rev };
             const css = document.createElement('link');
@@ -57,6 +57,7 @@
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             </button>
         </div>
+        <div id="reader-search-results" class="reader-search-results hidden" aria-live="polite"></div>
         <div id="reader-search-empty" class="reader-search-empty hidden" aria-live="polite"></div>
     </div>
 
@@ -721,6 +722,6 @@
         </div>
     </div>
 
-    <script src="reader.boot.js?v=20260430-reader-sync-1"></script>
+    <script src="reader.boot.js?v=20260501-reader-search-admin-1"></script>
 </body>
 </html>

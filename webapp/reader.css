@@ -594,16 +594,95 @@ body {
     display: none;
 }
 
+.reader-search-results {
+    margin: 10px 0 0;
+    display: grid;
+    gap: 8px;
+    max-height: min(42vh, 340px);
+    overflow: auto;
+    padding: 2px;
+    border-radius: calc(var(--radius-md) + 4px);
+    -webkit-overflow-scrolling: touch;
+}
+
+.reader-search-results.hidden {
+    display: none;
+}
+
+.reader-search-result {
+    width: 100%;
+    display: grid;
+    gap: 3px;
+    padding: 11px 12px;
+    border: 1px solid color-mix(in srgb, var(--surface-border) 82%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--surface-1) 92%, var(--accent) 8%);
+    color: var(--text);
+    text-align: left;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+    cursor: pointer;
+    transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.reader-search-result:hover,
+.reader-search-result:focus-visible {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--accent) 42%, var(--surface-border));
+    background: color-mix(in srgb, var(--surface-1) 84%, var(--accent) 16%);
+    box-shadow: 0 14px 30px rgba(var(--accent-rgb), 0.16);
+    outline: none;
+}
+
+.reader-search-result:active {
+    transform: translateY(0);
+}
+
+.reader-search-result-kicker,
+.reader-search-result-meta {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.reader-search-result-kicker {
+    color: var(--accent);
+    font-weight: 800;
+}
+
+.reader-search-result-title {
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.3;
+}
+
 #reader-search-panel:not(.hidden) ~ #screen-series.active .content-area {
     padding-top: calc(16px + 64px);
+}
+
+#reader-search-panel.has-results:not(.hidden) ~ #screen-series.active .content-area {
+    padding-top: calc(16px + 64px + min(42vh, 240px));
 }
 
 #reader-search-panel:not(.hidden) ~ #screen-chapters.active .series-detail-hero:not([hidden]) {
     margin-top: 64px;
 }
 
+#reader-search-panel.has-results:not(.hidden) ~ #screen-chapters.active .series-detail-hero:not([hidden]) {
+    margin-top: calc(64px + min(42vh, 240px));
+}
+
 #reader-search-panel:not(.hidden) ~ #screen-chapters.active .series-detail-hero[hidden] + .volume-tabs {
     margin-top: 64px;
+}
+
+#reader-search-panel.has-results:not(.hidden) ~ #screen-chapters.active .series-detail-hero[hidden] + .volume-tabs {
+    margin-top: calc(64px + min(42vh, 240px));
 }
 
 /* === КАРТОЧКИ СЕРИЙ (Refresh v4 — poster grid) === */
@@ -2619,17 +2698,22 @@ input:checked + .slider:before { transform: translateX(20px); }
     overflow-wrap: anywhere;
 }
 
-.bulk-preview-btn {
-    flex: 0.9;
-}
-
 .edit-url-actions, .bulk-upload-actions {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-3);
 }
 
+.bulk-upload-actions .edit-url-save {
+    grid-column: 1 / -1;
+}
+
+.bulk-preview-btn {
+    min-width: 0;
+}
+
 .edit-url-cancel {
-    flex: 1;
+    min-width: 0;
     min-height: 44px;
     padding: 0 18px;
     border: 1px solid var(--surface-border);
@@ -2649,7 +2733,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 .edit-url-cancel:active { transform: scale(0.97); }
 
 .edit-url-save {
-    flex: 1;
+    min-width: 0;
     min-height: 44px;
     padding: 0 18px;
     border: none;
