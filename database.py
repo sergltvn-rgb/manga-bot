@@ -377,10 +377,19 @@ async def init_db():
             winner_place INTEGER DEFAULT NULL,
             PRIMARY KEY (giveaway_id, user_id)
         )''')
-        try:
-            await db.execute('ALTER TABLE giveaway_entries ADD COLUMN winner_place INTEGER DEFAULT NULL')
-        except sqlite3.OperationalError:
-            pass
+        await _ensure_column(db, "giveaway_entries", "winner_place", "winner_place INTEGER DEFAULT NULL")
+        await _ensure_column(db, "giveaway_entries", "referral_source", "referral_source TEXT DEFAULT ''")
+        await _ensure_column(db, "giveaway_entries", "language_code", "language_code TEXT DEFAULT ''")
+        await _ensure_column(db, "giveaway_entries", "is_premium", "is_premium INTEGER DEFAULT NULL")
+        await _ensure_column(db, "giveaway_entries", "first_seen_at", "first_seen_at TEXT DEFAULT NULL")
+        await _ensure_column(db, "giveaway_entries", "last_seen_at", "last_seen_at TEXT DEFAULT NULL")
+        await _ensure_column(db, "giveaway_entries", "last_action_at", "last_action_at TEXT DEFAULT NULL")
+        await _ensure_column(db, "giveaway_entries", "action_count", "action_count INTEGER NOT NULL DEFAULT 0")
+        await _ensure_column(db, "giveaway_entries", "risk_score", "risk_score INTEGER NOT NULL DEFAULT 0")
+        await _ensure_column(db, "giveaway_entries", "risk_flags_json", "risk_flags_json TEXT DEFAULT '[]'")
+        await _ensure_column(db, "giveaway_entries", "moderated_at", "moderated_at TEXT DEFAULT NULL")
+        await _ensure_column(db, "giveaway_entries", "moderated_by", "moderated_by TEXT DEFAULT ''")
+        await _ensure_column(db, "giveaway_entries", "moderation_reason", "moderation_reason TEXT DEFAULT ''")
         await db.execute('''CREATE TABLE IF NOT EXISTS giveaway_required_channels (
             giveaway_id INTEGER NOT NULL,
             channel_id TEXT NOT NULL,
@@ -398,6 +407,29 @@ async def init_db():
             created_at TEXT NOT NULL,
             verified_at TEXT DEFAULT NULL,
             PRIMARY KEY (giveaway_id, user_id)
+        )''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS giveaway_entry_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            giveaway_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            referral_source TEXT DEFAULT '',
+            username TEXT DEFAULT '',
+            first_name TEXT DEFAULT '',
+            language_code TEXT DEFAULT '',
+            is_premium INTEGER DEFAULT NULL,
+            payload_json TEXT DEFAULT '{}',
+            created_at TEXT NOT NULL
+        )''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS giveaway_reroll_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            giveaway_id INTEGER NOT NULL,
+            place INTEGER NOT NULL,
+            old_user_id INTEGER NOT NULL,
+            new_user_id INTEGER NOT NULL,
+            actor_user_id TEXT DEFAULT '',
+            reason TEXT DEFAULT '',
+            created_at TEXT NOT NULL
         )''')
 
         await db.execute('''CREATE TABLE IF NOT EXISTS webapp_telemetry (
@@ -435,6 +467,17 @@ async def init_db():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaways_status_ends ON giveaways(status, ends_at_utc)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaways_status_publish ON giveaways(status, publish_at_utc)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_entries_giveaway ON giveaway_entries(giveaway_id)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_entries_status ON giveaway_entries(giveaway_id, status)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_entries_referral ON giveaway_entries(giveaway_id, referral_source)')
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_giveaway_entry_events_giveaway_user ON giveaway_entry_events(giveaway_id, user_id, created_at)'
+        )
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_giveaway_entry_events_type_time ON giveaway_entry_events(giveaway_id, event_type, created_at)'
+        )
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_giveaway_reroll_history_giveaway ON giveaway_reroll_history(giveaway_id, created_at)'
+        )
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_required_channels_giveaway ON giveaway_required_channels(giveaway_id)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_giveaway_verifications_verified ON giveaway_verifications(giveaway_id, verified)')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_webapp_telemetry_event_time ON webapp_telemetry(event_type, created_at)')

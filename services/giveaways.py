@@ -14,6 +14,7 @@ import logging
 import random
 import re
 import zipfile
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
@@ -51,9 +52,14 @@ GIVEAWAY_STATUS_ACTIVE = "active"
 GIVEAWAY_STATUS_FINISHING = "finishing"
 GIVEAWAY_STATUS_FINISHED = "finished"
 GIVEAWAY_STATUS_CANCELLED = "cancelled"
+GIVEAWAY_ENTRY_STATUS_JOINED = "joined"
+GIVEAWAY_ENTRY_STATUS_EXCLUDED = "excluded"
+GIVEAWAY_ENTRY_STATUS_TRUSTED = "trusted"
+GIVEAWAY_ENTRY_ACTIVE_STATUSES = {GIVEAWAY_ENTRY_STATUS_JOINED, GIVEAWAY_ENTRY_STATUS_TRUSTED}
 JOINED_STATUSES = {"member", "administrator", "creator"}
 SUPPORTED_MEDIA_TYPES = {"photo", "video", "document", "animation"}
 GIVEAWAY_HISTORY_PAGE_SIZE = 4
+GIVEAWAY_RISK_REVIEW_THRESHOLD = 50
 _DURATION_RE = re.compile(r"^(?P<count>\d+)(?P<unit>[mhd])$", re.IGNORECASE)
 
 
@@ -166,6 +172,27 @@ def _dt_from_db(value: str) -> datetime:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _maybe_dt_from_db(value: object) -> datetime | None:
+    if value in (None, ""):
+        return None
+    try:
+        return _dt_from_db(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _json_dumps(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _entry_display_name(entry: dict) -> str:
+    return str(entry.get("first_name") or entry.get("username") or entry.get("user_id") or "")
+
+
+def _entry_is_active_for_winner(entry: GiveawayEntry) -> bool:
+    return str(entry.status or GIVEAWAY_ENTRY_STATUS_JOINED) in GIVEAWAY_ENTRY_ACTIVE_STATUSES
 
 
 def parse_giveaway_end(raw: str, *, now: datetime | None = None) -> datetime:
@@ -486,8 +513,115 @@ async def add_giveaway_entry(giveaway_id: int, user_id: int, username: str | Non
             """,
             (giveaway_id, user_id, username, first_name, _dt_to_db(_utcnow())),
         )
+        await _sync_giveaway_entry_context(db, giveaway_id, user_id)
         await db.commit()
         return cursor.rowcount == 1
+
+
+async def _sync_giveaway_entry_context(db: aiosqlite.Connection, giveaway_id: int, user_id: int) -> None:
+    async with db.execute(
+        """
+        SELECT MIN(created_at), MAX(created_at), COUNT(*)
+        FROM giveaway_entry_events
+        WHERE giveaway_id = ? AND user_id = ?
+        """,
+        (giveaway_id, user_id),
+    ) as cursor:
+        aggregate = await cursor.fetchone()
+    if not aggregate or not aggregate[0]:
+        return
+
+    async with db.execute(
+        """
+        SELECT referral_source, username, first_name, language_code, is_premium
+        FROM giveaway_entry_events
+        WHERE giveaway_id = ? AND user_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (giveaway_id, user_id),
+    ) as cursor:
+        latest = await cursor.fetchone()
+
+    referral_source = str(latest[0] or "") if latest else ""
+    username = str(latest[1] or "") if latest else ""
+    first_name = str(latest[2] or "") if latest else ""
+    language_code = str(latest[3] or "") if latest else ""
+    is_premium = latest[4] if latest else None
+    await db.execute(
+        """
+        UPDATE giveaway_entries
+        SET first_seen_at = COALESCE(first_seen_at, ?),
+            last_seen_at = ?,
+            last_action_at = ?,
+            action_count = ?,
+            referral_source = CASE WHEN ? != '' THEN ? ELSE COALESCE(referral_source, '') END,
+            username = CASE WHEN ? != '' THEN ? ELSE username END,
+            first_name = CASE WHEN ? != '' THEN ? ELSE first_name END,
+            language_code = CASE WHEN ? != '' THEN ? ELSE COALESCE(language_code, '') END,
+            is_premium = CASE WHEN ? IS NOT NULL THEN ? ELSE is_premium END
+        WHERE giveaway_id = ? AND user_id = ?
+        """,
+        (
+            aggregate[0],
+            aggregate[1],
+            aggregate[1],
+            int(aggregate[2] or 0),
+            referral_source,
+            referral_source,
+            username,
+            username,
+            first_name,
+            first_name,
+            language_code,
+            language_code,
+            is_premium,
+            is_premium,
+            giveaway_id,
+            user_id,
+        ),
+    )
+
+
+async def record_giveaway_participant_event(
+    giveaway_id: int,
+    user_id: int,
+    event_type: str,
+    *,
+    referral_source: str | None = None,
+    username: str | None = None,
+    first_name: str | None = None,
+    language_code: str | None = None,
+    is_premium: bool | None = None,
+    payload: dict | None = None,
+    created_at: datetime | None = None,
+) -> None:
+    created = _dt_to_db(created_at or _utcnow())
+    premium_value = None if is_premium is None else int(bool(is_premium))
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO giveaway_entry_events (
+                giveaway_id, user_id, event_type, referral_source, username, first_name,
+                language_code, is_premium, payload_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                giveaway_id,
+                user_id,
+                str(event_type or "activity"),
+                str(referral_source or ""),
+                str(username or ""),
+                str(first_name or ""),
+                str(language_code or ""),
+                premium_value,
+                _json_dumps(payload or {}),
+                created,
+            ),
+        )
+        await _sync_giveaway_entry_context(db, giveaway_id, user_id)
+        await db.commit()
 
 
 async def get_giveaway_entries(giveaway_id: int) -> list[GiveawayEntry]:
@@ -515,6 +649,347 @@ async def get_giveaway_entries(giveaway_id: int) -> list[GiveawayEntry]:
         )
         for row in rows
     ]
+
+
+async def _fetch_giveaway_entry_rows(giveaway_id: int) -> list[dict]:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT giveaway_id, user_id, username, first_name, status, is_winner, joined_at, winner_place,
+                   referral_source, language_code, is_premium, first_seen_at, last_seen_at, last_action_at,
+                   action_count, moderated_at, moderated_by, moderation_reason
+            FROM giveaway_entries
+            WHERE giveaway_id = ?
+            ORDER BY joined_at, user_id
+            """,
+            (giveaway_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    keys = [
+        "giveaway_id",
+        "user_id",
+        "username",
+        "first_name",
+        "status",
+        "is_winner",
+        "joined_at",
+        "winner_place",
+        "referral_source",
+        "language_code",
+        "is_premium",
+        "first_seen_at",
+        "last_seen_at",
+        "last_action_at",
+        "action_count",
+        "moderated_at",
+        "moderated_by",
+        "moderation_reason",
+    ]
+    return [dict(zip(keys, row, strict=False)) for row in rows]
+
+
+async def _fetch_giveaway_event_rows(giveaway_id: int) -> list[dict]:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT user_id, event_type, referral_source, language_code, is_premium, created_at
+            FROM giveaway_entry_events
+            WHERE giveaway_id = ?
+            ORDER BY created_at, id
+            """,
+            (giveaway_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [
+        {
+            "user_id": int(row[0]),
+            "event_type": str(row[1] or ""),
+            "referral_source": str(row[2] or ""),
+            "language_code": str(row[3] or ""),
+            "is_premium": row[4],
+            "created_at": str(row[5] or ""),
+        }
+        for row in rows
+    ]
+
+
+def _first_event_at(events: list[dict], event_type: str | None = None) -> datetime | None:
+    for event in events:
+        if event_type is None or event["event_type"] == event_type:
+            parsed = _maybe_dt_from_db(event["created_at"])
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _build_risk_flags(
+    entry: dict,
+    events: list[dict],
+    *,
+    referral_counts: Counter,
+    minute_counts: Counter,
+    now: datetime,
+) -> tuple[int, list[dict]]:
+    if str(entry.get("status") or "") == GIVEAWAY_ENTRY_STATUS_TRUSTED:
+        return 0, []
+
+    flags: list[dict] = []
+
+    def add(code: str, weight: int, reason: str, evidence: dict | None = None) -> None:
+        flags.append({"code": code, "weight": weight, "reason": reason, "evidence": evidence or {}})
+
+    joined_at = _maybe_dt_from_db(entry.get("joined_at"))
+    first_seen_at = _maybe_dt_from_db(entry.get("first_seen_at")) or _first_event_at(events)
+    join_event_at = _first_event_at(events, "giveaway_join") or joined_at
+    if first_seen_at and join_event_at:
+        seconds = (join_event_at - first_seen_at).total_seconds()
+        if 0 <= seconds <= 10:
+            add(
+                "fast_registration",
+                30,
+                f"Registered {int(seconds)}s after first seen.",
+                {"seconds": int(seconds)},
+            )
+
+    referral_source = str(entry.get("referral_source") or "")
+    referral_count = referral_counts.get(referral_source, 0) if referral_source else 0
+    if referral_source and referral_count >= 5:
+        add(
+            "referral_burst",
+            25,
+            f"{referral_count} participants came from referral source {referral_source}.",
+            {"source": referral_source, "participants": referral_count},
+        )
+
+    if join_event_at:
+        minute_key = join_event_at.replace(second=0, microsecond=0).isoformat()
+        minute_count = minute_counts.get(minute_key, 0)
+        if minute_count >= 5:
+            add(
+                "time_burst",
+                15,
+                f"{minute_count} registrations landed in the same minute.",
+                {"minute": minute_key, "participants": minute_count},
+            )
+
+    action_count = int(entry.get("action_count") or len(events) or 0)
+    if action_count <= 2:
+        add("low_activity", 15, "Only giveaway entry activity is visible for this user.", {"actions": action_count})
+
+    last_seen_at = _maybe_dt_from_db(entry.get("last_seen_at")) or join_event_at or joined_at
+    if last_seen_at and now - last_seen_at > timedelta(days=7) and action_count <= 2:
+        add("stale_after_join", 10, "No recent bot/WebApp activity after joining.", {"last_seen_at": _dt_to_db(last_seen_at)})
+
+    if not str(entry.get("username") or "").strip():
+        add("no_username", 5, "Telegram username is not available; weak signal only.", {})
+
+    score = min(100, sum(int(flag["weight"]) for flag in flags))
+    return score, flags
+
+
+async def get_giveaway_monitor_snapshot(
+    giveaway_id: int,
+    *,
+    filter_status: str = "all",
+    now: datetime | None = None,
+) -> dict:
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return {"ok": False, "status": "not_found", "giveaway_id": giveaway_id}
+
+    now_utc = (now or _utcnow()).astimezone(timezone.utc)
+    entries = await _fetch_giveaway_entry_rows(giveaway_id)
+    events = await _fetch_giveaway_event_rows(giveaway_id)
+    events_by_user: dict[int, list[dict]] = defaultdict(list)
+    for event in events:
+        events_by_user[int(event["user_id"])].append(event)
+
+    referral_counts = Counter(str(entry.get("referral_source") or "") for entry in entries if str(entry.get("referral_source") or ""))
+    language_counts = Counter(str(entry.get("language_code") or "") for entry in entries if str(entry.get("language_code") or ""))
+    premium_counts = Counter(
+        "premium" if entry.get("is_premium") == 1 else "not_premium" for entry in entries if entry.get("is_premium") is not None
+    )
+
+    join_times: dict[int, datetime] = {}
+    for entry in entries:
+        user_events = events_by_user.get(int(entry["user_id"]), [])
+        join_at = _first_event_at(user_events, "giveaway_join") or _maybe_dt_from_db(entry.get("joined_at"))
+        if join_at:
+            join_times[int(entry["user_id"])] = join_at
+    minute_counts = Counter(value.replace(second=0, microsecond=0).isoformat() for value in join_times.values())
+
+    participants: list[dict] = []
+    for entry in entries:
+        user_id = int(entry["user_id"])
+        user_events = events_by_user.get(user_id, [])
+        risk_score, risk_flags = _build_risk_flags(
+            entry, user_events, referral_counts=referral_counts, minute_counts=minute_counts, now=now_utc
+        )
+        joined_at = _maybe_dt_from_db(entry.get("joined_at"))
+        last_seen_at = _maybe_dt_from_db(entry.get("last_seen_at"))
+        status = str(entry.get("status") or GIVEAWAY_ENTRY_STATUS_JOINED)
+        participant = {
+            "giveaway_id": giveaway_id,
+            "user_id": user_id,
+            "username": str(entry.get("username") or ""),
+            "first_name": str(entry.get("first_name") or ""),
+            "display_name": _entry_display_name(entry),
+            "joined_at": _dt_to_db(joined_at) if joined_at else "",
+            "referral_source": str(entry.get("referral_source") or ""),
+            "language_code": str(entry.get("language_code") or ""),
+            "is_premium": None if entry.get("is_premium") is None else bool(entry.get("is_premium")),
+            "status": status,
+            "is_winner": bool(entry.get("is_winner")),
+            "winner_place": entry.get("winner_place"),
+            "risk_score": risk_score,
+            "risk_flags": risk_flags,
+            "activity": {
+                "actions": int(entry.get("action_count") or len(user_events) or 0),
+                "last_seen_at": _dt_to_db(last_seen_at) if last_seen_at else "",
+                "active_now": bool(last_seen_at and now_utc - last_seen_at <= timedelta(minutes=5)),
+            },
+            "moderation": {
+                "moderated_at": str(entry.get("moderated_at") or ""),
+                "moderated_by": str(entry.get("moderated_by") or ""),
+                "reason": str(entry.get("moderation_reason") or ""),
+            },
+            "is_suspicious": risk_score >= GIVEAWAY_RISK_REVIEW_THRESHOLD and status != GIVEAWAY_ENTRY_STATUS_TRUSTED,
+            "is_new": bool(joined_at and now_utc - joined_at <= timedelta(minutes=15)),
+        }
+        participants.append(participant)
+
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        for item in participants:
+            await db.execute(
+                "UPDATE giveaway_entries SET risk_score = ?, risk_flags_json = ? WHERE giveaway_id = ? AND user_id = ?",
+                (item["risk_score"], _json_dumps(item["risk_flags"]), giveaway_id, item["user_id"]),
+            )
+        await db.commit()
+
+    filter_value = str(filter_status or "all").strip().lower()
+    if filter_value == "suspicious":
+        filtered = [item for item in participants if item["is_suspicious"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED]
+    elif filter_value in {"removed", "excluded"}:
+        filtered = [item for item in participants if item["status"] == GIVEAWAY_ENTRY_STATUS_EXCLUDED]
+    elif filter_value == "winners":
+        filtered = [item for item in participants if item["is_winner"]]
+    elif filter_value == "new":
+        filtered = [item for item in participants if item["is_new"]]
+    elif filter_value == "normal":
+        filtered = [
+            item
+            for item in participants
+            if not item["is_suspicious"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED and not item["is_winner"]
+        ]
+    else:
+        filtered = participants
+
+    suspicious_by_referral = Counter(item["referral_source"] for item in participants if item["is_suspicious"] and item["referral_source"])
+    referrals = [
+        {"source": source, "participants": count, "suspicious": suspicious_by_referral.get(source, 0)}
+        for source, count in referral_counts.most_common(12)
+    ]
+    timeline = [{"bucket": bucket, "count": count} for bucket, count in sorted(minute_counts.items())][-30:]
+    counters = {
+        "total": len(participants),
+        "normal": len([item for item in participants if not item["is_suspicious"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED]),
+        "suspicious": len([item for item in participants if item["is_suspicious"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED]),
+        "removed": len([item for item in participants if item["status"] == GIVEAWAY_ENTRY_STATUS_EXCLUDED]),
+        "winners": len([item for item in participants if item["is_winner"]]),
+        "new_1m": len(
+            [
+                item
+                for item in participants
+                if _maybe_dt_from_db(item["joined_at"]) and now_utc - _maybe_dt_from_db(item["joined_at"]) <= timedelta(minutes=1)
+            ]
+        ),
+        "new_5m": len(
+            [
+                item
+                for item in participants
+                if _maybe_dt_from_db(item["joined_at"]) and now_utc - _maybe_dt_from_db(item["joined_at"]) <= timedelta(minutes=5)
+            ]
+        ),
+        "new_15m": len([item for item in participants if item["is_new"]]),
+        "active_now": len([item for item in participants if item["activity"]["active_now"]]),
+    }
+    return {
+        "ok": True,
+        "giveaway_id": giveaway_id,
+        "status": giveaway.status,
+        "filter": filter_value,
+        "counters": counters,
+        "participants": filtered,
+        "referrals": referrals,
+        "timeline": timeline,
+        "audience": {
+            "languages": dict(language_counts),
+            "premium": dict(premium_counts),
+            "notes": [
+                "language_code and premium are Telegram-provided when available.",
+                "Online status is approximated from last bot/WebApp activity.",
+                "Language, region, name and inferred demographic signals are analytics only.",
+            ],
+        },
+    }
+
+
+async def set_giveaway_entry_moderation(
+    giveaway_id: int,
+    user_id: int,
+    status: str,
+    *,
+    actor_user_id: int | str,
+    reason: str,
+) -> bool:
+    normalized = str(status or "").strip().lower()
+    if normalized not in {GIVEAWAY_ENTRY_STATUS_JOINED, GIVEAWAY_ENTRY_STATUS_EXCLUDED, GIVEAWAY_ENTRY_STATUS_TRUSTED}:
+        raise GiveawayValidationError("Unsupported participant status.")
+    reason_text = str(reason or "").strip()
+    now_db = _dt_to_db(_utcnow())
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            UPDATE giveaway_entries
+            SET status = ?,
+                is_winner = CASE WHEN ? = ? THEN 0 ELSE is_winner END,
+                winner_place = CASE WHEN ? = ? THEN NULL ELSE winner_place END,
+                moderated_at = ?,
+                moderated_by = ?,
+                moderation_reason = ?
+            WHERE giveaway_id = ? AND user_id = ?
+            """,
+            (
+                normalized,
+                normalized,
+                GIVEAWAY_ENTRY_STATUS_EXCLUDED,
+                normalized,
+                GIVEAWAY_ENTRY_STATUS_EXCLUDED,
+                now_db,
+                str(actor_user_id),
+                reason_text,
+                giveaway_id,
+                user_id,
+            ),
+        )
+        await db.commit()
+
+    if cursor.rowcount != 1:
+        return False
+
+    action = {
+        GIVEAWAY_ENTRY_STATUS_EXCLUDED: "giveaway_entry_excluded",
+        GIVEAWAY_ENTRY_STATUS_TRUSTED: "giveaway_entry_trusted",
+        GIVEAWAY_ENTRY_STATUS_JOINED: "giveaway_entry_restored",
+    }[normalized]
+    await database.write_admin_audit_log(
+        action,
+        str(actor_user_id),
+        target=f"giveaway:{giveaway_id}:user:{user_id}",
+        payload_json=_json_dumps({"giveaway_id": giveaway_id, "user_id": user_id, "status": normalized, "reason": reason_text}),
+        result="ok",
+    )
+    return True
 
 
 async def has_giveaway_entry(giveaway_id: int, user_id: int) -> bool:
@@ -995,7 +1470,7 @@ async def select_winners(
     is_subscribed: Callable[[int], Awaitable[bool]],
     shuffle: Callable[[list[GiveawayEntry]], list[GiveawayEntry] | None] | None = None,
 ) -> WinnerSelectionResult:
-    pool = list(entries)
+    pool = [entry for entry in entries if _entry_is_active_for_winner(entry)]
     if shuffle is None:
         random.shuffle(pool)
     else:
@@ -1020,6 +1495,8 @@ async def reroll_giveaway_place(
     giveaway: Giveaway,
     place: int,
     *,
+    actor_user_id: int | str | None = None,
+    reason: str = "",
     shuffle: Callable[[list[GiveawayEntry]], list[GiveawayEntry] | None] | None = None,
 ) -> GiveawayRerollResult:
     if giveaway.status != GIVEAWAY_STATUS_FINISHED:
@@ -1032,7 +1509,11 @@ async def reroll_giveaway_place(
         raise GiveawayValidationError("Для этого места нет текущего победителя.")
     old_winner = winners[place - 1]
     current_winner_ids = {winner.user_id for winner in winners}
-    entries = [entry for entry in await get_giveaway_entries(giveaway.id) if entry.user_id not in current_winner_ids]
+    entries = [
+        entry
+        for entry in await get_giveaway_entries(giveaway.id)
+        if entry.user_id not in current_winner_ids and _entry_is_active_for_winner(entry)
+    ]
     if shuffle is None:
         random.shuffle(entries)
     else:
@@ -1059,6 +1540,21 @@ async def reroll_giveaway_place(
             "UPDATE giveaway_entries SET is_winner = 1, winner_place = ? WHERE giveaway_id = ? AND user_id = ?",
             (place, giveaway.id, new_winner.user_id),
         )
+        await db.execute(
+            """
+            INSERT INTO giveaway_reroll_history (giveaway_id, place, old_user_id, new_user_id, actor_user_id, reason, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                giveaway.id,
+                place,
+                old_winner.user_id,
+                new_winner.user_id,
+                str(actor_user_id or ""),
+                str(reason or ""),
+                _dt_to_db(_utcnow()),
+            ),
+        )
         await db.commit()
 
     result = GiveawayRerollResult(
@@ -1077,6 +1573,33 @@ async def reroll_giveaway_place(
     )
     await publish_giveaway_reroll_result(bot, giveaway, result)
     return result
+
+
+async def get_giveaway_reroll_history(giveaway_id: int) -> list[dict]:
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT id, giveaway_id, place, old_user_id, new_user_id, actor_user_id, reason, created_at
+            FROM giveaway_reroll_history
+            WHERE giveaway_id = ?
+            ORDER BY id DESC
+            """,
+            (giveaway_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    return [
+        {
+            "id": int(row[0]),
+            "giveaway_id": int(row[1]),
+            "place": int(row[2]),
+            "old_user_id": int(row[3]),
+            "new_user_id": int(row[4]),
+            "actor_user_id": str(row[5] or ""),
+            "reason": str(row[6] or ""),
+            "created_at": str(row[7] or ""),
+        }
+        for row in rows
+    ]
 
 
 async def is_channel_subscriber(bot, channel_id: str, user_id: int) -> bool:
@@ -1262,6 +1785,15 @@ async def join_giveaway_from_webapp(
         user_id,
         user.get("username"),
         user.get("first_name"),
+    )
+    await record_giveaway_participant_event(
+        giveaway_id,
+        user_id,
+        "giveaway_join",
+        username=user.get("username"),
+        first_name=user.get("first_name"),
+        language_code=user.get("language_code"),
+        is_premium=user.get("is_premium"),
     )
     if added and refresh_markup:
         try:
@@ -2377,6 +2909,15 @@ async def giveaway_join(callback: types.CallbackQuery):
         callback.from_user.username,
         callback.from_user.first_name,
     )
+    await record_giveaway_participant_event(
+        giveaway_id,
+        callback.from_user.id,
+        "giveaway_join",
+        username=callback.from_user.username,
+        first_name=callback.from_user.first_name,
+        language_code=getattr(callback.from_user, "language_code", None),
+        is_premium=getattr(callback.from_user, "is_premium", None),
+    )
     if added:
         await refresh_giveaway_participation_markup(callback.bot, giveaway)
     await callback.answer("Вы участвуете!" if added else "Вы уже участвуете.", show_alert=False)
@@ -2438,6 +2979,15 @@ async def giveaway_verify(callback: types.CallbackQuery):
         callback.from_user.id,
         callback.from_user.username,
         callback.from_user.first_name,
+    )
+    await record_giveaway_participant_event(
+        giveaway_id,
+        callback.from_user.id,
+        "giveaway_join",
+        username=callback.from_user.username,
+        first_name=callback.from_user.first_name,
+        language_code=getattr(callback.from_user, "language_code", None),
+        is_premium=getattr(callback.from_user, "is_premium", None),
     )
     if added:
         await refresh_giveaway_participation_markup(callback.bot, giveaway)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from typing import Any
@@ -19,8 +20,12 @@ from services.giveaways import (
     format_giveaway_end,
     format_giveaway_publish,
     get_giveaway_required_channels,
+    get_giveaway_monitor_snapshot,
+    get_giveaway_reroll_history,
     list_active_giveaways,
     list_recent_giveaways,
+    reroll_giveaway_place,
+    set_giveaway_entry_moderation,
     split_place_prizes,
 )
 from services.webapp_cors import CORS_HEADERS
@@ -327,6 +332,8 @@ async def _giveaway_payload(item: Giveaway) -> dict[str, Any]:
     required_channels = await get_giveaway_required_channels(item.id)
     required_payload = [{"channel_id": channel.channel_id, "title": channel.title, "url": channel.url} for channel in required_channels]
     prizes = split_place_prizes(item.prize)
+    monitor = await get_giveaway_monitor_snapshot(item.id)
+    counters = monitor.get("counters", {}) if monitor.get("ok") else {}
     return {
         "id": item.id,
         "status": item.status,
@@ -346,6 +353,14 @@ async def _giveaway_payload(item: Giveaway) -> dict[str, Any]:
         "required_channels_count": len(required_payload),
         "subscription": _subscription_label(len(required_payload)),
         "replacements_count": item.replacements_count,
+        "monitor": {
+            "suspicious": counters.get("suspicious", 0),
+            "removed": counters.get("removed", 0),
+            "new_1m": counters.get("new_1m", 0),
+            "new_5m": counters.get("new_5m", 0),
+            "new_15m": counters.get("new_15m", 0),
+            "active_now": counters.get("active_now", 0),
+        },
     }
 
 
@@ -379,6 +394,99 @@ async def handle_admin_giveaways(request: aiohttp.web.Request) -> aiohttp.web.Re
             "status_counts": await _giveaway_status_counts(),
             "limit": limit,
             "offset": offset,
+        }
+    )
+
+
+def _path_int(request: aiohttp.web.Request, name: str, pattern: str) -> int:
+    raw = request.match_info.get(name) if getattr(request, "match_info", None) else None
+    if raw not in (None, ""):
+        return int(raw)
+    match = re.search(pattern, request.path)
+    if not match:
+        raise ValueError(name)
+    return int(match.group(1))
+
+
+async def handle_admin_giveaway_participants(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    user = await _require_admin(request)
+    if isinstance(user, aiohttp.web.Response):
+        return user
+    try:
+        giveaway_id = _path_int(request, "giveaway_id", r"/api/admin/giveaways/(\d+)/participants")
+    except (TypeError, ValueError):
+        return webapp_error("bad_request", status=400)
+    filter_value = str(request.query.get("filter", "all")).strip().lower() or "all"
+    payload = await get_giveaway_monitor_snapshot(giveaway_id, filter_status=filter_value)
+    status = 404 if payload.get("status") == "not_found" else 200
+    return _json(payload, status=status)
+
+
+async def handle_admin_giveaway_participant_moderation(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    user = await _require_admin(request)
+    if isinstance(user, aiohttp.web.Response):
+        return user
+    try:
+        giveaway_id = _path_int(request, "giveaway_id", r"/api/admin/giveaways/(\d+)/participants/\d+/moderation")
+        user_id = _path_int(request, "user_id", r"/participants/(\d+)/moderation")
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return webapp_error("bad_request", status=400)
+    target_status = str(data.get("status", "")).strip().lower()
+    reason = str(data.get("reason", "")).strip()
+    if not target_status or not reason:
+        return webapp_error("bad_request", status=400, message="Укажите действие и причину модерации.")
+    try:
+        updated = await set_giveaway_entry_moderation(
+            giveaway_id,
+            user_id,
+            target_status,
+            actor_user_id=user["id"],
+            reason=reason,
+        )
+    except Exception as exc:  # noqa: BLE001 - convert validation/runtime issues to API response.
+        return webapp_error("bad_request", status=400, message=str(exc))
+    if not updated:
+        return webapp_error("not_found", status=404)
+    return _json({"ok": True, "giveaway_id": giveaway_id, "user_id": user_id, "status": target_status})
+
+
+async def handle_admin_giveaway_reroll(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    user = await _require_admin(request)
+    if isinstance(user, aiohttp.web.Response):
+        return user
+    try:
+        giveaway_id = _path_int(request, "giveaway_id", r"/api/admin/giveaways/(\d+)/reroll")
+        data = await request.json()
+        place = int(data.get("place", 1))
+    except Exception:  # noqa: BLE001
+        return webapp_error("bad_request", status=400)
+    reason = str(data.get("reason", "")).strip() or "Manual reroll from WebApp"
+    from services.giveaways import get_giveaway
+
+    giveaway = await get_giveaway(giveaway_id)
+    if giveaway is None:
+        return webapp_error("not_found", status=404)
+    try:
+        result = await reroll_giveaway_place(
+            request.app["bot"],
+            giveaway,
+            place,
+            actor_user_id=user["id"],
+            reason=reason,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return webapp_error("bad_request", status=400, message=str(exc))
+    return _json(
+        {
+            "ok": True,
+            "giveaway_id": giveaway_id,
+            "result": {
+                "place": result.place,
+                "old_user_id": result.old_winner.user_id,
+                "new_user_id": result.new_winner.user_id,
+            },
+            "history": await get_giveaway_reroll_history(giveaway_id),
         }
     )
 

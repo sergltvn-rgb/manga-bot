@@ -47,3 +47,15 @@ def test_giveaway_webapp_contains_server_captcha_flow():
     assert "renderCaptcha" in html
     assert "/api/giveaway/join" in html
     assert "captcha_answer" in html
+
+
+def test_admin_giveaway_monitor_has_antibot_controls():
+    html = ADMIN_HTML.read_text(encoding="utf-8")
+
+    assert 'id="participantFilter"' in html
+    assert 'id="participantRows"' in html
+    assert 'id="giveawayRiskFeed"' in html
+    assert "risk_score" in html
+    assert "risk_flags" in html
+    assert "data-entry-action" in html
+    assert "/api/admin/giveaways/" in html
