@@ -616,7 +616,8 @@ async def record_giveaway_participant_event(
     created_at: datetime | None = None,
 ) -> None:
     created = _dt_to_db(created_at or _utcnow())
-    premium_value = None if is_premium is None else int(bool(is_premium))
+    premium_normalized = _normalize_premium_value(is_premium)
+    premium_value = None if premium_normalized is None else int(premium_normalized)
     async with aiosqlite.connect(database.DB_PATH) as db:
         await db.execute(
             """
@@ -765,10 +766,28 @@ def _language_label(value: str) -> str:
     return f"язык {value}" if value else "язык неизвестен"
 
 
-def _premium_label(value: object) -> str:
+def _normalize_premium_value(value: object) -> bool | None:
     if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float):
+        return bool(value)
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    if text in {"1", "true", "yes", "y", "да", "premium"}:
+        return True
+    if text in {"0", "false", "no", "n", "нет", "none", "null"}:
+        return False
+    return None
+
+
+def _premium_label(value: object) -> str:
+    normalized = _normalize_premium_value(value)
+    if normalized is None:
         return "Premium неизвестно"
-    return "Premium да" if bool(value) else "Premium нет"
+    return "Premium да" if normalized else "Premium нет"
 
 
 def _activity_label(actions: int, telemetry_available: bool) -> str:
@@ -875,7 +894,9 @@ async def get_giveaway_monitor_snapshot(
     referral_counts = Counter(str(entry.get("referral_source") or "") for entry in entries if str(entry.get("referral_source") or ""))
     language_counts = Counter(str(entry.get("language_code") or "") for entry in entries if str(entry.get("language_code") or ""))
     premium_counts = Counter(
-        "premium" if entry.get("is_premium") == 1 else "not_premium" for entry in entries if entry.get("is_premium") is not None
+        "premium" if premium_value else "not_premium"
+        for premium_value in (_normalize_premium_value(entry.get("is_premium")) for entry in entries)
+        if premium_value is not None
     )
 
     join_times: dict[int, datetime] = {}
@@ -900,7 +921,7 @@ async def get_giveaway_monitor_snapshot(
         activity_actions = int(entry.get("action_count") or len(user_events) or 0)
         referral_source = str(entry.get("referral_source") or "")
         language_code = str(entry.get("language_code") or "")
-        premium_value = None if entry.get("is_premium") is None else bool(entry.get("is_premium"))
+        premium_value = _normalize_premium_value(entry.get("is_premium"))
         telemetry_available = bool(user_events or activity_actions)
         participant = {
             "giveaway_id": giveaway_id,

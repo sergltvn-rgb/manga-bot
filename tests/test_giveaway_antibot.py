@@ -86,6 +86,38 @@ def test_monitor_snapshot_scores_fast_referral_burst_with_explanations(tmp_path,
     assert participant["activity"]["label"] == "2 действия"
 
 
+def test_monitor_snapshot_normalizes_premium_values_from_telegram_payload(tmp_path, monkeypatch):
+    from services import giveaways
+
+    _db_path, giveaway_id = seed_active_giveaway(tmp_path, monkeypatch)
+    opened_at = datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)
+
+    for user_id, premium_value in [(3201, "false"), (3202, "0"), (3203, "true")]:
+        run(
+            giveaways.record_giveaway_participant_event(
+                giveaway_id,
+                user_id,
+                "webapp_open",
+                username=f"user{user_id}",
+                first_name=f"User {user_id}",
+                is_premium=premium_value,
+                created_at=opened_at,
+            )
+        )
+        assert run(giveaways.add_giveaway_entry(giveaway_id, user_id, f"user{user_id}", f"User {user_id}")) is True
+
+    snapshot = run(giveaways.get_giveaway_monitor_snapshot(giveaway_id, now=opened_at + timedelta(minutes=1)))
+    participants = {item["user_id"]: item for item in snapshot["participants"]}
+
+    assert participants[3201]["is_premium"] is False
+    assert participants[3201]["premium_label"] == "Premium нет"
+    assert participants[3202]["is_premium"] is False
+    assert participants[3202]["premium_label"] == "Premium нет"
+    assert participants[3203]["is_premium"] is True
+    assert participants[3203]["premium_label"] == "Premium да"
+    assert snapshot["audience"]["premium"] == {"not_premium": 2, "premium": 1}
+
+
 def test_auto_moderation_excludes_strong_technical_risk_after_join(tmp_path, monkeypatch):
     import database
     from services import giveaways

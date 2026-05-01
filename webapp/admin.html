@@ -907,7 +907,13 @@
 
     function premiumLabel(value) {
       if (value === null || typeof value === 'undefined') return 'Premium неизвестно';
-      return value ? 'Premium да' : 'Premium нет';
+      if (typeof value === 'boolean') return value ? 'Premium да' : 'Premium нет';
+      if (typeof value === 'number') return value ? 'Premium да' : 'Premium нет';
+      const normalized = String(value).trim().toLowerCase();
+      if (!normalized) return 'Premium неизвестно';
+      if (['1', 'true', 'yes', 'y', 'да', 'premium'].includes(normalized)) return 'Premium да';
+      if (['0', 'false', 'no', 'n', 'нет', 'none', 'null'].includes(normalized)) return 'Premium нет';
+      return 'Premium неизвестно';
     }
 
     function languageLabel(value) {

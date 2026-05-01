@@ -50,7 +50,7 @@ test.describe("admin giveaway monitor", () => {
             joined_at: "2026-05-01T12:00:04+00:00",
             referral_source: "promoA",
             language_code: "ar",
-            is_premium: false,
+            is_premium: "0",
             status: "joined",
             risk_score: 35,
             risk_level: "watch",
@@ -91,6 +91,7 @@ test.describe("admin giveaway monitor", () => {
     await expect(page.locator("#participantFilter")).toBeVisible();
     await expect(page.locator("#participantRows")).toContainText("Fast User");
     await expect(page.locator("#participantRows")).toContainText("35");
+    await expect(page.locator("#participantRows")).toContainText("Premium нет");
     await expect(page.locator("#participantRows")).toContainText("01.05.2026 15:09 МСК");
     await expect(page.locator("#participantRows")).toContainText("прямой вход");
     await expect(page.locator("#participantRows")).toContainText("язык ru");
