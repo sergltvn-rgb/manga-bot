@@ -62,6 +62,20 @@ GIVEAWAY_HISTORY_PAGE_SIZE = 4
 GIVEAWAY_RISK_REVIEW_THRESHOLD = 50
 GIVEAWAY_CAPTCHA_TTL_SECONDS = 5 * 60
 GIVEAWAY_CAPTCHA_MAX_ATTEMPTS = 3
+GIVEAWAY_RISK_FLAG_LABELS = {
+    "fast_registration": "Слишком быстрое участие",
+    "referral_burst": "Всплеск по рефералке",
+    "time_burst": "Всплеск регистраций",
+    "low_activity": "Мало активности",
+    "stale_after_join": "Нет активности после участия",
+    "no_username": "Нет username",
+}
+GIVEAWAY_RISK_LEVEL_LABELS = {
+    "clear": "Нет сигналов",
+    "watch": "Низкий",
+    "review": "На проверку",
+    "high": "Высокий",
+}
 _DURATION_RE = re.compile(r"^(?P<count>\d+)(?P<unit>[mhd])$", re.IGNORECASE)
 
 
@@ -724,6 +738,16 @@ def _first_event_at(events: list[dict], event_type: str | None = None) -> dateti
     return None
 
 
+def _risk_level(score: int) -> str:
+    if score >= 70:
+        return "high"
+    if score >= GIVEAWAY_RISK_REVIEW_THRESHOLD:
+        return "review"
+    if score > 0:
+        return "watch"
+    return "clear"
+
+
 def _build_risk_flags(
     entry: dict,
     events: list[dict],
@@ -738,18 +762,27 @@ def _build_risk_flags(
     flags: list[dict] = []
 
     def add(code: str, weight: int, reason: str, evidence: dict | None = None) -> None:
-        flags.append({"code": code, "weight": weight, "reason": reason, "evidence": evidence or {}})
+        flags.append(
+            {
+                "code": code,
+                "label": GIVEAWAY_RISK_FLAG_LABELS.get(code, code),
+                "weight": weight,
+                "reason": reason,
+                "evidence": evidence or {},
+            }
+        )
 
     joined_at = _maybe_dt_from_db(entry.get("joined_at"))
     first_seen_at = _maybe_dt_from_db(entry.get("first_seen_at")) or _first_event_at(events)
     join_event_at = _first_event_at(events, "giveaway_join") or joined_at
+    has_activity_events = bool(events)
     if first_seen_at and join_event_at:
         seconds = (join_event_at - first_seen_at).total_seconds()
         if 0 <= seconds <= 10:
             add(
                 "fast_registration",
                 30,
-                f"Registered {int(seconds)}s after first seen.",
+                f"Вступил через {int(seconds)} сек. после первого открытия бота или WebApp.",
                 {"seconds": int(seconds)},
             )
 
@@ -759,7 +792,7 @@ def _build_risk_flags(
         add(
             "referral_burst",
             25,
-            f"{referral_count} participants came from referral source {referral_source}.",
+            f"{referral_count} участников пришли из источника {referral_source}.",
             {"source": referral_source, "participants": referral_count},
         )
 
@@ -769,21 +802,21 @@ def _build_risk_flags(
         if minute_count >= 5:
             add(
                 "time_burst",
-                15,
-                f"{minute_count} registrations landed in the same minute.",
+                20,
+                f"{minute_count} регистраций попали в одну минуту. Это повод посмотреть пачку, но не основание для удаления само по себе.",
                 {"minute": minute_key, "participants": minute_count},
             )
 
     action_count = int(entry.get("action_count") or len(events) or 0)
-    if action_count <= 2:
-        add("low_activity", 15, "Only giveaway entry activity is visible for this user.", {"actions": action_count})
+    if has_activity_events and action_count <= 2:
+        add("low_activity", 15, "Видны только действия вокруг участия в конкурсе.", {"actions": action_count})
 
     last_seen_at = _maybe_dt_from_db(entry.get("last_seen_at")) or join_event_at or joined_at
-    if last_seen_at and now - last_seen_at > timedelta(days=7) and action_count <= 2:
-        add("stale_after_join", 10, "No recent bot/WebApp activity after joining.", {"last_seen_at": _dt_to_db(last_seen_at)})
+    if has_activity_events and last_seen_at and now - last_seen_at > timedelta(days=7) and action_count <= 2:
+        add("stale_after_join", 10, "После участия нет свежей активности в боте или WebApp.", {"last_seen_at": _dt_to_db(last_seen_at)})
 
     if not str(entry.get("username") or "").strip():
-        add("no_username", 5, "Telegram username is not available; weak signal only.", {})
+        add("no_username", 5, "Telegram username недоступен. Это слабый сигнал и не причина для удаления.", {})
 
     score = min(100, sum(int(flag["weight"]) for flag in flags))
     return score, flags
@@ -827,9 +860,11 @@ async def get_giveaway_monitor_snapshot(
         risk_score, risk_flags = _build_risk_flags(
             entry, user_events, referral_counts=referral_counts, minute_counts=minute_counts, now=now_utc
         )
+        risk_level = _risk_level(risk_score)
         joined_at = _maybe_dt_from_db(entry.get("joined_at"))
         last_seen_at = _maybe_dt_from_db(entry.get("last_seen_at"))
         status = str(entry.get("status") or GIVEAWAY_ENTRY_STATUS_JOINED)
+        activity_actions = int(entry.get("action_count") or len(user_events) or 0)
         participant = {
             "giveaway_id": giveaway_id,
             "user_id": user_id,
@@ -844,9 +879,13 @@ async def get_giveaway_monitor_snapshot(
             "is_winner": bool(entry.get("is_winner")),
             "winner_place": entry.get("winner_place"),
             "risk_score": risk_score,
+            "risk_level": risk_level,
+            "risk_label": GIVEAWAY_RISK_LEVEL_LABELS.get(risk_level, risk_level),
             "risk_flags": risk_flags,
             "activity": {
-                "actions": int(entry.get("action_count") or len(user_events) or 0),
+                "actions": activity_actions,
+                "events": len(user_events),
+                "telemetry_available": bool(user_events or activity_actions),
                 "last_seen_at": _dt_to_db(last_seen_at) if last_seen_at else "",
                 "active_now": bool(last_seen_at and now_utc - last_seen_at <= timedelta(minutes=5)),
             },
@@ -856,6 +895,7 @@ async def get_giveaway_monitor_snapshot(
                 "reason": str(entry.get("moderation_reason") or ""),
             },
             "is_suspicious": risk_score >= GIVEAWAY_RISK_REVIEW_THRESHOLD and status != GIVEAWAY_ENTRY_STATUS_TRUSTED,
+            "is_watch": risk_level == "watch" and status != GIVEAWAY_ENTRY_STATUS_TRUSTED,
             "is_new": bool(joined_at and now_utc - joined_at <= timedelta(minutes=15)),
         }
         participants.append(participant)
@@ -871,6 +911,8 @@ async def get_giveaway_monitor_snapshot(
     filter_value = str(filter_status or "all").strip().lower()
     if filter_value == "suspicious":
         filtered = [item for item in participants if item["is_suspicious"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED]
+    elif filter_value == "watch":
+        filtered = [item for item in participants if item["is_watch"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED]
     elif filter_value in {"removed", "excluded"}:
         filtered = [item for item in participants if item["status"] == GIVEAWAY_ENTRY_STATUS_EXCLUDED]
     elif filter_value == "winners":
@@ -887,8 +929,14 @@ async def get_giveaway_monitor_snapshot(
         filtered = participants
 
     suspicious_by_referral = Counter(item["referral_source"] for item in participants if item["is_suspicious"] and item["referral_source"])
+    watch_by_referral = Counter(item["referral_source"] for item in participants if item["is_watch"] and item["referral_source"])
     referrals = [
-        {"source": source, "participants": count, "suspicious": suspicious_by_referral.get(source, 0)}
+        {
+            "source": source,
+            "participants": count,
+            "suspicious": suspicious_by_referral.get(source, 0),
+            "watch": watch_by_referral.get(source, 0),
+        }
         for source, count in referral_counts.most_common(12)
     ]
     timeline = [{"bucket": bucket, "count": count} for bucket, count in sorted(minute_counts.items())][-30:]
@@ -896,6 +944,7 @@ async def get_giveaway_monitor_snapshot(
         "total": len(participants),
         "normal": len([item for item in participants if not item["is_suspicious"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED]),
         "suspicious": len([item for item in participants if item["is_suspicious"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED]),
+        "watch": len([item for item in participants if item["is_watch"] and item["status"] != GIVEAWAY_ENTRY_STATUS_EXCLUDED]),
         "removed": len([item for item in participants if item["status"] == GIVEAWAY_ENTRY_STATUS_EXCLUDED]),
         "winners": len([item for item in participants if item["is_winner"]]),
         "new_1m": len(
@@ -928,9 +977,9 @@ async def get_giveaway_monitor_snapshot(
             "languages": dict(language_counts),
             "premium": dict(premium_counts),
             "notes": [
-                "language_code and premium are Telegram-provided when available.",
-                "Online status is approximated from last bot/WebApp activity.",
-                "Language, region, name and inferred demographic signals are analytics only.",
+                "Язык и Premium берутся из Telegram только когда доступны.",
+                "Онлайн-статус приблизительный: считаем по последнему действию в боте или WebApp.",
+                "Язык, регион, имя и предполагаемая демография используются только как аналитика.",
             ],
         },
     }

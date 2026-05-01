@@ -786,6 +786,7 @@
           <div class="giveaway-risk-strip">
             <span>Новых 1м <b>${escapeHtml(item.monitor && item.monitor.new_1m || 0)}</b></span>
             <span>Подозрительных <b>${escapeHtml(item.monitor && item.monitor.suspicious || 0)}</b></span>
+            <span>Наблюдение <b>${escapeHtml(item.monitor && item.monitor.watch || 0)}</b></span>
             <span>Удалённых <b>${escapeHtml(item.monitor && item.monitor.removed || 0)}</b></span>
             <span>Онлайн proxy <b>${escapeHtml(item.monitor && item.monitor.active_now || 0)}</b></span>
           </div>
@@ -843,12 +844,13 @@
           <div class="participant-monitor__head">
             <div>
               <h4>Live аудитория конкурса</h4>
-              <p>Risk score объясняет технические сигналы. Язык, имя, региональные признаки и предполагаемая демография не являются причиной удаления сами по себе.</p>
+              <p>Оценка риска показывает технические сигналы. Язык, имя, региональные признаки и предполагаемая демография не являются причиной удаления сами по себе.</p>
             </div>
             <select class="field compact-field" id="participantFilter">
               <option value="all">Все</option>
               <option value="normal">Нормальные</option>
               <option value="suspicious">Подозрительные</option>
+              <option value="watch">Наблюдение</option>
               <option value="removed">Удалённые</option>
               <option value="winners">Победители</option>
               <option value="new">Новые</option>
@@ -857,7 +859,7 @@
           <div id="giveawayRiskFeed" class="risk-feed"><span class="label">Откройте карточку розыгрыша, чтобы загрузить участников.</span></div>
           <div class="table-wrap compact-table">
             <table>
-              <thead><tr><th>Участник</th><th>Источник</th><th>Активность</th><th>Risk</th><th>Причины</th><th>Действия</th></tr></thead>
+              <thead><tr><th>Участник</th><th>Источник</th><th>Активность</th><th>Риск</th><th>Причины</th><th>Действия</th></tr></thead>
               <tbody id="participantRows"><tr><td colspan="6">Участники появятся после выбора розыгрыша.</td></tr></tbody>
             </table>
           </div>
@@ -876,8 +878,46 @@
       const value = Number(score || 0);
       if (value >= 70) return 'rose';
       if (value >= 50) return 'amber';
-      if (value > 0) return 'violet';
       return '';
+    }
+
+    const riskFlagLabels = {
+      fast_registration: 'Слишком быстрое участие',
+      referral_burst: 'Всплеск по рефералке',
+      time_burst: 'Всплеск регистраций',
+      low_activity: 'Мало активности',
+      stale_after_join: 'Нет активности после участия',
+      no_username: 'Нет username',
+    };
+
+    function sourceLabel(source) {
+      return source ? source : 'прямой вход';
+    }
+
+    function premiumLabel(value) {
+      if (value === null || typeof value === 'undefined') return 'Premium неизвестно';
+      return value ? 'Premium да' : 'Premium нет';
+    }
+
+    function languageLabel(value) {
+      return value ? `язык ${value}` : 'язык неизвестен';
+    }
+
+    function activityLabel(activity = {}) {
+      const actions = Number(activity.actions || 0);
+      if (!activity.telemetry_available && actions === 0) return 'активность не собиралась';
+      if (actions === 1) return '1 действие';
+      if (actions > 1 && actions < 5) return `${actions} действия`;
+      return `${actions} действий`;
+    }
+
+    function riskLevelLabel(item) {
+      if (item.risk_label) return item.risk_label;
+      const value = Number(item.risk_score || 0);
+      if (value >= 70) return 'Высокий';
+      if (value >= 50) return 'На проверку';
+      if (value > 0) return 'Низкий';
+      return 'Нет сигналов';
     }
 
     function renderParticipants(payload) {
@@ -889,12 +929,13 @@
           <div><span>Всего</span><b>${escapeHtml(counters.total || 0)}</b></div>
           <div><span>Новых 1/5/15</span><b>${escapeHtml(counters.new_1m || 0)} / ${escapeHtml(counters.new_5m || 0)} / ${escapeHtml(counters.new_15m || 0)}</b></div>
           <div><span>Подозрительных</span><b>${escapeHtml(counters.suspicious || 0)}</b></div>
+          <div><span>Наблюдение</span><b>${escapeHtml(counters.watch || 0)}</b></div>
           <div><span>Удалённых</span><b>${escapeHtml(counters.removed || 0)}</b></div>
           <div><span>Победителей</span><b>${escapeHtml(counters.winners || 0)}</b></div>
           <div><span>Активны сейчас</span><b>${escapeHtml(counters.active_now || 0)}</b></div>
         </div>
         <div class="referral-line">
-          ${referrals.length ? referrals.slice(0, 6).map((item) => `<span class="badge">${escapeHtml(item.source)} · ${escapeHtml(item.participants)} / risk ${escapeHtml(item.suspicious)}</span>`).join('') : '<span class="label">Реферальных всплесков не видно.</span>'}
+          ${referrals.length ? referrals.slice(0, 6).map((item) => `<span class="badge">${escapeHtml(item.source)} · ${escapeHtml(item.participants)} / проверка ${escapeHtml(item.suspicious || 0)} / наблюдение ${escapeHtml(item.watch || 0)}</span>`).join('') : '<span class="label">Реферальных всплесков не видно.</span>'}
         </div>
       `;
       const rows = asArray(payload.participants);
@@ -906,10 +947,10 @@
         return `
           <tr>
             <td><b>${escapeHtml(item.display_name || item.first_name || item.username || item.user_id)}</b><br><span class="label">ID ${escapeHtml(item.user_id)} ${item.username ? `@${escapeHtml(item.username)}` : ''} · ${escapeHtml(participantStatusLabel(item.status))}</span></td>
-            <td>${escapeHtml(item.referral_source || 'direct')}<br><span class="label">${escapeHtml(item.language_code || 'lang ?')} · Premium ${item.is_premium === null ? '?' : (item.is_premium ? 'yes' : 'no')}</span></td>
-            <td><span class="label">${escapeHtml(item.joined_at || '')}</span><br><b>${escapeHtml(item.activity && item.activity.actions || 0)} actions</b></td>
-            <td><span class="badge ${riskTone(item.risk_score)}">${escapeHtml(item.risk_score)}</span></td>
-            <td>${flags.length ? flags.map((flag) => `<span class="flag-line"><b>${escapeHtml(flag.code)}</b> ${escapeHtml(flag.reason)}</span>`).join('') : '<span class="label">Нет сильных сигналов</span>'}</td>
+            <td>${escapeHtml(sourceLabel(item.referral_source))}<br><span class="label">${escapeHtml(languageLabel(item.language_code))} · ${escapeHtml(premiumLabel(item.is_premium))}</span></td>
+            <td><span class="label">${escapeHtml(item.joined_at || '')}</span><br><b>${escapeHtml(activityLabel(item.activity))}</b></td>
+            <td><span class="badge ${riskTone(item.risk_score)}">${escapeHtml(item.risk_score)}</span><br><span class="label">${escapeHtml(riskLevelLabel(item))}</span></td>
+            <td>${flags.length ? flags.map((flag) => `<span class="flag-line"><b>${escapeHtml(flag.label || riskFlagLabels[flag.code] || flag.code)}</b> ${escapeHtml(flag.reason)}</span>`).join('') : '<span class="label">Нет сильных сигналов</span>'}</td>
             <td class="actions-cell">${actions}</td>
           </tr>
         `;

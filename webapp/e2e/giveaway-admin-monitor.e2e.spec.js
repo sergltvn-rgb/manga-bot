@@ -27,7 +27,7 @@ test.describe("admin giveaway monitor", () => {
       route.fulfill({
         json: {
           ok: true,
-          active: [{ id: 7, status: "active", post_text: "VIP launch", prize: "VIP", participants: 12, winners_count: 1, ends_at: "02.05.2026 20:00", monitor: { suspicious: 3, removed: 1, new_1m: 2 } }],
+          active: [{ id: 7, status: "active", post_text: "VIP launch", prize: "VIP", participants: 12, winners_count: 1, ends_at: "02.05.2026 20:00", monitor: { suspicious: 3, watch: 4, removed: 1, new_1m: 2 } }],
           recent: [],
           total: 1,
           status_counts: { active: 1, scheduled: 0, finished: 0, cancelled: 0, all: 1 },
@@ -40,8 +40,8 @@ test.describe("admin giveaway monitor", () => {
           ok: true,
           giveaway_id: 7,
           filter: "all",
-          counters: { total: 12, suspicious: 3, removed: 1, winners: 0, new_1m: 2, new_5m: 5, new_15m: 9, active_now: 4 },
-          referrals: [{ source: "promoA", participants: 8, suspicious: 3 }],
+          counters: { total: 12, suspicious: 3, watch: 4, removed: 1, winners: 0, new_1m: 2, new_5m: 5, new_15m: 9, active_now: 4 },
+          referrals: [{ source: "promoA", participants: 8, suspicious: 3, watch: 4 }],
           timeline: [{ bucket: "12:00", count: 6 }],
           participants: [{
             user_id: 1001,
@@ -52,8 +52,10 @@ test.describe("admin giveaway monitor", () => {
             language_code: "ar",
             is_premium: false,
             status: "joined",
-            risk_score: 75,
-            risk_flags: [{ code: "fast_registration", reason: "Registered 4s after first seen.", weight: 30 }],
+            risk_score: 35,
+            risk_level: "watch",
+            risk_label: "Низкий",
+            risk_flags: [{ code: "time_burst", label: "Всплеск регистраций", reason: "16 регистраций в одну минуту.", weight: 20 }],
           }],
         },
       }),
@@ -66,8 +68,11 @@ test.describe("admin giveaway monitor", () => {
     await expect(page.locator("#giveawayStatus")).toContainText("Подозрительных");
     await expect(page.locator("#participantFilter")).toBeVisible();
     await expect(page.locator("#participantRows")).toContainText("Fast User");
-    await expect(page.locator("#participantRows")).toContainText("75");
-    await expect(page.locator("#participantRows")).toContainText("fast_registration");
+    await expect(page.locator("#participantRows")).toContainText("35");
+    await expect(page.locator("#participantRows")).toContainText("Низкий");
+    await expect(page.locator("#participantRows")).toContainText("Всплеск регистраций");
+    await expect(page.locator("#participantRows")).not.toContainText("time_burst");
+    await expect(page.locator("#participantRows")).not.toContainText("Registered");
     await expect(page.locator("[data-entry-action='exclude']")).toBeVisible();
     await expect(page.locator("[data-entry-action='trust']")).toBeVisible();
   });

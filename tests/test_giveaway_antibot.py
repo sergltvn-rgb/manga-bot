@@ -77,6 +77,55 @@ def test_monitor_snapshot_scores_fast_referral_burst_with_explanations(tmp_path,
     assert participant["risk_score"] >= 60
     assert {"fast_registration", "referral_burst", "low_activity"}.issubset(flag_codes)
     assert all(flag["reason"] for flag in participant["risk_flags"])
+    assert all(flag.get("label") for flag in participant["risk_flags"])
+    assert participant["risk_level"] in {"review", "high"}
+
+
+def test_legacy_batch_entries_are_watch_not_suspicious_without_activity_events(tmp_path, monkeypatch):
+    import database
+
+    from services import giveaways
+
+    _db_path, giveaway_id = seed_active_giveaway(tmp_path, monkeypatch)
+    joined_at = datetime(2026, 4, 24, 20, 31, tzinfo=timezone.utc)
+
+    for offset, user_id in enumerate(range(2001, 2017)):
+        assert run(giveaways.add_giveaway_entry(giveaway_id, user_id, f"user_{offset}", f"User {offset}")) is True
+
+    async def move_join_times():
+        async with aiosqlite.connect(database.DB_PATH) as db:
+            for offset, user_id in enumerate(range(2001, 2017)):
+                await db.execute(
+                    "UPDATE giveaway_entries SET joined_at = ?, action_count = 0 WHERE giveaway_id = ? AND user_id = ?",
+                    ((joined_at + timedelta(seconds=offset * 3)).isoformat(), giveaway_id, user_id),
+                )
+            await db.commit()
+
+    run(move_join_times())
+
+    snapshot = run(giveaways.get_giveaway_monitor_snapshot(giveaway_id, now=datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc)))
+    participant = next(item for item in snapshot["participants"] if item["user_id"] == 2001)
+    flag_codes = {flag["code"] for flag in participant["risk_flags"]}
+    flag_text = " ".join(flag["reason"] for flag in participant["risk_flags"])
+
+    assert snapshot["counters"]["suspicious"] == 0
+    assert snapshot["counters"]["watch"] == 16
+    assert participant["risk_score"] > 0
+    assert participant["risk_level"] == "watch"
+    assert participant["risk_label"] == "Низкий"
+    assert participant["is_suspicious"] is False
+    assert "time_burst" in flag_codes
+    assert "low_activity" not in flag_codes
+    assert "registrations landed" not in flag_text
+
+    watch = run(
+        giveaways.get_giveaway_monitor_snapshot(
+            giveaway_id,
+            filter_status="watch",
+            now=datetime(2026, 5, 1, 12, 0, tzinfo=timezone.utc),
+        )
+    )
+    assert len(watch["participants"]) == 16
 
 
 def test_exclude_restore_and_trust_participant_are_audited(tmp_path, monkeypatch):

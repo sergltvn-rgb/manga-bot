@@ -355,6 +355,7 @@ async def _giveaway_payload(item: Giveaway) -> dict[str, Any]:
         "replacements_count": item.replacements_count,
         "monitor": {
             "suspicious": counters.get("suspicious", 0),
+            "watch": counters.get("watch", 0),
             "removed": counters.get("removed", 0),
             "new_1m": counters.get("new_1m", 0),
             "new_5m": counters.get("new_5m", 0),
