@@ -534,6 +534,14 @@
                 "https://telegra.ph/Voitelnica-Alya--Glava-1-04-30",
                 "https://telegra.ph/Voitelnica-Alya--Glava-1-chast-2-04-30"
               ]
+            },
+            {
+              "chapter": "Иллюстрации",
+              "custom_name": "Глава Иллюстрации",
+              "url": "https://teletype.in/@slitvin/eYU4VveONul",
+              "urls": [
+                "https://teletype.in/@slitvin/eYU4VveONul"
+              ]
             }
           ]
         }
@@ -596,14 +604,14 @@
   ],
   "bot_username": "Alyamangapage_bot",
   "admin_ids": [
-    "7623430602",
     "5477281591",
-    "1747374025",
-    "8033148365",
-    "6210312655",
     "6573251552",
     "999408738",
+    "1747374025",
+    "7623430602",
+    "1577647113",
     "1424182136",
-    "1577647113"
+    "8033148365",
+    "6210312655"
   ]
 }
