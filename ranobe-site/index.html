@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ranobe Radar 2026 — что переводить с английского и японского</title>
+    <meta
+      name="description"
+      content="Интерактивная инфографика по 89 онгоинг-ранобэ и веб-новеллам (Kakuyomu, Scribble Hub, Royal Road, J-Novel, Yen Press), которые к маю 2026 не переведены на русский."
+    />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Unbounded:wght@400;500;600;700&family=Noto+Serif+JP:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Tailwind Play CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              ink: { 0: '#07060c', 1: '#0d0b16', 2: '#151224', 3: '#1e1a33' },
+              pink: { 500: '#ff5fa2' },
+              violet: { 500: '#8b5cf6' },
+              cyan: { 500: '#22d3ee' },
+            },
+          },
+        },
+      };
+    </script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- ============ NAV ============ -->
+    <nav class="topnav">
+      <div class="max-w-[1280px] mx-auto px-5 py-3.5 flex items-center justify-between gap-6">
+        <a href="#top" class="flex items-center gap-2.5 group">
+          <span class="w-8 h-8 rounded-xl bg-gradient-to-br from-pink-500 to-violet-500 flex items-center justify-center text-lg pulse">📡</span>
+          <span class="font-display font-semibold tracking-tight text-[15px]">Ranobe Radar <span class="text-[var(--text-dim)] font-normal">/2026</span></span>
+        </a>
+        <div class="hidden md:flex items-center gap-7">
+          <a href="#context" class="nav-link">Рынок</a>
+          <a href="#charts" class="nav-link">Графики</a>
+          <a href="#catalog" class="nav-link">Каталог</a>
+          <a href="#must-translate" class="nav-link">Must-Translate</a>
+          <a href="#reasons" class="nav-link">Почему нет</a>
+          <a href="#how-to" class="nav-link">Как начать</a>
+          <a href="#sources" class="nav-link">Источники</a>
+        </div>
+        <a href="#catalog" class="btn btn-primary !py-2 !px-4 text-[13px] hidden sm:inline-flex">Смотреть 89 тайтлов <span>→</span></a>
+      </div>
+    </nav>
+
+    <!-- ============ HERO ============ -->
+    <header id="top" class="relative overflow-hidden">
+      <div class="absolute inset-0 grid-lines opacity-40 pointer-events-none"></div>
+      <div class="max-w-[1280px] mx-auto px-5 pt-16 pb-20 md:pt-24 md:pb-28 relative">
+        <div class="flex items-center gap-2 text-[12px] tracking-[0.25em] uppercase text-[var(--text-dim)] mb-6">
+          <span class="w-2 h-2 rounded-full bg-pink-500 pulse"></span>
+          Отчёт актуален на <span class="text-[var(--text-muted)]">2 мая 2026</span>
+        </div>
+        <h1 class="font-display text-4xl md:text-6xl lg:text-[76px] leading-[1.02] tracking-tight max-w-5xl">
+          Онгоинги, которые <span class="gradient-text">рунет пропустил</span>.<br />
+          <span class="text-[var(--text-muted)]">Инфографика по 89 ранобэ и веб-новеллам.</span>
+        </h1>
+        <p class="mt-8 max-w-2xl text-[var(--text-muted)] text-lg leading-relaxed">
+          Горячие новинки Kakuyomu, мега-саги Scribble Hub и свежие лицензии J-Novel / Yen Press — все они доступны на английском или японском, но в русском сегменте их нет. Разбираем объёмы, платформы, жанры и выделяем тайтлы, <em class="text-white not-italic">которые правда стоят перевода</em>.
+        </p>
+
+        <!-- KPI -->
+        <div class="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="kpi">
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">Тайтлов в отчёте</div>
+            <div class="kpi-value" id="kpi-titles">—</div>
+            <div class="text-xs text-[var(--text-muted)] mt-2">отсутствуют в RU</div>
+          </div>
+          <div class="kpi">
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">Суммарно слов</div>
+            <div class="kpi-value" id="kpi-words">—</div>
+            <div class="text-xs text-[var(--text-muted)] mt-2">≈ объём сотни томов LN</div>
+          </div>
+          <div class="kpi">
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">Платформ</div>
+            <div class="kpi-value" id="kpi-platforms">—</div>
+            <div class="text-xs text-[var(--text-muted)] mt-2">JP + EN web и commercial</div>
+          </div>
+          <div class="kpi">
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">Must-Translate</div>
+            <div class="kpi-value" id="kpi-must"><span style="color:#ff5fa2">5</span></div>
+            <div class="text-xs text-[var(--text-muted)] mt-2">экспертная подборка</div>
+          </div>
+        </div>
+
+        <div class="mt-10 flex flex-wrap gap-3">
+          <a href="#catalog" class="btn btn-primary">📚 Открыть каталог</a>
+          <a href="#must-translate" class="btn">🔥 Must-Translate топ-5</a>
+          <a href="#charts" class="btn">📊 К графикам</a>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============ CONTEXT ============ -->
+    <section id="context" class="py-20 border-t border-[var(--line)]">
+      <div class="max-w-[1280px] mx-auto px-5">
+        <div class="flex items-end justify-between flex-wrap gap-4 mb-10">
+          <div>
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">01 / Рынок</div>
+            <h2 class="font-display text-3xl md:text-5xl leading-tight">Что происходит в сетевой литературе 2025–2026</h2>
+          </div>
+          <p class="max-w-md text-sm text-[var(--text-muted)]">Рост объёмов ↑, падение монетизации ↓, цензура разнесла платформы по лагерям. Результат — рекордный разрыв между тем, что читают на EN/JP, и тем, что доходит до RU.</p>
+        </div>
+
+        <div class="grid md:grid-cols-3 gap-4">
+          <div class="glass card p-6 rounded-3xl">
+            <div class="text-[var(--text-dim)] text-xs uppercase tracking-widest mb-3">Royal Road, просмотры/год</div>
+            <div class="font-display text-4xl md:text-5xl gradient-text">×4.4</div>
+            <div class="text-sm text-[var(--text-muted)] mt-3 leading-relaxed">
+              С 960 млн (2022) до 4,2 млрд (2025). Но средний Patron Value упал с $4.77 до $1.62 — платформа массифицируется, деньги за контентом уходят на Amazon Kindle.
+            </div>
+          </div>
+          <div class="glass card p-6 rounded-3xl">
+            <div class="text-[var(--text-dim)] text-xs uppercase tracking-widest mb-3">Лаг RU vs EN</div>
+            <div class="font-display text-4xl md:text-5xl gradient-text">3–4 года</div>
+            <div class="text-sm text-[var(--text-muted)] mt-3 leading-relaxed">
+              В 2026 RU-агрегаторы всё ещё раскатывают переводы тайтлов 2020–2022. Тренды Kakuyomu этого года («clouding», «Mob MC») приходят в рунет с задержкой почти в пятилетку.
+            </div>
+          </div>
+          <div class="glass card p-6 rounded-3xl">
+            <div class="text-[var(--text-dim)] text-xs uppercase tracking-widest mb-3">Доля романтики</div>
+            <div class="font-display text-4xl md:text-5xl gradient-text">≈ 15%</div>
+            <div class="text-sm text-[var(--text-muted)] mt-3 leading-relaxed">
+              На Royal Road — жанр-аутсайдер, но с высоким удержанием. На Scribble Hub — доминирует. На Kakuyomu — ядро ежедневных рейтингов.
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CHARTS ============ -->
+    <section id="charts" class="py-20 border-t border-[var(--line)]">
+      <div class="max-w-[1280px] mx-auto px-5">
+        <div class="flex items-end justify-between flex-wrap gap-4 mb-10">
+          <div>
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">02 / Графики</div>
+            <h2 class="font-display text-3xl md:text-5xl leading-tight">Распределения и масштабы</h2>
+          </div>
+          <p class="max-w-md text-sm text-[var(--text-muted)]">Пять углов зрения на 89 тайтлов: где они, сколько весят, какие жанры и как выглядят в координатах «год старта × объём».</p>
+        </div>
+
+        <div class="grid lg:grid-cols-3 gap-4">
+          <div class="glass card rounded-3xl p-5 lg:col-span-1">
+            <h3 class="font-display text-lg mb-1">Распределение по платформам</h3>
+            <p class="text-xs text-[var(--text-muted)] mb-4">Сколько тайтлов живёт на каждой площадке</p>
+            <div class="chart-wrap"><canvas id="chart-platforms"></canvas></div>
+          </div>
+          <div class="glass card rounded-3xl p-5 lg:col-span-2">
+            <h3 class="font-display text-lg mb-1">Топ-10 по объёму</h3>
+            <p class="text-xs text-[var(--text-muted)] mb-4">В тысячах слов. Учитывайте: объём — это и магнит, и барьер для перевода.</p>
+            <div class="chart-wrap chart-wrap-tall"><canvas id="chart-words"></canvas></div>
+          </div>
+
+          <div class="glass card rounded-3xl p-5 lg:col-span-2">
+            <h3 class="font-display text-lg mb-1">Жанровая матрица платформ</h3>
+            <p class="text-xs text-[var(--text-muted)] mb-4">Сколько тайтлов каждого жанра встречается на платформе</p>
+            <div class="chart-wrap"><canvas id="chart-genre-matrix"></canvas></div>
+          </div>
+          <div class="glass card rounded-3xl p-5 lg:col-span-1">
+            <h3 class="font-display text-lg mb-1">Средние характеристики</h3>
+            <p class="text-xs text-[var(--text-muted)] mb-4">По шкале 0–10 для каждой платформы</p>
+            <div class="chart-wrap"><canvas id="chart-radar"></canvas></div>
+          </div>
+
+          <div class="glass card rounded-3xl p-5 lg:col-span-3">
+            <h3 class="font-display text-lg mb-1">Год старта × объём × приоритет перевода</h3>
+            <p class="text-xs text-[var(--text-muted)] mb-4">Пузырь = приоритет (0–100). Чем ярче и крупнее — тем сильнее рекомендуем взять в перевод.</p>
+            <div class="chart-wrap chart-wrap-tall"><canvas id="chart-scatter"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ CATALOG ============ -->
+    <section id="catalog" class="py-20 border-t border-[var(--line)]">
+      <div class="max-w-[1280px] mx-auto px-5">
+        <div class="flex items-end justify-between flex-wrap gap-4 mb-8">
+          <div>
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">03 / Каталог</div>
+            <h2 class="font-display text-3xl md:text-5xl leading-tight">89 онгоингов <span class="text-[var(--text-muted)]">под радаром</span></h2>
+          </div>
+          <div id="catalog-counter" class="text-sm text-[var(--text-muted)]">—</div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters-panel glass-strong rounded-3xl p-5 mb-8">
+          <div>
+            <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Платформа</div>
+            <div class="flex flex-wrap gap-2" data-filter-group="platform"></div>
+          </div>
+          <div>
+            <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Язык оригинала</div>
+            <div class="flex flex-wrap gap-2" data-filter-group="language">
+              <button class="filter-btn active" data-filter-value="all">Все</button>
+              <button class="filter-btn" data-filter-value="ja">🇯🇵 Японский</button>
+              <button class="filter-btn" data-filter-value="en">🇺🇸 Английский</button>
+            </div>
+          </div>
+          <div>
+            <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Контент</div>
+            <div class="flex flex-wrap gap-2" data-filter-group="rating">
+              <button class="filter-btn active" data-filter-value="all">Все</button>
+              <button class="filter-btn" data-filter-value="safe">Без 18+</button>
+              <button class="filter-btn" data-filter-value="adult">Только 18+</button>
+            </div>
+          </div>
+          <div>
+            <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Приоритет перевода</div>
+            <div class="flex flex-wrap gap-2" data-filter-group="priority">
+              <button class="filter-btn active" data-filter-value="all">Все</button>
+              <button class="filter-btn" data-filter-value="must">🔥 Must-Translate (топ-5)</button>
+              <button class="filter-btn" data-filter-value="high">≥ 70</button>
+              <button class="filter-btn" data-filter-value="mid">50–69</button>
+              <button class="filter-btn" data-filter-value="low">&lt; 50</button>
+            </div>
+          </div>
+          <div>
+            <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Разведка переводов</div>
+            <div class="flex flex-wrap gap-2" data-filter-group="scout">
+              <button class="filter-btn active" data-filter-value="all">Все</button>
+              <button class="filter-btn" data-filter-value="not_found">Свободно</button>
+              <button class="filter-btn" data-filter-value="en_agg">Английский есть</button>
+              <button class="filter-btn" data-filter-value="ru_partial">RU частично</button>
+              <button class="filter-btn" data-filter-value="ru_full">RU закрыто</button>
+            </div>
+          </div>
+          <div>
+            <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Английский источник</div>
+            <div class="flex flex-wrap gap-2" data-filter-group="source">
+              <button class="filter-btn active" data-filter-value="all">Все</button>
+              <button class="filter-btn" data-filter-value="pdf_epub">PDF/EPUB найдено</button>
+              <button class="filter-btn" data-filter-value="ocean">OceanOfPDF сигнал</button>
+            </div>
+          </div>
+          <div>
+            <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Жанры / теги</div>
+            <div class="flex flex-wrap gap-2 max-h-28 overflow-y-auto pr-1" data-filter-group="genre"></div>
+          </div>
+          <div>
+            <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Объём</div>
+            <div class="flex flex-wrap gap-2" data-filter-group="length">
+              <button class="filter-btn active" data-filter-value="all">Любой</button>
+              <button class="filter-btn" data-filter-value="short">До 100k</button>
+              <button class="filter-btn" data-filter-value="medium">100–300k</button>
+              <button class="filter-btn" data-filter-value="long">300–700k</button>
+              <button class="filter-btn" data-filter-value="mega">700k+</button>
+            </div>
+          </div>
+          <div class="flex items-center justify-between pt-2 border-t border-[var(--line)]">
+            <div class="text-xs text-[var(--text-muted)]">Сортировка</div>
+            <select id="sort-select" class="bg-[var(--bg-2)] border border-[var(--line-strong)] rounded-lg px-3 py-2 text-sm outline-none focus:border-pink-500 transition-colors">
+              <option value="priority">По приоритету перевода ↓</option>
+              <option value="words">По объёму слов ↓</option>
+              <option value="chapters">По количеству глав ↓</option>
+              <option value="year">По году старта ↓</option>
+              <option value="alpha">По названию A→Z</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Grid -->
+        <div id="catalog-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"></div>
+        <div id="catalog-empty" class="hidden text-center py-16 text-[var(--text-muted)]">
+          По выбранным фильтрам ничего не найдено. Попробуйте расширить критерии.
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ MUST-TRANSLATE ============ -->
+    <section id="must-translate" class="py-20 border-t border-[var(--line)]">
+      <div class="max-w-[1280px] mx-auto px-5">
+        <div class="flex items-end justify-between flex-wrap gap-4 mb-4">
+          <div>
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">04 / Экспертный выбор</div>
+            <h2 class="font-display text-3xl md:text-5xl leading-tight">🔥 Must-Translate: топ-5</h2>
+          </div>
+          <p class="max-w-md text-sm text-[var(--text-muted)]">Оценка 0–100 по 4 параметрам: популярность (25) + уникальность (25) + релевантность RU-аудитории (25) + реализуемость перевода (25).</p>
+        </div>
+        <div id="must-grid" class="mt-8 grid md:grid-cols-2 gap-5"></div>
+
+        <!-- Methodology -->
+        <details class="mt-10 glass rounded-2xl p-5 group">
+          <summary class="cursor-pointer flex items-center justify-between font-display text-lg">
+            Методология оценки
+            <span class="text-[var(--text-muted)] text-sm group-open:rotate-180 transition-transform">▾</span>
+          </summary>
+          <div class="mt-5 grid md:grid-cols-2 gap-5 text-sm text-[var(--text-muted)] leading-relaxed">
+            <div><b class="text-white">Популярность</b> — позиции в рейтингах платформы, упоминания в Reddit / Twitter / fandom-пространствах, тираж (если это LN), наличие манги/аниме адаптации.</div>
+            <div><b class="text-white">Уникальность</b> — оригинальность сеттинга и хука, отсутствие близких аналогов на RU-рынке, свежесть тропа (clouding, Mob MC, shoggoth, GL-реализм).</div>
+            <div><b class="text-white">Релевантность RU</b> — насколько тема попадает в текущие интересы русскоязычной аудитории ранобэ: академия, villainess, цундэрэ-слом, дарк-романтика, yuri с драмой.</div>
+            <div><b class="text-white">Реализуемость</b> — объём, темп выхода глав, доступность английского промежуточного перевода, юридический статус.</div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- ============ REASONS ============ -->
+    <section id="reasons" class="py-20 border-t border-[var(--line)]">
+      <div class="max-w-[1280px] mx-auto px-5">
+        <div class="mb-10">
+          <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">05 / Барьеры</div>
+          <h2 class="font-display text-3xl md:text-5xl leading-tight">Почему эти работы <span class="gradient-text">не доходят до рунета</span></h2>
+        </div>
+        <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div class="glass card rounded-3xl p-6">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-violet-500 flex items-center justify-center mb-4 text-lg">📏</div>
+            <h3 class="font-display text-lg mb-2">Объём</h3>
+            <p class="text-sm text-[var(--text-muted)] leading-relaxed">Rupegia — 2,65 млн слов. Rebirth of the Nephilim — 1,9 млн. Dungeon of Knowledge — близко к 2 млн. Любительская команда не выдержит экономически.</p>
+          </div>
+          <div class="glass card rounded-3xl p-6">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center mb-4 text-lg">🧠</div>
+            <h3 class="font-display text-lg mb-2">Психологическая сложность</h3>
+            <p class="text-sm text-[var(--text-muted)] leading-relaxed">«Weekly Purchase», «Living as a Mob», «Ehehe» требуют передачи нюансов созависимости и «clouding» — сложнее, чем стандартный исекай.</p>
+          </div>
+          <div class="glass card rounded-3xl p-6">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-pink-500 flex items-center justify-center mb-4 text-lg">⚖️</div>
+            <h3 class="font-display text-lg mb-2">Правовой риск</h3>
+            <p class="text-sm text-[var(--text-muted)] leading-relaxed">18+, яндере-насилие, BL/GL. Крупные RU-агрегаторы чистят такой контент, а переводчики опасаются жалоб и блокировок.</p>
+          </div>
+          <div class="glass card rounded-3xl p-6">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-cyan-500 flex items-center justify-center mb-4 text-lg">🔒</div>
+            <h3 class="font-display text-lg mb-2">Stubbing + лицензии</h3>
+            <p class="text-sm text-[var(--text-muted)] leading-relaxed">Авторы уходят на Amazon Kindle / Patreon — бесплатный текст обрывается. J-Novel / Yen Press выкупают всё раньше, чем доходит до рунета.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ HOW TO TRANSLATE ============ -->
+    <section id="how-to" class="py-20 border-t border-[var(--line)]">
+      <div class="max-w-[1280px] mx-auto px-5">
+        <div class="flex items-end justify-between flex-wrap gap-4 mb-10">
+          <div>
+            <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">06 / Практика</div>
+            <h2 class="font-display text-3xl md:text-5xl leading-tight">Как и откуда <span class="gradient-text">переводить</span></h2>
+          </div>
+          <p class="max-w-md text-sm text-[var(--text-muted)]">Открыл Kakuyomu и не понял, где «глава 1»? Разбираем по шагам: куда нажимать, чем переводить, что легально.</p>
+        </div>
+
+        <!-- Step 1: Find the starting point -->
+        <div class="glass-strong rounded-3xl p-6 md:p-8 mb-6">
+          <div class="flex items-start gap-4 mb-5">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-pink-500 to-violet-500 flex items-center justify-center flex-shrink-0 font-display text-lg">1</div>
+            <div>
+              <h3 class="font-display text-xl md:text-2xl">Найди первую главу на платформе</h3>
+              <p class="text-sm text-[var(--text-muted)] mt-1">На каждой площадке «начать читать» выглядит по-своему. Вот точный маршрут:</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- Kakuyomu -->
+            <div class="glass rounded-2xl p-5">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-2 h-2 rounded-full" style="background:#22d3ee"></span>
+                <span class="font-display font-semibold">Kakuyomu</span>
+                <span class="chip ml-auto">🇯🇵 JP</span>
+              </div>
+              <ol class="text-sm text-[var(--text-muted)] space-y-2 leading-relaxed list-decimal pl-4">
+                <li>На странице работы справа — оглавление (<span class="font-jp text-white">目次</span>)</li>
+                <li>Нажимай кнопку <b class="text-white">「第1話から読む」</b> или просто первый пункт — <b class="text-white">エピソード1</b> / «Эпизод 1» (в авто-переводе)</li>
+                <li>Под заголовком главы — тело текста. Ниже — стрелка <b class="text-white">→</b> на следующий эпизод</li>
+                <li>Авто-перевод Chrome может путать порядок — лучше отключить и переводить вручную</li>
+              </ol>
+            </div>
+
+            <!-- Narou -->
+            <div class="glass rounded-2xl p-5">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-2 h-2 rounded-full" style="background:#38bdf8"></span>
+                <span class="font-display font-semibold">Shousetsuka ni Narou</span>
+                <span class="chip ml-auto">🇯🇵 JP</span>
+              </div>
+              <ol class="text-sm text-[var(--text-muted)] space-y-2 leading-relaxed list-decimal pl-4">
+                <li>URL вида <code class="text-white bg-white/5 px-1 rounded">ncode.syosetu.com/<b>n0800ga</b>/</code> — это страница произведения</li>
+                <li>Прибавь <code class="text-white bg-white/5 px-1 rounded">/1/</code> — откроется первая глава напрямую: <code class="bg-white/5 px-1 rounded">/<b>n0800ga/1/</b></code></li>
+                <li>Внизу каждой главы — стрелка <b class="text-white font-jp">次へ &gt;&gt;</b> (дальше)</li>
+                <li>Narou — самый чистый RAW-источник, без декораций</li>
+              </ol>
+            </div>
+
+            <!-- Scribble Hub -->
+            <div class="glass rounded-2xl p-5">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-2 h-2 rounded-full" style="background:#ff5fa2"></span>
+                <span class="font-display font-semibold">Scribble Hub</span>
+                <span class="chip ml-auto">🇺🇸 EN</span>
+              </div>
+              <ol class="text-sm text-[var(--text-muted)] space-y-2 leading-relaxed list-decimal pl-4">
+                <li>Синоним — сразу на странице серии</li>
+                <li>Блок <b class="text-white">Table of Contents</b> — жми самый нижний элемент (самый ранний по дате)</li>
+                <li>Или зелёная кнопка <b class="text-white">«Start reading»</b> сверху</li>
+                <li>Текст сразу на английском — самый простой источник для перевода на RU</li>
+              </ol>
+            </div>
+
+            <!-- Royal Road -->
+            <div class="glass rounded-2xl p-5">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-2 h-2 rounded-full" style="background:#a855f7"></span>
+                <span class="font-display font-semibold">Royal Road</span>
+                <span class="chip ml-auto">🇺🇸 EN</span>
+              </div>
+              <ol class="text-sm text-[var(--text-muted)] space-y-2 leading-relaxed list-decimal pl-4">
+                <li>Кнопка <b class="text-white">«Start reading»</b> / «Read first chapter»</li>
+                <li>Между главами — кнопки <b class="text-white">«Previous / Next»</b></li>
+                <li>Внимание: часть глав могут быть <b class="text-[var(--text-muted)]">stubbed</b> (сняты в пользу Amazon) — тогда полного текста нет</li>
+              </ol>
+            </div>
+
+            <!-- J-Novel -->
+            <div class="glass rounded-2xl p-5">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-2 h-2 rounded-full" style="background:#f59e0b"></span>
+                <span class="font-display font-semibold">J-Novel Club</span>
+                <span class="chip ml-auto">💳 LN</span>
+              </div>
+              <ol class="text-sm text-[var(--text-muted)] space-y-2 leading-relaxed list-decimal pl-4">
+                <li>Нужна подписка ($5/мес) или покупка тома (~$7–10)</li>
+                <li>Веб-ридер: том 1 → глава 1</li>
+                <li>EPUB-файл — для оффлайн-перевода с инструментами</li>
+                <li>Текст — качественный профессиональный EN-перевод японского оригинала</li>
+              </ol>
+            </div>
+
+            <!-- Yen Press -->
+            <div class="glass rounded-2xl p-5">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-2 h-2 rounded-full" style="background:#f472b6"></span>
+                <span class="font-display font-semibold">Yen Press</span>
+                <span class="chip ml-auto">💳 LN</span>
+              </div>
+              <ol class="text-sm text-[var(--text-muted)] space-y-2 leading-relaxed list-decimal pl-4">
+                <li>Только печатный / Kindle формат — нет веб-ридера</li>
+                <li>Покупай том на Amazon / Barnes & Noble / BookWalker</li>
+                <li>Для перевода: OCR с Kindle-скриншотов либо DRM-stripping EPUB (серая зона)</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 2: Translation chain -->
+        <div class="glass-strong rounded-3xl p-6 md:p-8 mb-6">
+          <div class="flex items-start gap-4 mb-5">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-violet-500 flex items-center justify-center flex-shrink-0 font-display text-lg">2</div>
+            <div>
+              <h3 class="font-display text-xl md:text-2xl">Выбери цепочку перевода</h3>
+              <p class="text-sm text-[var(--text-muted)] mt-1">Три реалистичных пути — выбирай по уровню и целям:</p>
+            </div>
+          </div>
+
+          <div class="grid md:grid-cols-3 gap-4">
+            <div class="rounded-2xl p-5 border border-[var(--line-strong)]" style="background:linear-gradient(180deg,rgba(34,211,238,0.08),transparent);">
+              <div class="text-xs uppercase tracking-widest text-cyan-400 mb-2">Путь A · хардкор</div>
+              <div class="font-display text-base mb-2">JP → RU напрямую</div>
+              <p class="text-sm text-[var(--text-muted)] leading-relaxed">Нужен уровень N2-N1. Максимальная точность и стиль. Единственный вариант для Kakuyomu-новинок без английского анлейта (Living as a Mob, Ehehe, Saved you secret).</p>
+            </div>
+            <div class="rounded-2xl p-5 border border-[var(--line-strong)]" style="background:linear-gradient(180deg,rgba(255,95,162,0.08),transparent);">
+              <div class="text-xs uppercase tracking-widest text-pink-400 mb-2">Путь B · практичный</div>
+              <div class="font-display text-base mb-2">JP → EN fan-TL → RU</div>
+              <p class="text-sm text-[var(--text-muted)] leading-relaxed">Для тайтлов, где есть проверенный английский фан-перевод (Weekly Purchase ← Ave Lilium). Проще всего, но зависишь от темпа анлейтеров.</p>
+            </div>
+            <div class="rounded-2xl p-5 border border-[var(--line-strong)]" style="background:linear-gradient(180deg,rgba(139,92,246,0.08),transparent);">
+              <div class="text-xs uppercase tracking-widest text-violet-400 mb-2">Путь C · гибридный</div>
+              <div class="font-display text-base mb-2">JP RAW → MTL → правка</div>
+              <p class="text-sm text-[var(--text-muted)] leading-relaxed">DeepL/GPT/Claude делают черновик, ты правишь. Только если знаешь японский хотя бы на N3 — иначе MTL пропустит смысл.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3: Tools -->
+        <div class="glass-strong rounded-3xl p-6 md:p-8 mb-6">
+          <div class="flex items-start gap-4 mb-5">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-pink-500 flex items-center justify-center flex-shrink-0 font-display text-lg">3</div>
+            <div>
+              <h3 class="font-display text-xl md:text-2xl">Арсенал переводчика</h3>
+              <p class="text-sm text-[var(--text-muted)] mt-1">Минимальный набор инструментов на 2026 год:</p>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="glass rounded-xl p-4">
+              <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">📖 Разбор JP</div>
+              <div class="text-sm leading-relaxed"><b class="text-white">Yomitan</b> (бывший Yomichan) — расширение Chrome/Firefox, наводишь курсор — всплывает разбор слова, чтение фуриганой, значения.</div>
+            </div>
+            <div class="glass rounded-xl p-4">
+              <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">📚 Словари</div>
+              <div class="text-sm leading-relaxed"><b class="text-white">Jisho.org</b> — общий, <b class="text-white">Weblio</b> — нативный, <b class="text-white">HiNative</b> — сленг и разговорные обороты.</div>
+            </div>
+            <div class="glass rounded-xl p-4">
+              <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">🤖 MTL</div>
+              <div class="text-sm leading-relaxed"><b class="text-white">DeepL</b> — лучший для JP→EN, <b class="text-white">GPT-5 / Claude 4</b> — хороши JP→RU при детальном промпте, <b class="text-white">Sugoi Translator</b> — локальный офлайн.</div>
+            </div>
+            <div class="glass rounded-xl p-4">
+              <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">📝 Глоссарий</div>
+              <div class="text-sm leading-relaxed">Таблица в <b class="text-white">Notion / Google Sheets</b>: имена персонажей, локации, уникальные термины — чтобы не «Мияги» в гл.1 и «Мияджи» в гл.50.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 4: Legal -->
+        <div class="glass-strong rounded-3xl p-6 md:p-8">
+          <div class="flex items-start gap-4 mb-5">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-pink-500 flex items-center justify-center flex-shrink-0 font-display text-lg">4</div>
+            <div>
+              <h3 class="font-display text-xl md:text-2xl">Правовой контур</h3>
+              <p class="text-sm text-[var(--text-muted)] mt-1">Три категории — три разных подхода:</p>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-3 gap-4">
+            <div class="rounded-2xl p-5 border" style="border-color:rgba(34,197,94,0.3);background:rgba(34,197,94,0.06);">
+              <div class="text-xs uppercase tracking-widest mb-2" style="color:#4ade80">🟢 Зелёная зона</div>
+              <div class="font-display text-base mb-2">Бесплатный web без лицензии</div>
+              <p class="text-sm text-[var(--text-muted)] leading-relaxed">Narou / Kakuyomu / Scribble Hub / Royal Road без EN-лицензии → напиши автору в ЛС или через форму «may I translate?». В 80% случаев разрешают при кредите и ссылке на оригинал.</p>
+            </div>
+            <div class="rounded-2xl p-5 border" style="border-color:rgba(245,158,11,0.35);background:rgba(245,158,11,0.06);">
+              <div class="text-xs uppercase tracking-widest mb-2" style="color:#fbbf24">🟡 Серая зона</div>
+              <div class="font-display text-base mb-2">Лицензировано EN, нет RU</div>
+              <p class="text-sm text-[var(--text-muted)] leading-relaxed">J-Novel / Yen Press лицензировали, но RU прав нет → классический любительский перевод. Не монетизируй, ставь дисклеймер «unofficial fan translation», снимай по требованию правообладателя.</p>
+            </div>
+            <div class="rounded-2xl p-5 border" style="border-color:rgba(239,68,68,0.35);background:rgba(239,68,68,0.06);">
+              <div class="text-xs uppercase tracking-widest mb-2" style="color:#f87171">🔴 Красная зона</div>
+              <div class="font-display text-base mb-2">Уже лицензия в РФ</div>
+              <p class="text-sm text-[var(--text-muted)] leading-relaxed">Если тайтл купил Истари Комикс / АСТ / XL Media — переводить нельзя даже бесплатно. В нашем каталоге таких нет — всё «чисто».</p>
+            </div>
+          </div>
+          <div class="mt-5 text-xs text-[var(--text-dim)] leading-relaxed">
+            ⚠ <b>Важно для 2026 года:</b> авторы всё чаще уходят на Amazon Kindle (stubbing) — бесплатные главы исчезают с платформы. Скачивай RAW заранее: <b class="text-white">wget</b> / <b class="text-white">Calibre</b> / <b class="text-white">FanFicFare</b>.
+          </div>
+        </div>
+
+        <!-- Per-title quick start -->
+        <div class="mt-8 glass rounded-3xl p-6">
+          <div class="flex items-start gap-4 mb-4">
+            <span class="text-xl">🎯</span>
+            <div>
+              <div class="font-display text-lg">Быстрый старт по конкретным тайтлам из каталога</div>
+              <div class="text-xs text-[var(--text-muted)] mt-0.5">Точки входа, которые я проверил: первая глава или страница серии, если прямой публичной главы нет.</div>
+            </div>
+          </div>
+          <div class="grid md:grid-cols-2 gap-x-6 gap-y-2.5 text-sm">
+            <a target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2 border-b border-[var(--line)] hover:text-pink-500 transition-colors" href="https://ncode.syosetu.com/n0800ga/1/">
+              <span><b class="text-white">Weekly Purchase of a Classmate</b> — гл.1 (Narou)</span><span>→</span>
+            </a>
+            <a target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2 border-b border-[var(--line)] hover:text-pink-500 transition-colors" href="https://www.scribblehub.com/read/52931-rupegia/chapter/52941/">
+              <span><b class="text-white">Rupegia</b> — гл.1 (Scribble Hub)</span><span>→</span>
+            </a>
+            <a target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2 border-b border-[var(--line)] hover:text-pink-500 transition-colors" href="https://www.scribblehub.com/read/117113-isekaid-shoggoth/chapter/117115/">
+              <span><b class="text-white">Isekai'd Shoggoth</b> — гл.1 (Scribble Hub)</span><span>→</span>
+            </a>
+            <a target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2 border-b border-[var(--line)] hover:text-pink-500 transition-colors" href="https://www.scribblehub.com/read/433893-villain-the-play-of-destiny/chapter/433987/">
+              <span><b class="text-white">Villain: The Play of Destiny</b> — гл.1 (Scribble Hub)</span><span>→</span>
+            </a>
+            <a target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2 border-b border-[var(--line)] hover:text-pink-500 transition-colors" href="https://kakuyomu.jp/works/2912051597449812471/episodes/2912051597449853291">
+              <span><b class="text-white">Living as a Mob</b> — гл.1 (Kakuyomu)</span><span>→</span>
+            </a>
+            <a target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2 border-b border-[var(--line)] hover:text-pink-500 transition-colors" href="https://www.royalroad.com/fiction/92080/amelia-thornheart/chapter/1762434/chapter-one-the-vengeance">
+              <span><b class="text-white">Amelia Thornheart</b> — Chapter One (Royal Road)</span><span>→</span>
+            </a>
+            <a target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2 border-b border-[var(--line)] hover:text-pink-500 transition-colors" href="https://j-novel.club/read/reforming-an-icy-final-boss-getting-back-at-the-self-proclaimed-villainess-with-the-power-of-friendship-volume-1-part-1">
+              <span><b class="text-white">Reforming an Icy Final Boss</b> — том 1, глава 1 (J-Novel, требуется подписка)</span><span>→</span>
+            </a>
+            <a target="_blank" rel="noopener" class="flex items-center justify-between gap-3 py-2 border-b border-[var(--line)] hover:text-pink-500 transition-colors" href="https://j-novel.club/series/sister-mafioso">
+              <span><b class="text-white">Sister Mafioso</b> — страница серии (J-Novel, главы в prepub)</span><span>→</span>
+            </a>
+          </div>
+          <div class="text-xs text-[var(--text-dim)] mt-4">
+            Для остальных тайтлов: открой карточку в каталоге → кнопка «Открыть оригинал ↗» ведёт на страницу серии, дальше по инструкции своей платформы выше.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SOURCES ============ -->
+    <section id="sources" class="py-20 border-t border-[var(--line)]">
+      <div class="max-w-[1280px] mx-auto px-5">
+        <div class="mb-10">
+          <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">07 / Источники</div>
+          <h2 class="font-display text-3xl md:text-5xl leading-tight">Данные и ссылки</h2>
+        </div>
+        <div class="glass rounded-3xl p-6 md:p-8">
+          <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://kakuyomu.jp/rankings/romance/daily">Kakuyomu — ежедневный рейтинг романтики</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://ncode.syosetu.com/n0800ga/">Narou — 週に一度クラスメイトを買う話</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://www.scribblehub.com/genre/romance/">Scribble Hub — Romance</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://www.scribblehub.com/genre/girls-love/">Scribble Hub — Girls Love</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://www.royalroad.com">Royal Road — главная</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://j-novel.club/blog/nycc-2025-new-series-and-announcements-recap">J-Novel Club — анонсы NYCC 2025</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://yenpress.com">Yen Press — каталог</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://medium.com/@hrule/royalroad-analysis-2025-86b92fae99d8">RoyalRoad Analysis 2025 — Medium</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://www.reddit.com/r/ProgressionFantasy/comments/1pbikyv/what_are_the_the_top_stories_of_2025/">Reddit /r/ProgressionFantasy — Top stories 2025</a>
+            <a target="_blank" rel="noopener" class="text-[var(--text-muted)] hover:text-pink-500 transition-colors" href="https://www.animenewsnetwork.com/news/2025-10-11/yen-press-reveals-14-new-licenses-delicious-in-dungeon-board-game/.229847">ANN — Yen Press 14 новых лицензий</a>
+          </div>
+          <div class="divider my-7"></div>
+          <p class="text-xs text-[var(--text-dim)] leading-relaxed">
+            Цифры глав и слов — на май 2026, округлены. Синопсисы сформулированы своими словами на основе публичных страниц платформ и обзоров. Обложки подтягиваются с публичных страниц/медиа-CDN, а при ошибке загрузки заменяются процедурными градиентами.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ FOOTER ============ -->
+    <footer class="py-10 border-t border-[var(--line)]">
+      <div class="max-w-[1280px] mx-auto px-5 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-[var(--text-dim)]">
+        <div>© 2026 Ranobe Radar · сгенерировано на базе отчёта «Анализ перспективных онгоингов»</div>
+        <div class="flex items-center gap-4">
+          <span>Tailwind · Chart.js · Lucide</span>
+          <a href="#top" class="hover:text-white">Наверх ↑</a>
+        </div>
+      </div>
+    </footer>
+
+    <!-- ============ MODAL ============ -->
+    <div id="modal" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+      <article class="modal glass-strong" id="modal-content"></article>
+    </div>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <!-- Data -->
+    <script src="data.js"></script>
+    <!-- App -->
+    <script src="app.js"></script>
+  </body>
+</html>
