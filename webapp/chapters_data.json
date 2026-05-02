@@ -519,6 +519,14 @@
           "custom_name": "Том 2",
           "chapters": [
             {
+              "chapter": "Иллюстрации",
+              "custom_name": "Глава Иллюстрации",
+              "url": "https://teletype.in/@slitvin/eYU4VveONul",
+              "urls": [
+                "https://teletype.in/@slitvin/eYU4VveONul"
+              ]
+            },
+            {
               "chapter": "Пролог",
               "custom_name": "Пролог",
               "url": "https://telegra.ph/Voitelnica-Alya--Prolog-04-30",
@@ -533,14 +541,6 @@
               "urls": [
                 "https://telegra.ph/Voitelnica-Alya--Glava-1-04-30",
                 "https://telegra.ph/Voitelnica-Alya--Glava-1-chast-2-04-30"
-              ]
-            },
-            {
-              "chapter": "Иллюстрации",
-              "custom_name": "Глава Иллюстрации",
-              "url": "https://teletype.in/@slitvin/eYU4VveONul",
-              "urls": [
-                "https://teletype.in/@slitvin/eYU4VveONul"
               ]
             }
           ]
