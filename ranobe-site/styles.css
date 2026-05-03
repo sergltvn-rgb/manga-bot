@@ -414,6 +414,12 @@ body {
   border: 1px solid rgba(45, 212, 191, 0.55);
 }
 
+.chip-source-nyaa {
+  top: 108px;
+  color: #fbbf24;
+  border-color: rgba(251, 191, 36, 0.55);
+}
+
 /* ---------- nav ---------- */
 
 .topnav {
@@ -494,10 +500,18 @@ body {
   min-width: 0;
 }
 
+.filters-panel > .filter-strip,
 .filters-panel > div:first-child,
 .filters-panel > div:nth-last-child(2),
 .filters-panel > div:last-child {
   grid-column: 1 / -1;
+}
+
+.filter-strip {
+  padding: 14px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.08), rgba(245, 158, 11, 0.08));
+  border: 1px solid rgba(255, 255, 255, 0.11);
 }
 
 .filter-btn {
@@ -523,6 +537,70 @@ body {
   border-color: rgba(45, 212, 191, 0.6);
   color: var(--text);
   box-shadow: 0 0 20px -8px rgba(45, 212, 191, 0.45);
+}
+
+.decision-panel {
+  margin: 0 0 16px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.decision-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 12px;
+  color: #fff;
+}
+
+.decision-head span:last-child {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+
+.decision-summary {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.decision-reason {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+
+.decision-take {
+  border-color: rgba(34, 197, 94, 0.55);
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.14), rgba(45, 212, 191, 0.06));
+}
+
+.decision-candidate {
+  border-color: rgba(45, 212, 191, 0.45);
+  background: linear-gradient(135deg, rgba(45, 212, 191, 0.12), rgba(139, 92, 246, 0.05));
+}
+
+.decision-watch {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.13), rgba(255, 95, 162, 0.05));
+}
+
+.decision-reserve {
+  border-color: rgba(167, 162, 194, 0.28);
+}
+
+.decision-closed {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(255, 255, 255, 0.025));
 }
 
 /* ---------- chart wrappers ---------- */

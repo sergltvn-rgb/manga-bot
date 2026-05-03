@@ -29,6 +29,55 @@ const untranslatedJapaneseRomanceIds = [
   'win-heart-nth-try',
 ];
 
+const nyaaAuditIds = [
+  'our-party-nearly-wiped',
+  'venus-mission',
+  'saints-fallen-antlers',
+  'bubble-love-mermaid',
+  'azure-sword-distortions',
+  'shanti',
+  'four-child-life',
+  'fluffy-cafe-world',
+  'villainess-speaks-not',
+  'reborn-assassins-apprentice',
+  'far-east-savior',
+  'monster-i-love',
+  'mmo-world-way-to-you',
+  'flower-blooms-hill',
+  'true-love-one-star',
+  'canon-fodder',
+  'thou-as-my-knight',
+  'tough-necromancer',
+  'new-game-plus-last-boss',
+  'substitute-harvest-goddess',
+  'petty-villain-rules',
+  'old-knight-new-post',
+  'clueless-fps-player',
+  'kinki-region',
+  'little-alchemist-spirits',
+  'sowing-vengeance',
+  'cats-and-books',
+  'reforming-final-boss',
+  'even-exiled-saint',
+  'repeated-vice',
+  'beautiful-daydream',
+  'azure-dragon',
+  'bone-ash',
+  'lila-winds-war',
+  'miss-blossom-standards',
+  'dragon-blade-saint',
+  'zilbagias-demon-prince',
+  'kept-man-princess-knight',
+  'bs-situation-tougetsu',
+  'goddess-tsundere-witch',
+  'hero-killing-bride',
+  'girl-wants-hero',
+  'tiny-witch-deep-woods',
+  'dark-elf-middle-aged',
+  'pale-moon-reverie',
+  'moon-blossom-asura',
+];
+
 function assert(condition, message) {
   if (!condition) {
     throw new Error(message);
@@ -93,6 +142,15 @@ for (const id of untranslatedJapaneseRomanceIds) {
   );
 }
 
+for (const id of nyaaAuditIds) {
+  const title = titles.find((item) => item.id === id);
+  assert(title, `Missing Nyaa-audited title: ${id}`);
+  assert(
+    title.translation_scout?.sources?.some((source) => source.resource === 'Nyaa'),
+    `${id} should include a Nyaa scout source`
+  );
+}
+
 console.log(
-  `Validated ${titles.length} titles, including ${oceanRomcomIds.length} OceanOfPDF romcoms and ${untranslatedJapaneseRomanceIds.length} untranslated Japanese romance picks.`
+  `Validated ${titles.length} titles, including ${oceanRomcomIds.length} OceanOfPDF romcoms, ${untranslatedJapaneseRomanceIds.length} untranslated Japanese romance picks, and ${nyaaAuditIds.length} Nyaa-audited titles.`
 );

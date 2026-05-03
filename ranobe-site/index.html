@@ -6,7 +6,7 @@
     <title>Ranobe Radar 2026 — что переводить с английского и японского</title>
     <meta
       name="description"
-      content="Интерактивная инфографика по 89 онгоинг-ранобэ и веб-новеллам (Kakuyomu, Scribble Hub, Royal Road, J-Novel, Yen Press), которые к маю 2026 не переведены на русский."
+      content="Интерактивная инфографика по онгоинг-ранобэ и веб-новеллам (Kakuyomu, Scribble Hub, Royal Road, J-Novel, Yen Press), которые к маю 2026 не переведены на русский."
     />
 
     <!-- Fonts -->
@@ -54,7 +54,7 @@
           <a href="#how-to" class="nav-link">Как начать</a>
           <a href="#sources" class="nav-link">Источники</a>
         </div>
-        <a href="#catalog" class="btn btn-primary !py-2 !px-4 text-[13px] hidden sm:inline-flex">Смотреть 89 тайтлов <span>→</span></a>
+        <a href="#catalog" class="btn btn-primary !py-2 !px-4 text-[13px] hidden sm:inline-flex">Смотреть <span data-title-count>149</span> тайтлов <span>→</span></a>
       </div>
     </nav>
 
@@ -68,7 +68,7 @@
         </div>
         <h1 class="font-display text-4xl md:text-6xl lg:text-[76px] leading-[1.02] tracking-tight max-w-5xl">
           Онгоинги, которые <span class="gradient-text">рунет пропустил</span>.<br />
-          <span class="text-[var(--text-muted)]">Инфографика по 89 ранобэ и веб-новеллам.</span>
+          <span class="text-[var(--text-muted)]">Инфографика по <span data-title-count>149</span> ранобэ и веб-новеллам.</span>
         </h1>
         <p class="mt-8 max-w-2xl text-[var(--text-muted)] text-lg leading-relaxed">
           Горячие новинки Kakuyomu, мега-саги Scribble Hub и свежие лицензии J-Novel / Yen Press — все они доступны на английском или японском, но в русском сегменте их нет. Разбираем объёмы, платформы, жанры и выделяем тайтлы, <em class="text-white not-italic">которые правда стоят перевода</em>.
@@ -151,7 +151,7 @@
             <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">02 / Графики</div>
             <h2 class="font-display text-3xl md:text-5xl leading-tight">Распределения и масштабы</h2>
           </div>
-          <p class="max-w-md text-sm text-[var(--text-muted)]">Пять углов зрения на 89 тайтлов: где они, сколько весят, какие жанры и как выглядят в координатах «год старта × объём».</p>
+          <p class="max-w-md text-sm text-[var(--text-muted)]">Пять углов зрения на <span data-title-count>149</span> тайтлов: где они, сколько весят, какие жанры и как выглядят в координатах «год старта × объём».</p>
         </div>
 
         <div class="grid lg:grid-cols-3 gap-4">
@@ -192,13 +192,26 @@
         <div class="flex items-end justify-between flex-wrap gap-4 mb-8">
           <div>
             <div class="text-xs uppercase tracking-widest text-[var(--text-dim)] mb-2">03 / Каталог</div>
-            <h2 class="font-display text-3xl md:text-5xl leading-tight">89 онгоингов <span class="text-[var(--text-muted)]">под радаром</span></h2>
+            <h2 class="font-display text-3xl md:text-5xl leading-tight"><span data-title-count>149</span> онгоингов <span class="text-[var(--text-muted)]">под радаром</span></h2>
           </div>
           <div id="catalog-counter" class="text-sm text-[var(--text-muted)]">—</div>
         </div>
 
         <!-- Filters -->
         <div class="filters-panel glass-strong rounded-3xl p-5 mb-8">
+          <div class="filter-strip">
+            <div>
+              <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Быстрое решение</div>
+              <div class="flex flex-wrap gap-2" data-filter-group="decision">
+                <button class="filter-btn active" data-filter-value="all">Все решения</button>
+                <button class="filter-btn" data-filter-value="take">Брать в перевод</button>
+                <button class="filter-btn" data-filter-value="candidate">Хороший кандидат</button>
+                <button class="filter-btn" data-filter-value="check">Проверить дубль</button>
+                <button class="filter-btn" data-filter-value="reserve">Резерв</button>
+                <button class="filter-btn" data-filter-value="occupied">Занято RU</button>
+              </div>
+            </div>
+          </div>
           <div>
             <div class="text-[11px] uppercase tracking-widest text-[var(--text-dim)] mb-2">Платформа</div>
             <div class="flex flex-wrap gap-2" data-filter-group="platform"></div>
@@ -245,6 +258,7 @@
               <button class="filter-btn active" data-filter-value="all">Все</button>
               <button class="filter-btn" data-filter-value="pdf_epub">PDF/EPUB найдено</button>
               <button class="filter-btn" data-filter-value="ocean">OceanOfPDF сигнал</button>
+              <button class="filter-btn" data-filter-value="nyaa">Nyaa проверен</button>
             </div>
           </div>
           <div>

@@ -14,6 +14,7 @@
       language: 'all',
       rating: 'all',
       priority: 'all',
+      decision: 'all',
       scout: 'all',
       source: 'all',
       genre: 'all',
@@ -84,7 +85,7 @@
   const motifFor = (title) => (typeof COVER_MOTIFS !== 'undefined' && COVER_MOTIFS[title.id]) || '📖';
   const coverUrlFor = (title) => (typeof COVER_URLS !== 'undefined' ? COVER_URLS[title.id] : null) || null;
   const isBookCoverUrl = (url) =>
-    /assets\/covers\/|cdn\.j-novel\.club|images\.yenpress\.com|images1\.penguinrandomhouse\.com|images\.ranobedb\.org|crossinfworld\.com|sevenseasentertainment\.com|dynamic\.indigoimages\.ca|royalroadcdn\.com|cdn\.scribblehub\.com|images\.isbndb\.com|cdn\.kdkw\.jp|cdn-ak\.f\.st-hatena\.com|media\.oceanofpdf\.com/.test(url || '');
+    /assets\/covers\/|jnovels\.com\/wp-content\/uploads\/|cdn\.j-novel\.club|images\.yenpress\.com|images1\.penguinrandomhouse\.com|images\.ranobedb\.org|crossinfworld\.com|sevenseasentertainment\.com|dynamic\.indigoimages\.ca|royalroadcdn\.com|cdn\.scribblehub\.com|images\.isbndb\.com|cdn\.kdkw\.jp|cdn-ak\.f\.st-hatena\.com|media\.oceanofpdf\.com/.test(url || '');
   const isWideCoverUrl = (url) => /cdn-static\.kakuyomu\.jp|sbo\.syosetu\.com/.test(url || '');
   const joinList = (value) => (Array.isArray(value) ? value.filter(Boolean).join('; ') : value || '—');
   const creatorLineFor = (title) =>
@@ -102,6 +103,79 @@
     scoutSourcesFor(title).some((item) => String(item.resource || '').toLowerCase() === resource.toLowerCase());
   const hasPdfEpubMirror = (title) =>
     scoutSourcesFor(title).some((item) => /pdf|epub|oceanofpdf|jnovels/i.test(`${item.resource || ''} ${item.amount || ''} ${item.note || ''}`));
+  const hasRelevantNyaaHit = (title) =>
+    scoutSourcesFor(title).some(
+      (item) =>
+        String(item.resource || '').toLowerCase() === 'nyaa' &&
+        !/0 relevant|non-literature/i.test(`${item.amount || ''} ${item.note || ''}`)
+    );
+
+  const translationDecisionFor = (title) => {
+    const scout = title.translation_scout || {};
+    const status = scout.status || 'unknown';
+    const score = title.priority_score || 0;
+    const hasMirror = hasPdfEpubMirror(title);
+    const hasNyaa = hasRelevantNyaaHit(title);
+    const isFresh = (title.year_start || 0) >= 2025 || /2026|2025/.test(String(title.last_updated || ''));
+
+    if (status === 'ru_full') {
+      return {
+        key: 'occupied',
+        tone: 'closed',
+        label: 'Занято RU',
+        summary: 'Русский перевод уже закрывает нишу.',
+        reason: 'Не брать без отдельной причины',
+      };
+    }
+
+    if (status === 'ru_partial') {
+      return {
+        key: 'check',
+        tone: 'watch',
+        label: 'Проверить дубль',
+        summary: 'Есть частичный русский след.',
+        reason: 'Сначала сверить объём и активность команды',
+      };
+    }
+
+    if (score >= 82 && (status === 'not_found' || status === 'en_agg')) {
+      return {
+        key: 'take',
+        tone: 'take',
+        label: 'Брать в перевод',
+        summary: hasNyaa ? 'RU свободен; EN-слой и Nyaa уже видны.' : 'RU свободен; приоритет высокий.',
+        reason: hasMirror ? 'Есть опора для EN-сверки' : 'Сильный крючок и свежий слот',
+      };
+    }
+
+    if (score >= 70 && (status === 'not_found' || status === 'en_agg')) {
+      return {
+        key: 'candidate',
+        tone: 'candidate',
+        label: 'Хороший кандидат',
+        summary: hasNyaa ? 'RU не найден; Nyaa подтверждает EN-циркуляцию.' : 'RU не найден; стоит держать в коротком списке.',
+        reason: isFresh ? 'Свежий и достаточно высокий приоритет' : 'Сильный, но не самый свежий',
+      };
+    }
+
+    if (status === 'not_found' || status === 'en_agg') {
+      return {
+        key: 'reserve',
+        tone: 'reserve',
+        label: 'Резерв',
+        summary: 'RU не найден, но приоритет ниже основной очереди.',
+        reason: hasNyaa || hasMirror ? 'Источник есть, брать после топов' : 'Нужна ручная оценка спроса',
+      };
+    }
+
+    return {
+      key: 'check',
+      tone: 'watch',
+      label: 'Проверить руками',
+      summary: 'Статус перевода неоднозначный.',
+      reason: 'Нужна ручная сверка источников',
+    };
+  };
   const ruCheckFor = (title) => {
     const scout = title.translation_scout;
     if (!scout) return 'разведка переводов не заполнена';
@@ -290,9 +364,11 @@
     if (f.priority === 'high' && t.priority_score < 70) return false;
     if (f.priority === 'mid' && (t.priority_score < 50 || t.priority_score >= 70)) return false;
     if (f.priority === 'low' && t.priority_score >= 50) return false;
+    if (f.decision !== 'all' && translationDecisionFor(t).key !== f.decision) return false;
     if (f.scout !== 'all' && t.translation_scout?.status !== f.scout) return false;
     if (f.source === 'pdf_epub' && !hasPdfEpubMirror(t)) return false;
     if (f.source === 'ocean' && !hasScoutResource(t, 'OceanOfPDF')) return false;
+    if (f.source === 'nyaa' && !hasScoutResource(t, 'Nyaa')) return false;
     if (f.genre !== 'all' && !(t.tags || []).includes(f.genre)) return false;
     if (f.length === 'short' && t.words > 100000) return false;
     if (f.length === 'medium' && (t.words <= 100000 || t.words > 300000)) return false;
@@ -323,6 +399,8 @@
     const isAdult = t.content_rating === 'adult';
     const scout = scoutMetaFor(t.translation_scout?.status);
     const hasMirror = hasPdfEpubMirror(t);
+    const hasNyaa = hasScoutResource(t, 'Nyaa');
+    const decision = translationDecisionFor(t);
     const tagsHTML = (t.tags || [])
       .slice(0, 4)
       .map((tag) => {
@@ -357,6 +435,7 @@
           }
           <span class="chip-scout chip-scout-${escape(scout.tone)}">${escape(scout.label)}</span>
           ${hasMirror ? '<span class="chip-source">PDF/EPUB</span>' : ''}
+          ${hasNyaa ? `<span class="chip-source ${hasMirror ? 'chip-source-nyaa' : ''}">Nyaa</span>` : ''}
           <div class="cover-text">
             <div class="card-cover-title">${escape(t.title_ru)}</div>
             <div class="card-cover-kana ${t.language === 'ja' ? 'font-jp' : ''}">${escape(kanaPreview(t))}</div>
@@ -381,6 +460,15 @@
           </div>
 
           <div class="flex flex-wrap gap-1.5 mb-4">${tagsHTML}</div>
+
+          <div class="decision-panel decision-${escape(decision.tone)}">
+            <div class="decision-head">
+              <span>${escape(decision.label)}</span>
+              <span>${escape(decision.key)}</span>
+            </div>
+            <div class="decision-summary">${escape(decision.summary)}</div>
+            <div class="decision-reason">${escape(decision.reason)}</div>
+          </div>
 
           <div class="mt-auto">
             <div class="flex items-center justify-between text-[11px] text-[var(--text-muted)] mb-1.5">
@@ -652,6 +740,9 @@
     $('#kpi-titles').textContent = TITLES.length;
     $('#kpi-words').textContent = fmtWords(totalWords).replace(' ', '\u00A0');
     $('#kpi-platforms').textContent = new Set(TITLES.map((t) => t.platform)).size;
+    $$('[data-title-count]').forEach((el) => {
+      el.textContent = TITLES.length;
+    });
   };
 
   // =============================================
