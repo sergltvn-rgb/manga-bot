@@ -84,7 +84,7 @@
   const motifFor = (title) => (typeof COVER_MOTIFS !== 'undefined' && COVER_MOTIFS[title.id]) || '📖';
   const coverUrlFor = (title) => (typeof COVER_URLS !== 'undefined' ? COVER_URLS[title.id] : null) || null;
   const isBookCoverUrl = (url) =>
-    /cdn\.j-novel\.club|images\.yenpress\.com|images\.ranobedb\.org|crossinfworld\.com|sevenseasentertainment\.com|royalroadcdn\.com|cdn\.scribblehub\.com|images\.isbndb\.com|cdn\.kdkw\.jp|cdn-ak\.f\.st-hatena\.com|media\.oceanofpdf\.com/.test(url || '');
+    /assets\/covers\/|cdn\.j-novel\.club|images\.yenpress\.com|images1\.penguinrandomhouse\.com|images\.ranobedb\.org|crossinfworld\.com|sevenseasentertainment\.com|dynamic\.indigoimages\.ca|royalroadcdn\.com|cdn\.scribblehub\.com|images\.isbndb\.com|cdn\.kdkw\.jp|cdn-ak\.f\.st-hatena\.com|media\.oceanofpdf\.com/.test(url || '');
   const isWideCoverUrl = (url) => /cdn-static\.kakuyomu\.jp|sbo\.syosetu\.com/.test(url || '');
   const joinList = (value) => (Array.isArray(value) ? value.filter(Boolean).join('; ') : value || '—');
   const creatorLineFor = (title) =>
