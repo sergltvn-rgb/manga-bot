@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 import aiohttp.web
 import aiosqlite
@@ -79,7 +80,12 @@ def _get_table_info(series_id: str, volume):
         )
     elif series_id.startswith("manga_"):
         lang = series_id.replace("manga_", "")
-        return ("chapters_urls", "chapter_number", "chapter_number = ? AND lang = ?", lambda v, c: (c, lang))
+        return (
+            "chapters_urls",
+            "chapter_number",
+            "chapter_number = ? AND lang = ? AND volume = ?",
+            lambda v, c: (c, lang, _volume_int(v)),
+        )
     return None
 
 
@@ -248,15 +254,16 @@ async def handle_chapter_edit(request: aiohttp.web.Request) -> aiohttp.web.Respo
                 vol_token = volume_int
             else:
                 lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
-                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=?", (lang,)) as cur:
+                volume_int = _volume_int(volume)
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=? AND volume=?", (lang, volume_int)) as cur:
                     row = await cur.fetchone()
                     next_order = (row[0] or 0) + 1
                 await db.execute(
-                    f"INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?) "
-                    f"ON CONFLICT(chapter_number, lang) DO UPDATE SET url=excluded.url",
-                    (chapter, lang, new_url, next_order),
+                    f"INSERT INTO {table} (chapter_number, lang, volume, url, sort_order) VALUES (?, ?, ?, ?, ?) "
+                    f"ON CONFLICT(chapter_number, lang, volume) DO UPDATE SET url=excluded.url",
+                    (chapter, lang, volume_int, new_url, next_order),
                 )
-                vol_token = 1
+                vol_token = volume_int
             if name:
                 name_clean = name[:120].strip()
                 await db.execute(
@@ -339,8 +346,8 @@ async def handle_chapter_bulk_preview(request: aiohttp.web.Request) -> aiohttp.w
             where_clause = "lang = ? AND volume = ?"
             where_params = (lang, _volume_int(volume))
         elif series_id.startswith("manga_"):
-            where_clause = "lang = ?"
-            where_params = (series_id.split("_", 1)[1],)
+            where_clause = "lang = ? AND volume = ?"
+            where_params = (series_id.split("_", 1)[1], _volume_int(volume))
         else:
             where_clause = "volume = ?"
             where_params = (str(volume),)
@@ -476,9 +483,9 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
             where_params = (lang, volume_int)
         elif series_id.startswith("manga_"):
             lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
-            volume_int = 1
-            where_clause = "lang = ?"
-            where_params = (lang,)
+            volume_int = _volume_int(volume)
+            where_clause = "lang = ? AND volume = ?"
+            where_params = (lang, volume_int)
         else:
             lang = ""
             volume_int = volume
@@ -511,9 +518,9 @@ async def handle_chapter_bulk(request: aiohttp.web.Request) -> aiohttp.web.Respo
                     )
                 else:
                     await db.execute(
-                        f"INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?) "
-                        f"ON CONFLICT(chapter_number, lang) DO UPDATE SET url=excluded.url",
-                        (ch_num, lang, url, next_order),
+                        f"INSERT INTO {table} (chapter_number, lang, volume, url, sort_order) VALUES (?, ?, ?, ?, ?) "
+                        f"ON CONFLICT(chapter_number, lang, volume) DO UPDATE SET url=excluded.url",
+                        (ch_num, lang, volume_int, url, next_order),
                     )
                 added += 1
             await db.commit()
@@ -639,28 +646,26 @@ async def handle_chapter_add(request: aiohttp.web.Request) -> aiohttp.web.Respon
                 )
             else:
                 lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
-                async with db.execute(f"SELECT 1 FROM {table} WHERE chapter_number=? AND lang=?", (chapter, lang)) as cur:
+                volume_int = _volume_int(volume)
+                async with db.execute(
+                    f"SELECT 1 FROM {table} WHERE chapter_number=? AND lang=? AND volume=?",
+                    (chapter, lang, volume_int),
+                ) as cur:
                     exists_row = await cur.fetchone()
                 if exists_row:
                     return aiohttp.web.json_response({"error": "chapter already exists"}, status=409, headers=CORS_HEADERS)
 
-                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=?", (lang,)) as cur:
+                async with db.execute(f"SELECT MAX(sort_order) FROM {table} WHERE lang=? AND volume=?", (lang, volume_int)) as cur:
                     row = await cur.fetchone()
                     next_order = (row[0] or 0) + 1
                 await db.execute(
-                    f"INSERT INTO {table} (chapter_number, lang, url, sort_order) VALUES (?, ?, ?, ?)",
-                    (chapter, lang, new_url, next_order),
+                    f"INSERT INTO {table} (chapter_number, lang, volume, url, sort_order) VALUES (?, ?, ?, ?, ?)",
+                    (chapter, lang, volume_int, new_url, next_order),
                 )
 
             # Сохраняем кастомное имя главы, если указано.
             if name:
-                vol_token = (
-                    _volume_int(volume)
-                    if series_id.startswith("ranobe_")
-                    else volume
-                    if series_id in ("akashic_records", "british_belle")
-                    else 1
-                )
+                vol_token = volume if series_id in ("akashic_records", "british_belle") else _volume_int(volume)
                 name_clean = name[:MAX_RENAME_OBJECT_ID_LENGTH]
                 await db.execute(
                     "INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)",
@@ -748,10 +753,14 @@ async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
                 vol_token = volume_int
             else:
                 lang = series_id.split("_", 1)[1] if "_" in series_id else "ru"
-                cursor = await db.execute(f"DELETE FROM {table} WHERE chapter_number=? AND lang=?", (chapter, lang))
+                volume_int = _volume_int(volume)
+                cursor = await db.execute(
+                    f"DELETE FROM {table} WHERE chapter_number=? AND lang=? AND volume=?",
+                    (chapter, lang, volume_int),
+                )
                 deleted = cursor.rowcount or 0
                 await cursor.close()
-                vol_token = 1
+                vol_token = volume_int
 
             if deleted == 0:
                 await db.rollback()
@@ -786,7 +795,12 @@ async def handle_chapter_delete(request: aiohttp.web.Request) -> aiohttp.web.Res
 
 
 async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Response:
-    """PUT: обновить мета-данные серии (пока — только обложка). Только для админов."""
+    """PUT: обновить мета-данные серии (обложка и/или название). Только для админов.
+
+    Обновляются только поля, присутствующие в payload:
+    - `cover_url` — обложка (пустая строка = сброс);
+    - `title` — кастомное название тайтла (пустая строка = сброс на дефолт).
+    """
     from bot import DB_PATH, invalidate_reader_cache, run_git_sync, spawn_bg
 
     user_id = ""
@@ -804,27 +818,41 @@ async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Resp
 
         data = await request.json()
         series_id = str(data.get("series_id", "")).strip()
+        has_cover_field = "cover_url" in data
+        has_title_field = "title" in data
         cover_url_raw = str(data.get("cover_url", "") or "").strip()
+        title_raw = str(data.get("title", "") or "").strip()
 
         if not series_id:
             return aiohttp.web.json_response({"error": "missing series_id"}, status=400, headers=CORS_HEADERS)
         if not _is_valid_series_id(series_id):
             return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        if not has_cover_field and not has_title_field:
+            return aiohttp.web.json_response({"error": "nothing to update"}, status=400, headers=CORS_HEADERS)
+        if has_title_field and len(title_raw) > 120:
+            return aiohttp.web.json_response({"error": "title too long"}, status=400, headers=CORS_HEADERS)
 
         cover_url_clean: str | None = None
-        if cover_url_raw:
+        if has_cover_field and cover_url_raw:
             cover_url_clean = _normalize_external_url(cover_url_raw)
             if not cover_url_clean:
                 return aiohttp.web.json_response({"error": "invalid cover_url"}, status=400, headers=CORS_HEADERS)
 
         cover_key = f"cover_{series_id}"
+        title_key = f"series_{series_id}"
         async with aiosqlite.connect(DB_PATH) as db:
-            if cover_url_clean is None:
-                await db.execute("DELETE FROM custom_names WHERE id = ?", (cover_key,))
-            else:
-                await db.execute("INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)", (cover_key, cover_url_clean))
+            if has_cover_field:
+                if cover_url_clean is None:
+                    await db.execute("DELETE FROM custom_names WHERE id = ?", (cover_key,))
+                else:
+                    await db.execute("INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)", (cover_key, cover_url_clean))
+            if has_title_field:
+                if title_raw:
+                    await db.execute("INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)", (title_key, title_raw))
+                else:
+                    await db.execute("DELETE FROM custom_names WHERE id = ?", (title_key,))
             await db.commit()
-        invalidate_reader_cache("series_cover_updated")
+        invalidate_reader_cache("series_meta_updated")
 
         await _sync_reader_json()
         spawn_bg(run_git_sync(f"update cover for {series_id} via webapp"), name="run_git_sync:update_cover")
@@ -832,15 +860,99 @@ async def handle_series_update(request: aiohttp.web.Request) -> aiohttp.web.Resp
             action="series_update",
             actor_user_id=user_id,
             target=series_id,
-            payload={"series_id": series_id, "has_cover": bool(cover_url_clean)},
+            payload={"series_id": series_id, "has_cover": bool(cover_url_clean), "has_title": bool(title_raw)},
             result="ok",
         )
 
-        return aiohttp.web.json_response({"ok": True, "cover_url": cover_url_clean or ""}, headers=CORS_HEADERS)
+        return aiohttp.web.json_response(
+            {"ok": True, "cover_url": cover_url_clean or "", "title": title_raw},
+            headers=CORS_HEADERS,
+        )
     except Exception as e:  # noqa: BLE001
         logging.error(f"Series Update API Error: {e}")
         await _audit_admin_action(
             action="series_update",
+            actor_user_id=user_id,
+            payload={"path": request.path},
+            result="error",
+            error=str(e),
+        )
+        return _api_error_response(e, context=request.path)
+
+
+_SERIES_CODE_RE = re.compile(r"[a-z0-9][a-z0-9_]{0,19}")
+
+
+async def handle_series_create(request: aiohttp.web.Request) -> aiohttp.web.Response:
+    """POST: создать новый тайтл (ranobe/manga). Только для админов.
+
+    Payload: `{"type": "ranobe"|"manga", "code": "<lat_id>", "title": "..."}`.
+    Тайтл = новая lang-секция в ranobe_urls/chapters_urls + запись
+    `series_<id>` в custom_names. Пустой тайтл сразу появляется в читалке
+    (build_reader_data инъектит серии из custom_names), главы добавляются
+    через админ-модалку WebApp или /admin в боте (код = пункт языка).
+    """
+    from bot import DB_PATH, invalidate_reader_cache, run_git_sync, spawn_bg
+
+    user_id = ""
+    try:
+        user = get_auth_user(request)
+        if not user:
+            return aiohttp.web.json_response({"error": "Unauthorized"}, status=401, headers=CORS_HEADERS)
+        user_id = str(user.get("id", ""))
+        limited = await _enforce_rate_limit(request, "admin_series_create", user_id=user_id)
+        if limited:
+            return limited
+        forbidden = await _check_admin(request, user_id)
+        if forbidden is not None:
+            return forbidden
+
+        data = await request.json()
+        kind = str(data.get("type", "")).strip().lower()
+        code = str(data.get("code", "")).strip().lower()
+        title = str(data.get("title", "") or "").strip()
+
+        if kind not in ("ranobe", "manga"):
+            return aiohttp.web.json_response({"error": "invalid type"}, status=400, headers=CORS_HEADERS)
+        if not _SERIES_CODE_RE.fullmatch(code):
+            return aiohttp.web.json_response({"error": "invalid code"}, status=400, headers=CORS_HEADERS)
+        if not title or len(title) > 120:
+            return aiohttp.web.json_response({"error": "invalid title"}, status=400, headers=CORS_HEADERS)
+
+        series_id = f"{kind}_{code}"
+        if not _is_valid_series_id(series_id):
+            return aiohttp.web.json_response({"error": "invalid series_id"}, status=400, headers=CORS_HEADERS)
+        table = "ranobe_urls" if kind == "ranobe" else "chapters_urls"
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(f"SELECT 1 FROM {table} WHERE lang = ? LIMIT 1", (code,)) as cur:
+                exists_rows = await cur.fetchone()
+            async with db.execute("SELECT 1 FROM custom_names WHERE id = ?", (f"series_{series_id}",)) as cur:
+                exists_name = await cur.fetchone()
+            if exists_rows or exists_name:
+                return aiohttp.web.json_response({"error": "series already exists"}, status=409, headers=CORS_HEADERS)
+            await db.execute(
+                "INSERT OR REPLACE INTO custom_names (id, name) VALUES (?, ?)",
+                (f"series_{series_id}", title),
+            )
+            await db.commit()
+        invalidate_reader_cache("series_created")
+
+        await _sync_reader_json()
+        spawn_bg(run_git_sync(f"create series {series_id} via webapp"), name="run_git_sync:create_series")
+        await _audit_admin_action(
+            action="series_create",
+            actor_user_id=user_id,
+            target=series_id,
+            payload={"series_id": series_id, "type": kind, "code": code, "title": title},
+            result="ok",
+        )
+
+        return aiohttp.web.json_response({"ok": True, "series_id": series_id, "title": title}, headers=CORS_HEADERS)
+    except Exception as e:  # noqa: BLE001
+        logging.error(f"Series Create API Error: {e}")
+        await _audit_admin_action(
+            action="series_create",
             actor_user_id=user_id,
             payload={"path": request.path},
             result="error",

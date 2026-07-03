@@ -87,6 +87,45 @@ async def ensure_ranobe_volume_schema(db) -> None:
     await db.execute(f"DROP TABLE {legacy_table}")
 
 
+async def ensure_manga_volume_schema(db) -> None:
+    """Ensure chapters_urls can store the same chapter number in different volumes."""
+    async with db.execute("PRAGMA table_info(chapters_urls)") as cursor:
+        columns_info = await cursor.fetchall()
+    if not columns_info:
+        return
+
+    columns = [row[1] for row in columns_info]
+    pk_columns = [row[1] for row in sorted((row for row in columns_info if row[5]), key=lambda row: row[5])]
+    if "volume" in columns and pk_columns == ["chapter_number", "lang", "volume"]:
+        return
+
+    legacy_table = "chapters_urls_legacy_volume_migration"
+    await db.execute(f"DROP TABLE IF EXISTS {legacy_table}")
+    await db.execute(f"ALTER TABLE chapters_urls RENAME TO {legacy_table}")
+    await db.execute(
+        """
+        CREATE TABLE chapters_urls (
+            chapter_number TEXT,
+            lang TEXT,
+            volume INTEGER DEFAULT 1,
+            url TEXT,
+            sort_order INTEGER DEFAULT 0,
+            PRIMARY KEY (chapter_number, lang, volume)
+        )
+        """
+    )
+    volume_expr = "COALESCE(volume, 1)" if "volume" in columns else "1"
+    sort_expr = "COALESCE(sort_order, 0)" if "sort_order" in columns else "0"
+    await db.execute(
+        f"""
+        INSERT OR REPLACE INTO chapters_urls (chapter_number, lang, volume, url, sort_order)
+        SELECT chapter_number, lang, {volume_expr}, url, {sort_expr}
+        FROM {legacy_table}
+        """
+    )
+    await db.execute(f"DROP TABLE {legacy_table}")
+
+
 async def _ensure_column(db, table: str, column: str, definition: str) -> None:
     async with db.execute(f"PRAGMA table_info({table})") as cursor:
         columns = {row[1] for row in await cursor.fetchall()}
@@ -266,6 +305,8 @@ async def init_db():
 
         # Миграция: добавляем колонку для Drag-and-Drop сортировки
         await ensure_ranobe_volume_schema(db)
+        # Миграция: тома для манги (volume в chapters_urls, PK с volume)
+        await ensure_manga_volume_schema(db)
 
         for tbl in ['chapters_urls', 'ranobe_urls', 'akashic_ranobe', 'british_ranobe']:
             async with db.execute(f"PRAGMA table_info({tbl})") as cursor:
@@ -851,7 +892,7 @@ async def remove_admin(user_id: int):
 async def get_chapters(lang: str):
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            'SELECT chapter_number FROM chapters_urls WHERE lang = ? ORDER BY sort_order, CAST(chapter_number AS REAL)', (lang,)
+            'SELECT chapter_number FROM chapters_urls WHERE lang = ? ORDER BY volume, sort_order, CAST(chapter_number AS REAL)', (lang,)
         ) as cursor:
             rows = await cursor.fetchall()
             return [row[0] for row in rows]

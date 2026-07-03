@@ -145,7 +145,7 @@ async def uc_upload_id_callback(callback: types.CallbackQuery, state: FSMContext
     await state.update_data(content_id=callback.data.split("_", 1)[1])
     await state.set_state(UniversalContentUpload.waiting_for_chapter)
     data = await state.get_data()
-    if data.get('content_type') == 'ranobe':
+    if data.get('content_type') in ('ranobe', 'manga'):
         await state.set_state(UniversalContentUpload.waiting_for_volume)
         await callback.message.edit_text("Введите номер тома:")
         return
@@ -164,7 +164,7 @@ async def uc_upload_id_text(message: types.Message, state: FSMContext):
         await state.update_data(content_id=int(message.text.strip()))
     else:
         await state.update_data(content_id=message.text.strip())
-    if data.get('content_type') == 'ranobe':
+    if data.get('content_type') in ('ranobe', 'manga'):
         await state.set_state(UniversalContentUpload.waiting_for_volume)
         return await message.answer("Введите номер тома:")
     await state.set_state(UniversalContentUpload.waiting_for_chapter)
@@ -223,7 +223,7 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
         # Чистый текст главы без ссылок -> собираем Telegraph-страницу.
         wait_msg = await message.answer("📝 <i>Готовлю страницу Telegraph...</i>", parse_mode="HTML")
         id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
-        if ctype == 'ranobe':
+        if ctype in ('ranobe', 'manga'):
             id_label = f"{id_label}, Том {volume}"
         title = f"{ct['emoji']} {ct['name']} — {id_label}, Глава {chapter}"
         new_link = await upload_to_telegraph(title, text_input)
@@ -239,18 +239,20 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
 
     async with aiosqlite.connect(bot.DB_PATH) as db:
         # Получаем текущий макс. sort_order для этого тайтла/тома
-        if ctype == 'ranobe':
+        if ctype in ('ranobe', 'manga'):
+            # Ранобэ и манга хранят том в колонке volume — выбранный в /admin
+            # том попадает в БД и дальше в WebApp (build_reader_data группирует по volume).
             async with db.execute(
-                'SELECT MAX(sort_order) FROM ranobe_urls WHERE lang = ? AND volume = ?',
+                f'SELECT MAX(sort_order) FROM {ct["table"]} WHERE lang = ? AND volume = ?',
                 (content_id, volume),
             ) as cursor:
                 row = await cursor.fetchone()
                 next_order = (row[0] or 0) + 1 if row else 1
 
             await db.execute(
-                'INSERT INTO ranobe_urls (lang, volume, chapter_number, url, sort_order) '
-                'VALUES (?, ?, ?, ?, ?) '
-                'ON CONFLICT(chapter_number, lang, volume) DO UPDATE SET url=excluded.url',
+                f'INSERT INTO {ct["table"]} (lang, volume, chapter_number, url, sort_order) '
+                f'VALUES (?, ?, ?, ?, ?) '
+                f'ON CONFLICT(chapter_number, lang, volume) DO UPDATE SET url=excluded.url',
                 (content_id, volume, chapter, link, next_order),
             )
         else:
@@ -278,7 +280,7 @@ async def uc_upload_link(message: types.Message, state: FSMContext):
 
     # Формируем имя для уведомления
     id_label = ct['names_map'].get(str(content_id), str(content_id)) if ct['names_map'] else f"Том {content_id}"
-    if ctype == 'ranobe':
+    if ctype in ('ranobe', 'manga'):
         id_label = f"{id_label}, Том {volume}"
     await message.answer(f"✅ {ct['emoji']} {ct['name']}: глава {chapter} ({id_label}) добавлена!\n🔗 Ссылка: {link}")
 

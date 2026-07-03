@@ -4492,25 +4492,32 @@ async def build_reader_data() -> dict:
         async with db.execute('SELECT DISTINCT lang FROM chapters_urls') as cursor:
             langs_mg = [row[0] for row in await cursor.fetchall()]
         for lang in langs_mg:
-            async with db.execute(
-                'SELECT chapter_number, url FROM chapters_urls WHERE lang = ? ORDER BY sort_order, CAST(chapter_number AS REAL)', (lang,)
-            ) as c:
-                chapters = []
-                for row in await c.fetchall():
-                    extracted = _clean_urls(row[1])
-                    url_val = extracted[0] if len(extracted) == 1 else ""
-                    custom_chap = custom_names.get(f"chap_manga_{lang}_1_{row[0]}") or f"Глава {row[0]}"
-                    chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
-            if chapters:
+            async with db.execute('SELECT DISTINCT volume FROM chapters_urls WHERE lang = ? ORDER BY volume', (lang,)) as cursor:
+                mg_volumes = [row[0] for row in await cursor.fetchall()]
+            series_volumes = []
+            for vol in mg_volumes:
+                async with db.execute(
+                    'SELECT chapter_number, url FROM chapters_urls WHERE lang = ? AND volume = ? ORDER BY sort_order, CAST(chapter_number AS REAL)',
+                    (lang, vol),
+                ) as c:
+                    chapters = []
+                    for row in await c.fetchall():
+                        extracted = _clean_urls(row[1])
+                        url_val = extracted[0] if len(extracted) == 1 else ""
+                        custom_chap = custom_names.get(f"chap_manga_{lang}_{vol}_{row[0]}") or f"Глава {row[0]}"
+                        chapters.append({"chapter": row[0], "custom_name": custom_chap, "url": url_val, "urls": extracted})
+                if chapters:
+                    custom_vol = custom_names.get(f"vol_manga_{lang}_{vol}") or f"Том {vol}"
+                    series_volumes.append({"volume": vol, "custom_name": custom_vol, "chapters": chapters})
+            if series_volumes:
                 lname = "Русский" if lang == "ru" else "English" if lang == "en" else lang
                 custom_title = custom_names.get(f"series_manga_{lang}") or f"Манга ({lname})"
-                custom_vol = custom_names.get(f"vol_manga_{lang}_1") or "Том 1"
                 result["series"].append(
                     {
                         "id": f"manga_{lang}",
                         "title": custom_title,
                         "cover_url": custom_names.get(f"cover_manga_{lang}", ""),
-                        "volumes": [{"volume": 1, "custom_name": custom_vol, "chapters": chapters}],
+                        "volumes": series_volumes,
                     }
                 )
 
@@ -4552,6 +4559,25 @@ async def build_reader_data() -> dict:
                 target_vol["chapters"].sort(key=lambda x: (float(x["chapter"]) if str(x["chapter"]).replace('.', '', 1).isdigit() else 0))
             except Exception as e:
                 logging.debug(f"build_reader_data: chapter sort fallback for {s_id}/{vol}: {e}")
+
+    # Инъекция пустых тайтлов, созданных через WebApp (custom_names: series_*),
+    # у которых ещё нет глав в БД — новый тайтл сразу виден в читалке.
+    for key, name in custom_names.items():
+        if not key.startswith("series_"):
+            continue
+        s_id = key[len("series_") :]
+        if not (s_id.startswith("ranobe_") or s_id.startswith("manga_")):
+            continue
+        if any(s["id"] == s_id for s in result["series"]):
+            continue
+        result["series"].append(
+            {
+                "id": s_id,
+                "title": name,
+                "cover_url": custom_names.get(f"cover_{s_id}", ""),
+                "volumes": [{"volume": 1, "custom_name": custom_names.get(f"vol_{s_id}_1") or "Том 1", "chapters": []}],
+            }
+        )
 
     return result
 
@@ -4922,6 +4948,7 @@ from services.admin_chapter_api import (  # noqa: E402,F401
     handle_chapter_delete,
     handle_chapter_edit,
     handle_rename_delete,
+    handle_series_create,
     handle_series_update,
 )
 
@@ -5225,8 +5252,12 @@ async def handle_sort_chapters(request: aiohttp.web.Request) -> aiohttp.web.Resp
             id_col = 'lang'
             chapter_col = 'chapter_number'
             idx_val = series_id.replace('manga_', '')
-            where_clause = f"{id_col} = ?"
-            where_params = (str(idx_val),)
+            try:
+                volume_int = int(volume or 1)
+            except (TypeError, ValueError):
+                volume_int = 1
+            where_clause = f"{id_col} = ? AND volume = ?"
+            where_params = (str(idx_val), volume_int)
         elif series_id.startswith('ranobe_'):
             table = 'ranobe_urls'
             id_col = 'lang'
@@ -5512,6 +5543,7 @@ def create_webapp_api_app() -> aiohttp.web.Application:
     app.router.add_options("/api/chapters/bulk/preview", handle_cors_preflight)
 
     app.router.add_route("PUT", "/api/series", handle_series_update)
+    app.router.add_post("/api/series", handle_series_create)
     app.router.add_options("/api/series", handle_cors_preflight)
 
     try:

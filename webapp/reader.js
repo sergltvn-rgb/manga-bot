@@ -468,7 +468,21 @@ function buildGlobalAdminMenuItems(screenName) {
             detail: 'Обновить витрину и постер',
             onClick: 'openCoverEditForCurrent()'
         });
+        items.push({
+            group: 'Серия',
+            icon: '✏️',
+            label: 'Название тайтла',
+            detail: 'Переименовать прямо в читалке',
+            onClick: 'openSeriesTitleRenameForCurrent()'
+        });
     } else if (screenName === 'series' || screenName === 'library') {
+        items.push({
+            group: 'Тайтлы',
+            icon: '➕',
+            label: 'Добавить тайтл',
+            detail: 'Новая серия: ранобэ или манга',
+            onClick: "openSeriesTitleModal('create')"
+        });
         items.push({
             group: 'Данные',
             icon: '🔄',
@@ -796,6 +810,7 @@ function syncReaderOverlayChromeSuppression() {
         '#bulk-upload-modal:not(.hidden)',
         '#add-chapter-modal:not(.hidden)',
         '#cover-edit-modal:not(.hidden)',
+        '#series-title-modal:not(.hidden)',
         '#typo-modal:not(.hidden)',
         '#edit-url-modal:not(.hidden)'
     ];
@@ -876,6 +891,8 @@ function resetTransientUiState({ saveSettingsOnClose = false } = {}) {
     closeEditUrlModal();
     closeBulkModal();
     closeAddChapterModal({ skipConfirm: true });
+    closeCoverEditModal();
+    closeSeriesTitleModal();
     closeTypoModal();
     closeAdminMenu();
     document.body.classList.remove('keyboard-open');
@@ -2370,7 +2387,7 @@ function renderSeriesPosterCard(s, idx = 0) {
     // Админ-действия — плавающая полоска в углу обложки.
     const adminOverlay = isAdminMode ? `
         <div class="series-poster-admin" onclick="event.stopPropagation();">
-            <button class="admin-edit-btn" title="Переименовать" onclick="renameItem('series_${s.id}'); event.stopPropagation();">&#9998;</button>
+            <button class="admin-edit-btn" title="Переименовать" onclick="openSeriesTitleModal('rename', '${escapeHtml(String(s.id))}'); event.stopPropagation();">&#9998;</button>
             <button class="admin-reset-btn" title="Сброс имени" onclick="resetCustomName('series_${s.id}'); event.stopPropagation();">&#8635;</button>
             <button class="admin-edit-btn" title="Обложка" onclick="openCoverEditModal('${escapeHtml(String(s.id))}'); event.stopPropagation();">&#128247;</button>
         </div>` : '';
@@ -6304,6 +6321,124 @@ async function deleteChapterCurrent() {
     } catch (e) {
         showToast('Ошибка сети: ' + e.message);
     }
+}
+
+// === Series Title Modal (Admin): добавить новый тайтл / изменить название ===
+let seriesTitleModalMode = 'rename';
+
+function openSeriesTitleModal(mode, seriesId) {
+    if (!hasAdminApi()) {
+        showToast('Управление тайтлами доступно только при подключенном API.');
+        return;
+    }
+    seriesTitleModalMode = mode === 'create' ? 'create' : 'rename';
+    const overlay = document.getElementById('series-title-overlay');
+    const modal = document.getElementById('series-title-modal');
+    const heading = document.getElementById('series-title-heading');
+    const context = document.getElementById('series-title-context');
+    const createFields = document.getElementById('series-title-create-fields');
+    const codeInput = document.getElementById('series-title-code');
+    const titleInput = document.getElementById('series-title-input');
+    if (!overlay || !modal || !titleInput) return;
+
+    if (seriesTitleModalMode === 'create') {
+        if (heading) heading.textContent = 'Новый тайтл';
+        if (context) context.textContent = 'ID — латиницей, после создания не меняется';
+        if (createFields) createFields.classList.remove('hidden');
+        if (codeInput) codeInput.value = '';
+        titleInput.value = '';
+        titleInput.dataset.seriesId = '';
+    } else {
+        const series = findSeriesById(seriesId || currentSeries?.id);
+        if (!series) return showToast('Сначала выберите тайтл');
+        if (heading) heading.textContent = 'Название тайтла';
+        if (context) context.textContent = String(series.id);
+        if (createFields) createFields.classList.add('hidden');
+        titleInput.value = series.title || '';
+        titleInput.dataset.seriesId = String(series.id);
+    }
+    restoreOriginalLabel(document.getElementById('series-title-save'));
+    overlay.classList.remove('hidden');
+    modal.classList.remove('hidden');
+    syncReaderOverlayChromeSuppression();
+    setTimeout(() => {
+        const focusTarget = (seriesTitleModalMode === 'create' && codeInput) ? codeInput : titleInput;
+        focusTarget.focus();
+    }, 350);
+}
+
+function closeSeriesTitleModal() {
+    const overlay = document.getElementById('series-title-overlay');
+    const modal = document.getElementById('series-title-modal');
+    if (overlay) overlay.classList.add('hidden');
+    if (modal) modal.classList.add('hidden');
+    restoreOriginalLabel(document.getElementById('series-title-save'));
+    syncReaderOverlayChromeSuppression();
+}
+
+async function submitSeriesTitleModal() {
+    if (!API_URL) return showToast('Доступно только при подключенном API.');
+    const titleInput = document.getElementById('series-title-input');
+    const codeInput = document.getElementById('series-title-code');
+    const typeSelect = document.getElementById('series-title-type');
+    const saveBtn = document.getElementById('series-title-save');
+    const title = (titleInput?.value || '').trim();
+    if (!title) return showToast('Введите название');
+
+    let method = 'PUT';
+    let payload;
+    if (seriesTitleModalMode === 'create') {
+        const code = (codeInput?.value || '').trim().toLowerCase();
+        if (!/^[a-z0-9][a-z0-9_]{0,19}$/.test(code)) {
+            return showToast('ID: латиница/цифры/_, до 20 символов');
+        }
+        method = 'POST';
+        payload = { type: (typeSelect?.value || 'ranobe'), code: code, title: title };
+    } else {
+        const seriesId = titleInput?.dataset.seriesId || '';
+        if (!seriesId) return showToast('Тайтл не выбран');
+        payload = { series_id: seriesId, title: title };
+    }
+
+    captureOriginalLabel(saveBtn);
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Сохранение...'; }
+    try {
+        const resp = await apiFetch(`${API_URL}/api/series`, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok || !result.ok) {
+            if (resp.status === 401) {
+                handleAuthRejected('Сессия Telegram не активна. Войдите ещё раз.');
+                return;
+            }
+            throw new Error(result.error || `HTTP ${resp.status}`);
+        }
+        closeSeriesTitleModal();
+        showToast(seriesTitleModalMode === 'create' ? '✅ Тайтл создан' : '✅ Название сохранено', 'success');
+        haptic('success');
+        if (seriesTitleModalMode === 'rename' && payload.series_id) {
+            const series = findSeriesById(payload.series_id);
+            if (series) series.title = title;
+            if (currentSeries && sameReaderKey(currentSeries.id, payload.series_id)) currentSeries.title = title;
+            if (document.getElementById('screen-series')?.classList.contains('active')) renderSeriesList();
+        }
+        refreshReaderDataAfterAdminMutation();
+    } catch (e) {
+        showToast('Ошибка: ' + e.message, 'error');
+    } finally {
+        if (saveBtn) { saveBtn.disabled = false; restoreOriginalLabel(saveBtn); }
+    }
+}
+
+function openSeriesTitleRenameForCurrent() {
+    if (!currentSeries) {
+        showToast('Сначала выберите серию');
+        return;
+    }
+    openSeriesTitleModal('rename', currentSeries.id);
 }
 
 function openCoverEditModal(seriesId) {

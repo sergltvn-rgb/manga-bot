@@ -49,6 +49,10 @@ artifacts/
 *.zip
 *.log
 
+# Generated output (Playwright screenshots, audits)
+output/
+ranobe-site/output/
+
 # Temporary/debug scripts (cleanup 2026-04)
 tmp_*.py
 find_*.py
